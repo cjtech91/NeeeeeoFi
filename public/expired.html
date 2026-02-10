@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Account Expired</title>
+    <style>
+        :root {
+            --primary: #3498db;
+            --danger: #e74c3c;
+            --bg: #f5f6fa;
+            --text: #2d3436;
+            --text-muted: #636e72;
+            --white: #ffffff;
+            --shadow: 0 4px 6px rgba(0,0,0,0.1);
+            --radius: 12px;
+        }
+
+        /* Chat Widget CSS */
+        .chat-widget-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            background: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            cursor: pointer;
+            z-index: 1000;
+            display: none;
+            transition: transform 0.2s;
+        }
+        .chat-widget-btn:hover {
+            transform: scale(1.1);
+        }
+        .chat-widget-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+        .chat-widget-box {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 300px;
+            height: 400px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            overflow: hidden;
+            border: 1px solid #eee;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(20px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+        .chat-widget-box.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+        }
+        .chat-widget-header {
+            background: var(--primary);
+            color: white;
+            padding: 12px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-widget-header .close-btn {
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        .chat-widget-messages {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .chat-widget-input {
+            padding: 10px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 5px;
+            background: white;
+        }
+        .chat-widget-input input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            outline: none;
+        }
+        .chat-widget-input button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        @keyframes msgSlideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .chat-msg {
+            max-width: 80%;
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            word-wrap: break-word;
+            animation: msgSlideUp 0.3s ease-out forwards;
+        }
+        .chat-msg.sent {
+            align-self: flex-end;
+            background: var(--primary);
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+        .chat-msg.received {
+            align-self: flex-start;
+            background: #e9ecef;
+            color: #333;
+            border-bottom-left-radius: 2px;
+        }
+        .chat-unread-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: var(--danger);
+            color: white;
+            font-size: 0.7rem;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            display: none;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 360px;
+            background: var(--white);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .icon-circle {
+            width: 80px;
+            height: 80px;
+            background: #ffeaa7;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+        }
+
+        .icon-circle svg {
+            width: 40px;
+            height: 40px;
+            color: #d63031;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+            color: var(--text);
+        }
+
+        p {
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 25px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background: var(--primary);
+            color: var(--white);
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .developer-footer {
+            margin-top: 20px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon-circle">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        </div>
+        <h1>Account Expired</h1>
+        <p>Your internet access has been suspended because your PPPoE account has expired.</p>
+        <p>Please contact the administrator or renew your subscription to restore access.</p>
+        
+        <div id="account-details" style="display:none; text-align: left; background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #90caf9;">
+            <p style="margin-bottom: 8px; color: #2d3436; font-size: 0.95rem;"><strong>Username:</strong> <span id="user-username" style="color: #0984e3; font-weight: bold; margin-left: 5px;"></span></p>
+            <p style="margin-bottom: 8px; color: #2d3436; font-size: 0.95rem;"><strong>Profile:</strong> <span id="user-profile" style="color: #0984e3; font-weight: bold; margin-left: 5px;"></span></p>
+            <p style="margin-bottom: 8px; color: #2d3436; font-size: 0.95rem;"><strong>Amount to Paid:</strong> <span id="user-price" style="color: #27ae60; font-weight: bold; margin-left: 5px;"></span></p>
+            <p style="margin-bottom: 0; color: #2d3436; font-size: 0.95rem;"><strong>Expired On:</strong> <span id="user-expiration" style="color: #d63031; font-weight: bold; margin-left: 5px;"></span></p>
+        </div>
+
+        <!-- Optional: Button to refresh or contact info -->
+    </div>
+    <div class="developer-footer">NEOFI SYSTEMS</div>
+    <!-- Chat Widget -->
+    <div class="chat-widget-btn" onclick="toggleChat()">
+        <svg viewBox="0 0 24 24">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+        </svg>
+        <div class="chat-unread-badge" id="chatUnreadBadge">0</div>
+    </div>
+
+    <div class="chat-widget-box" id="chatBox">
+        <div class="chat-widget-header">
+            <span>Chat Support</span>
+            <span class="close-btn" onclick="toggleChat()">&times;</span>
+        </div>
+        <div class="chat-widget-messages" id="chatMessages">
+            <!-- Messages go here -->
+        </div>
+        <div class="chat-widget-input">
+            <input type="text" id="chatInput" placeholder="Type a message..." onkeypress="handleChatKeyPress(event)">
+            <button onclick="sendChatMessage()">Send</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Chat Variables
+        let socket = null;
+        let chatOpen = false;
+        let unreadCount = 0;
+        let currentUserId = null; // PPPoE Username
+        const chatType = 'pppoe';
+
+        // Initialize Chat
+        async function initChat() {
+            try {
+                // Get User Info
+                const res = await fetch('/api/pppoe/me');
+                const data = await res.json();
+                
+                if (data.success && data.username) {
+                    currentUserId = data.username;
+                    
+                    // Display Account Details
+                    document.getElementById('user-username').textContent = data.username;
+                    document.getElementById('user-profile').textContent = data.profile_name || 'N/A';
+                    document.getElementById('user-price').textContent = data.price ? '₱' + data.price : 'N/A';
+                    
+                    if (data.expiration_date) {
+                         const date = new Date(data.expiration_date);
+                         document.getElementById('user-expiration').textContent = date.toLocaleString();
+                    } else {
+                         document.getElementById('user-expiration').textContent = 'Expired';
+                    }
+                    
+                    document.getElementById('account-details').style.display = 'block';
+
+                    // Show Chat Button
+                    document.querySelector('.chat-widget-btn').style.display = 'flex';
+                    
+                    // Connect Socket
+                    socket = io();
+                    
+                    socket.on('connect', () => {
+                        console.log('Connected to chat server');
+                        // Join Chat Room
+                        socket.emit('join_chat', { mac: currentUserId, type: chatType });
+                    });
+
+                    socket.on('new_message', (msg) => {
+                        appendMessage(msg);
+                        if (!chatOpen) {
+                            unreadCount++;
+                            updateUnreadBadge();
+                        }
+                    });
+                    
+                    socket.on('chat_history', (history) => {
+                         const container = document.getElementById('chatMessages');
+                         container.innerHTML = '';
+                         history.forEach(msg => appendMessage(msg));
+                    });
+                }
+            } catch (e) {
+                console.error('Chat init error:', e);
+            }
+        }
+
+        function toggleChat() {
+            chatOpen = !chatOpen;
+            const box = document.getElementById('chatBox');
+            if (chatOpen) {
+                box.classList.add('open');
+                unreadCount = 0;
+                updateUnreadBadge();
+                scrollToBottom();
+            } else {
+                box.classList.remove('open');
+            }
+        }
+
+        function updateUnreadBadge() {
+            const badge = document.getElementById('chatUnreadBadge');
+            badge.textContent = unreadCount;
+            badge.style.display = unreadCount > 0 ? 'flex' : 'none';
+        }
+
+        function appendMessage(msg) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            // Check sender format: 'user' vs 'admin' or boolean is_from_admin
+            // msg from 'new_message' event: { sender: 'user'/'admin', message: ... }
+            // msg from 'chat_history': { is_from_admin: 0/1, message: ... }
+            
+            let isUser = false;
+            if (msg.sender) {
+                isUser = msg.sender === 'user';
+            } else {
+                isUser = msg.is_from_admin === 0;
+            }
+
+            div.className = `chat-msg ${isUser ? 'sent' : 'received'}`;
+            div.textContent = msg.message;
+            container.appendChild(div);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            const container = document.getElementById('chatMessages');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!msg || !socket || !currentUserId) return;
+
+            // Emit message
+            socket.emit('send_message', {
+                mac: currentUserId, // Using username as ID
+                message: msg,
+                type: chatType
+            });
+            
+            input.value = '';
+        }
+
+        function handleChatKeyPress(e) {
+            if (e.key === 'Enter') {
+                sendChatMessage();
+            }
+        }
+
+        // Start
+        document.addEventListener('DOMContentLoaded', initChat);
+    </script>
+</body>
+</html>

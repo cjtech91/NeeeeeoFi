@@ -1,0 +1,15 @@
+{
+    "key": "NEO-2026-IFX6-6EPS",
+    "Key": "NEO-2026-IFX6-6EPS",
+    "KEY": "NEO-2026-IFX6-6EPS",
+    "license": "NEO-2026-IFX6-6EPS",
+    "license_key": "NEO-2026-IFX6-6EPS",
+    "token": "NEO-2026-IFX6-6EPS",
+    "machine_id": "0d9b014325996864f24d4427270db96dac07d62128eecca6ed448dec3030571c",
+    "MachineId": "0d9b014325996864f24d4427270db96dac07d62128eecca6ed448dec3030571c",
+    "MACHINE_ID": "0d9b014325996864f24d4427270db96dac07d62128eecca6ed448dec3030571c",
+    "hwid": "0d9b014325996864f24d4427270db96dac07d62128eecca6ed448dec3030571c",
+    "HWID": "0d9b014325996864f24d4427270db96dac07d62128eecca6ed448dec3030571c",
+    "device_model": "OrangePi Zero3",
+    "endpoint": "activate"
+}
