@@ -5156,13 +5156,13 @@
                 <div id="view-portal" class="view-section" style="display:none;">
                     <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
                         <!-- Portal Configuration Card -->
-                        <div class="card" style="flex: 1; min-width: 400px; max-width: 600px;">
+                        <div class="card" style="flex: 1; min-width: 250px; max-width: 600px;">
                             <div class="card-header">
                                 <div class="card-title">Portal Configuration</div>
                             </div>
                             <form id="portal-config-form" onsubmit="savePortalConfig(event)">
-                                <div style="padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                                    <div style="grid-column: span 2;">
+                                <div style="padding: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                                    <div style="grid-column: 1 / -1;">
                                         <label for="portal-theme-select" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Portal Theme</label>
                                         <select id="portal-theme-select" class="login-input" style="margin:0;" onchange="updatePortalPreview(this.value)">
                                             <option value="portal.html">Default (portal.html)</option>
@@ -5185,7 +5185,7 @@
                                     <label for="portal-banner-height" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Banner Height (px) - Set to 0 to hide</label>
                                     <input type="number" id="portal-banner-height" class="login-input" min="0" max="500" style="margin:0;" autocomplete="off">
                                 </div>
-                                <div style="grid-column: span 2; margin-bottom: 10px;">
+                                <div style="grid-column: 1 / -1; margin-bottom: 10px;">
                                     <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 6px; border: 1px solid #dfe6e9;">
                                         <div style="display:flex; align-items:center;">
                                             <span style="font-weight: 600; color: #2d3436;">Hide Voucher Code Display</span>
@@ -5200,8 +5200,25 @@
                                     </div>
                                 </div>
 
+                                <!-- Ticker Settings -->
+                                <div style="grid-column: 1 / -1; margin-top: 5px; border-top: 1px solid #eee; padding-top: 10px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 6px; border: 1px solid #dfe6e9;">
+                                        <div style="display:flex; align-items:center;">
+                                            <span style="font-weight: 600; color: #2d3436;">Enable Scrolling Ticker</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="portal-ticker-enabled">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    <div style="margin-top: 10px;">
+                                        <label for="portal-ticker-text" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Ticker Text</label>
+                                        <input type="text" id="portal-ticker-text" class="login-input" placeholder="Thank you for choosing our piso wifi hotspot services!" style="margin:0;">
+                                    </div>
+                                </div>
+
                                 <!-- Banner Mode Selection -->
-                                <div style="grid-column: span 2; margin-top: 10px;">
+                                <div style="grid-column: 1 / -1; margin-top: 10px;">
                                     <label style="display:block; font-weight:600; margin-bottom:8px; font-size:0.9rem;">Banner Mode</label>
                                     <div style="display:flex; gap:20px;">
                                         <div style="display:flex; align-items:center;">
@@ -5216,8 +5233,8 @@
                                 </div>
 
                                 <!-- FIXED BANNER SETTINGS -->
-                                <div id="fixed-banner-settings" style="grid-column: span 2; display: contents;">
-                                    <div style="grid-column: span 2; margin-bottom: 10px;">
+                                <div id="fixed-banner-settings" style="grid-column: 1 / -1; display: contents;">
+                                    <div style="grid-column: 1 / -1; margin-bottom: 10px;">
                                         <div style="display:flex; align-items:center; height:40px;">
                                             <input type="checkbox" id="portal-use-default-banner" style="margin-right:10px; transform:scale(1.2);" onchange="toggleBannerUpload()">
                                             <label for="portal-use-default-banner" style="font-weight:600; font-size:0.9rem; cursor:pointer;">Use Default Banner</label>
@@ -5230,7 +5247,7 @@
                                             </select>
                                         </div>
                                     </div>
-                                    <div style="grid-column: span 2;" id="banner-upload-section">
+                                    <div style="grid-column: 1 / -1;" id="banner-upload-section">
                                         <label for="portal-banner-upload" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Banner Image (PNG/JPG)</label>
                                         <input type="file" id="portal-banner-upload" accept="image/png, image/jpeg" style="margin:0 0 10px 0;">
                                         <button type="button" class="btn btn-sm btn-primary" onclick="uploadPortalBanner()">Upload Banner</button>
@@ -5238,7 +5255,7 @@
                                 </div>
 
                                 <!-- SLIDESHOW SETTINGS -->
-                                <div id="slideshow-settings" style="grid-column: span 2; display:none; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
+                                <div id="slideshow-settings" style="grid-column: 1 / -1; display:none; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px;">
                                     <div class="form-group">
                                         <label>Slide Interval (ms)</label>
                                         <input type="number" id="portal-slideshow-interval" class="login-input" value="3000">
@@ -5259,13 +5276,13 @@
                                 </div>
 
                                 <!-- Footer Settings -->
-                                <div style="grid-column: span 2; margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                                <div style="grid-column: 1 / -1; margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
                                     <h4 style="margin: 0 0 10px 0; font-size: 0.95rem; color: #2d3436;">Footer Configuration</h4>
-                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                                         <div>
-              <label for="portal-footer-text" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Footer Text</label>
-              <input type="text" id="portal-footer-text" class="login-input" placeholder="e.g. Powered by MyISP (Empty = Default)" style="margin:0;">
-            </div>
+                                            <label for="portal-footer-text" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Footer Text</label>
+                                            <input type="text" id="portal-footer-text" class="login-input" placeholder="e.g. Powered by MyISP (Empty = Default)" style="margin:0;">
+                                        </div>
                                         <div>
                                             <label for="portal-footer-link" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Footer Link (URL)</label>
                                             <input type="text" id="portal-footer-link" class="login-input" placeholder="e.g. https://myisp.com" style="margin:0;">
@@ -5282,7 +5299,7 @@
                     </div>
 
                     <!-- Portal Preview Card -->
-                    <div class="card" style="flex: 1; min-width: 350px;">
+                    <div class="card" style="flex: 1; min-width: 250px;">
                         <div class="card-header">
                             <div class="card-title">Portal Overview</div>
                             <div style="display: flex; gap: 10px;">
@@ -5290,8 +5307,8 @@
                                 <button class="btn btn-sm btn-secondary" onclick="setPreviewMode('desktop')">💻 Desktop</button>
                             </div>
                         </div>
-                        <div style="background: #e2e6ea; padding: 20px; border-radius: 8px; display: flex; justify-content: center; min-height: 600px; overflow: hidden;">
-                            <iframe id="portal-preview-frame" src="portal.html" style="width: 375px; height: 667px; border: 4px solid #333; border-radius: 12px; background: white; transition: all 0.3s ease;"></iframe>
+                        <div style="background: #e2e6ea; padding: 10px; border-radius: 8px; display: flex; justify-content: center; min-height: 600px; overflow: hidden;">
+                            <iframe id="portal-preview-frame" src="portal.html" style="width: 100%; max-width: 375px; height: 667px; border: 4px solid #333; border-radius: 12px; background: white; transition: all 0.3s ease;"></iframe>
                         </div>
                     </div>
                 </div>
@@ -8533,12 +8550,14 @@
         function setPreviewMode(mode) {
             const frame = document.getElementById('portal-preview-frame');
             if (mode === 'mobile') {
-                frame.style.width = '375px';
+                frame.style.width = '100%';
+                frame.style.maxWidth = '375px';
                 frame.style.height = '667px';
                 frame.style.border = '4px solid #333';
                 frame.style.borderRadius = '12px';
             } else {
                 frame.style.width = '100%';
+                frame.style.maxWidth = 'none';
                 frame.style.height = '667px';
                 frame.style.border = '1px solid #ccc';
                 frame.style.borderRadius = '0';
@@ -8669,6 +8688,16 @@
                 const hideVoucherToggle = document.getElementById('portal-hide-voucher-code');
                 if (hideVoucherToggle) {
                     hideVoucherToggle.checked = config.hide_voucher_code || false;
+                }
+
+                // Ticker Settings
+                const tickerEnabledToggle = document.getElementById('portal-ticker-enabled');
+                if (tickerEnabledToggle) {
+                    tickerEnabledToggle.checked = config.ticker_enabled || false;
+                }
+                const tickerTextInput = document.getElementById('portal-ticker-text');
+                if (tickerTextInput) {
+                    tickerTextInput.value = config.ticker_text || '';
                 }
 
                 // Banner Mode
@@ -8849,6 +8878,8 @@
             const useDefault = document.getElementById('portal-use-default-banner').checked;
             const defaultFile = document.getElementById('portal-default-banner-file').value;
             const hideVoucherCode = document.getElementById('portal-hide-voucher-code').checked;
+            const tickerEnabled = document.getElementById('portal-ticker-enabled').checked;
+            const tickerText = document.getElementById('portal-ticker-text').value;
             
             // New Fields
             const bannerMode = document.querySelector('input[name="banner_mode"]:checked').value;
@@ -8870,6 +8901,8 @@
                         use_default_banner: useDefault,
                         default_banner_file: defaultFile,
                         hide_voucher_code: hideVoucherCode,
+                        ticker_enabled: tickerEnabled,
+                        ticker_text: tickerText,
                         banner_mode: bannerMode,
                         slideshow_interval: slideshowInterval,
                         footer_text: footerText,

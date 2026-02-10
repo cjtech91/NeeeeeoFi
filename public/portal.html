@@ -306,6 +306,10 @@
             box-shadow: none;
             border-radius: var(--btn-radius);
             margin-top: 5px;
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            width: fit-content;
+            display: inline-block;
         }
         
         /* Code Display */
@@ -838,6 +842,10 @@
                 opacity: 0;
             }
         }
+        @keyframes ticker-scroll {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
     </style>
 </head>
 <body>
@@ -866,6 +874,9 @@
 
         <!-- Main Display -->
         <div class="main-display">
+            <div id="ticker-container" style="display: none; width: 100%; overflow: hidden; margin-bottom: 10px;">
+                <div id="ticker-text" style="white-space: nowrap; animation: ticker-scroll 15s linear infinite; display: inline-block; color: var(--primary); font-weight: 600;"></div>
+            </div>
             <div class="credit-label">Unclaimed Credit: <span id="coin-display">₱0.00</span></div>
             <div class="info-row info-row-compact">
                 <span>IP: <span id="ip-display">...</span></span>
@@ -878,7 +889,10 @@
             
             <div class="timer-value" id="time-display">00:00:00</div>
             
-            <div id="vendo-selection-container" style="margin-top: 15px; margin-bottom: 5px;">
+            <div id="vendo-selection-container" style="margin-top: 15px; margin-bottom: 5px; display: flex; flex-direction: column; align-items: center;">
+                <!-- Moved Free Time Button -->
+                <button class="btn btn-free-time" id="free-time-widget" onclick="claimFreeTime()" style="display:none; margin-bottom: 5px;">Free Time</button>
+                
                 <div class="device-trigger" onclick="openDeviceModal()">
                     <svg style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M4 6h16v10H4z" rx="2"/>
@@ -898,7 +912,6 @@
             <button class="btn btn-pause" id="btn-pause" onclick="togglePause()" style="display:none;">Pause Time</button>
             <button class="btn btn-rates" onclick="showRates()">Wifi Rates</button>
             <button class="btn btn-points" id="btn-points" onclick="showPointRates()" style="display:none;">Redeem Points</button>
-            <button class="btn btn-free-time" id="free-time-widget" onclick="claimFreeTime()" style="display:none;">Free Time</button>
         </div>
 
         <!-- Voucher Input (Inline) -->
@@ -1042,6 +1055,18 @@
             
             // Apply Styles
             const root = document.documentElement;
+
+            // Ticker Settings
+            const tickerContainer = document.getElementById('ticker-container');
+            const tickerText = document.getElementById('ticker-text');
+            if (tickerContainer && tickerText) {
+                if (config.ticker_enabled) {
+                    tickerContainer.style.display = 'block';
+                    tickerText.textContent = config.ticker_text || 'Thank you for choosing our piso wifi hotspot services!';
+                } else {
+                    tickerContainer.style.display = 'none';
+                }
+            }
             if (config.container_max_width) {
                 const container = document.querySelector('.container');
                 if (container) container.style.maxWidth = `${config.container_max_width}px`;
@@ -1689,7 +1714,7 @@
             if (!widget) return;
             const enabledGlobal = portalConfig && portalConfig.free_time_widget_enabled;
             let selectedHasFreeTime = false;
-            if (selectedVendoId && selectedVendoId !== 'hardware' && Array.isArray(lastKnownDevices)) {
+            if (selectedVendoId && Array.isArray(lastKnownDevices)) {
                 const dev = lastKnownDevices.find(d => d.id === selectedVendoId);
                 if (dev && dev.hasFreeTime) selectedHasFreeTime = true;
             }
