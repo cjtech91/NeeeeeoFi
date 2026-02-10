@@ -2877,46 +2877,42 @@
                     <div style="display:flex; gap:20px; margin-top:20px; flex-wrap:wrap; align-items:stretch;">
                         
                         <!-- Left Column: Traffic Overview -->
-                        <div style="flex: 1; min-width: 400px; display:flex; flex-direction:column;">
+                        <div style="flex: 1; min-width: 300px; display:flex; flex-direction:column;">
                             <div class="card" style="margin-top: 0; flex: 1; display:flex; flex-direction:column;">
-                                <div class="card-header" style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                    <div class="card-title">
+                                <div class="card-header" style="display:flex; flex-direction:column; align-items:center; gap:2px; padding-bottom: 5px;">
+                                    <div class="card-title" style="margin-bottom: 5px;">
                                         <span style="display:inline-flex;align-items:center;gap:6px;">
                                             <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
                                                 <path fill="currentColor" d="M3 17h2v-4h2v4h2v-7h2v7h2v-10h2v10h2v2H3z"/>
                                             </svg>
-                                            <span>Traffic Overview</span>
-                                            <span style="font-size:0.8rem; color:#6b7280; margin-left:8px; font-weight:normal;">
-                                                <select id="monitored-interface-select" onchange="onInterfaceChange()" style="border:none; background:transparent; font-weight:600; color:#374151; cursor:pointer; outline:none; padding:0;">
-                                                    <option value="" disabled selected>Detecting...</option>
-                                                </select>
-                                            </span>
+                                            <span style="text-transform: uppercase;">Traffic Overview</span>
                                         </span>
                                     </div>
-                                    <div style="font-size:0.85rem; color:#636e72; display:flex; gap:32px; justify-content:center;">
-                                        <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                                            <span>
-                                                <span style="color:#0984e3; font-weight:600;">Download:</span>
-                                                <span id="rx-last" style="color:#0984e3; font-weight:600; margin-left:4px;">0 Mbps</span>
+
+                                    <div style="font-size:0.75rem; color:#636e72; display:flex; gap:15px; justify-content:center; width: 100%; align-items:center;">
+                                        <div style="display:flex; flex-direction:column; align-items:center;">
+                                            <span style="color:#0984e3; font-weight:600; display:flex; align-items:center; gap:5px;">
+                                                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:#0984e3;"></span>
+                                                Download: <span id="rx-last">0 Mbps</span>
                                             </span>
-                                            <span>
-                                                <span style="color:#0984e3; font-weight:600;">Total Download:</span>
-                                                <span id="rx-total" style="color:#0984e3; font-weight:600; margin-left:4px;">0 MB</span>
-                                            </span>
+                                            <span style="color:#0984e3; font-weight:600; font-size: 0.7rem;">Total: <span id="rx-total">0 MB</span></span>
                                         </div>
-                                        <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                                            <span>
-                                                <span style="color:#2ecc71; font-weight:600;">Upload:</span>
-                                                <span id="tx-last" style="color:#2ecc71; font-weight:600; margin-left:4px;">0 Mbps</span>
+                                        <div style="display:flex; flex-direction:column; align-items:center;">
+                                            <span style="color:#2ecc71; font-weight:600; display:flex; align-items:center; gap:5px;">
+                                                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:#2ecc71;"></span>
+                                                Upload: <span id="tx-last">0 Mbps</span>
                                             </span>
-                                            <span>
-                                                <span style="color:#2ecc71; font-weight:600;">Total Upload:</span>
-                                                <span id="tx-total" style="color:#2ecc71; font-weight:600; margin-left:4px;">0 MB</span>
-                                            </span>
+                                            <span style="color:#2ecc71; font-weight:600; font-size: 0.7rem;">Total: <span id="tx-total">0 MB</span></span>
                                         </div>
                                     </div>
+
+                                    <div style="font-size:0.9rem; color:#6b7280; font-weight:bold; margin-top:2px;">
+                                        <select id="monitored-interface-select" onchange="onInterfaceChange()" style="border:none; background:transparent; font-weight:600; color:#374151; cursor:pointer; outline:none; padding:0; text-align: center;">
+                                            <option value="" disabled selected>Detecting...</option>
+                                        </select>
+                                    </div>
                                 </div>
-                                <div style="height: 300px; width: 100%; position: relative; flex:1;">
+                                <div style="height: 350px; width: 100%; position: relative; flex:1;">
                                     <canvas id="bandwidthChart"></canvas>
                                     <div id="bw-text-fallback" style="display:none; text-align:center; padding-top:100px; font-weight:bold; font-size:1.2rem;">
                                         Waiting for data...
