@@ -7,40 +7,92 @@
     <script src="/js/admin-toast.js"></script>
     <style>
         :root {
-            --primary: #0984e3;
-            --dark: #2d3436;
-            --light: #dfe6e9;
-            --bg: #f0f2f5;
+            --primary: #4361ee;
+            --secondary: #3f37c9;
+            --success: #4cc9f0;
+            --warning: #f1c40f;
+            --info: #3498db;
+            --danger: #f72585;
+            --dark: #1b2631;
+            --light: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-main: #2d3436;
+            --text-muted: #636e72;
+            --border: #dfe6e9;
+            --shadow: 0 4px 6px rgba(0,0,0,0.05);
+            --bg-body: #f0f2f5;
+            --sidebar-bg: #ffffff;
+            --header-bg: #ffffff;
+            --input-bg: #ffffff;
+            --table-header-bg: #f8f9fa;
+            --table-border: #f1f2f6;
+            --status-active: #2ecc71;
+            --log-bg: #f1f2f6;
+            --log-text: #2d3436;
+            --log-border: #dfe6e9;
+            --log-timestamp: #636e72;
+            --log-voucher: #d35400;
+            --status-expired: #e74c3c;
         }
+
+        [data-theme="dark"] {
+            --primary: #5c7cfa;
+            --secondary: #4c6ef5;
+            --success: #00d2d3;
+            --danger: #ff6b6b;
+            --dark: #f1f2f6;
+            --light: #2f3640;
+            --card-bg: #2f3640;
+            --text-main: #dcdde1;
+            --text-muted: #a4b0be;
+            --border: #4b6584;
+            --shadow: 0 4px 6px rgba(0,0,0,0.3);
+            --bg-body: #1e272e;
+            --sidebar-bg: #2f3640;
+            --header-bg: #2f3640;
+            --input-bg: #353b48;
+            --table-header-bg: #353b48;
+            --table-border: #4b6584;
+            --status-active: #2ecc71;
+            --status-expired: #ff6b6b;
+            --log-bg: #1e272e;
+            --log-text: #dcdde1;
+            --log-border: #2c3e50;
+            --log-timestamp: #95a5a6;
+            --log-voucher: #f1c40f;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: var(--bg);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-body);
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
-            color: var(--dark);
+            color: var(--text-main);
         }
         .container {
-            background: white;
+            background: var(--card-bg);
             padding: 40px;
             border-radius: 12px;
             width: 90%;
             max-width: 400px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            box-shadow: var(--shadow);
             text-align: center;
         }
-        h2 { margin-top: 0; color: var(--dark); }
+        h2 { margin-top: 0; color: var(--text-main); }
         .input-group { margin-bottom: 20px; text-align: left; }
-        .input-group label { font-size: 0.85rem; font-weight: 600; color: #636e72; display: block; margin-bottom: 5px; }
+        .input-group label { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 5px; }
         .form-control {
             width: 100%;
             padding: 12px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border);
             border-radius: 6px;
             box-sizing: border-box;
             font-size: 1rem;
+            background: var(--input-bg);
+            color: var(--text-main);
         }
         .btn {
             width: 100%;
@@ -54,13 +106,13 @@
             font-size: 1rem;
             transition: background 0.2s;
         }
-        .btn:hover { background: #0773c5; }
+        .btn:hover { opacity: 0.9; }
         .btn-secondary {
-            background: #b2bec3;
+            background: var(--text-muted);
             margin-top: 10px;
         }
-        .btn-secondary:hover { background: #636e72; }
-        .error { color: #e74c3c; font-size: 0.9rem; margin-top: 10px; display: none; }
+        .btn-secondary:hover { opacity: 0.9; }
+        .error { color: var(--status-expired); font-size: 0.9rem; margin-top: 10px; display: none; }
         .hidden { display: none; }
     </style>
 </head>
@@ -70,11 +122,11 @@
         <!-- Step 1: Verification -->
         <div id="step-verify">
             <h2>Security Check</h2>
-            <p style="color: #636e72; font-size: 0.9rem; margin-bottom: 25px;">Please answer your security question to reset your credentials.</p>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 25px;">Please answer your security question to reset your credentials.</p>
             
             <div class="input-group">
                 <label>Security Question</label>
-                <div id="security-question" style="padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #eee; font-weight: 500;">
+                <div id="security-question" style="padding: 12px; background: var(--bg-body); border-radius: 6px; border: 1px solid var(--border); font-weight: 500; color: var(--text-main);">
                     Loading...
                 </div>
             </div>
@@ -92,7 +144,7 @@
         <!-- Step 2: Reset Form -->
         <div id="step-reset" class="hidden">
             <h2>Reset Credentials</h2>
-            <p style="color: #636e72; font-size: 0.9rem; margin-bottom: 20px;">Identity Verified. Update your login details.</p>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">Identity Verified. Update your login details.</p>
 
             <div class="input-group">
                 <label>New Username</label>
@@ -125,6 +177,14 @@
     </div>
 
     <script>
+        // Theme Initialization
+        (function() {
+            const savedTheme = localStorage.getItem('theme');
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            const initialTheme = savedTheme || systemTheme;
+            document.documentElement.setAttribute('data-theme', initialTheme);
+        })();
+
         let resetToken = null;
 
         // Load Security Question on Page Load

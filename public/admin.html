@@ -2136,9 +2136,9 @@
         /* Login Screen */
         #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-body); display: flex; justify-content: center; align-items: center; z-index: 2000; }
         #login-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-body); display: none; justify-content: center; align-items: center; flex-direction: column; z-index: 1000; }
-        .login-box { background: var(--card-bg); padding: 40px; border-radius: 12px; width: 350px; box-shadow: var(--shadow); text-align: center; }
-        .login-input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; background: var(--input-bg); color: var(--text-main); }
-        .login-btn { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+        .login-box { background: var(--card-bg); padding: 10px; border-radius: 12px; width: 300px; box-shadow: var(--shadow); text-align: center; }
+        .login-input { width: 90%; padding: 10px; margin: 8px auto; display: block; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; background: var(--input-bg); color: var(--text-main); }
+        .login-btn { width: 90%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin: 10px auto; display: block; }
 
         /* Pull to Refresh */
         #pull-to-refresh {
@@ -2676,20 +2676,20 @@
 
     <!-- Login -->
     <div id="login-screen">
-        <img src="/neofi_nb.png" alt="NeoFi Logo" style="max-width: 200px; margin-bottom: 20px;">
+        <img src="/neofi_nb.png" alt="NeoFi Logo" style="max-width: 180px; margin-bottom: 15px;">
         <div class="login-box">
-            <h2 style="margin-bottom: 20px; color: var(--dark);">Admin Access</h2>
+            <h2 style="margin-bottom: 15px; color: var(--dark);">Admin Access</h2>
             <form onsubmit="login(); return false;">
                 <label for="username" style="display:none;">Username</label>
                 <input type="text" id="username" class="login-input" placeholder="Username" autocomplete="username">
                 <label for="password" style="display:none;">Password</label>
                 <input type="password" id="password" class="login-input" placeholder="Password" autocomplete="current-password">
-                <div style="text-align:right; margin-bottom:15px;">
+                <div style="text-align:right; margin-bottom:10px;">
                     <a href="/forgot.html" style="font-size:0.85rem; color: var(--secondary); text-decoration:none;">Forgot Password?</a>
                 </div>
                 <button type="submit" class="login-btn">Secure Login</button>
             </form>
-            <p id="login-error" style="color: var(--status-expired); font-size:0.85rem; margin-top:15px;"></p>
+            <p id="login-error" style="color: var(--status-expired); font-size:0.85rem; margin-top:10px;"></p>
         </div>
     </div>
 
