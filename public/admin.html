@@ -5333,6 +5333,27 @@
                                     </div>
                                 </div>
 
+                                <!-- Announcement Settings -->
+                                <div style="grid-column: 1 / -1; margin-top: 5px; border-top: 1px solid var(--border); padding-top: 10px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--bg-body); border-radius: 6px; border: 1px solid var(--border);">
+                                        <div style="display:flex; align-items:center;">
+                                            <span style="font-weight: 600; color: var(--text-main);">Enable Announcement Popup</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="portal-announcement-enabled">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    <div style="margin-top: 10px;">
+                                        <label for="portal-announcement-title" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Announcement Title</label>
+                                        <input type="text" id="portal-announcement-title" class="login-input" placeholder="Announcement" style="margin:0;">
+                                    </div>
+                                    <div style="margin-top: 10px;">
+                                        <label for="portal-announcement-message" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Announcement Message</label>
+                                        <textarea id="portal-announcement-message" class="login-input" placeholder="Enter your announcement message here..." style="margin:0; min-height: 80px; resize: vertical;"></textarea>
+                                    </div>
+                                </div>
+
                                 <!-- Banner Mode Selection -->
                                 <div style="grid-column: 1 / -1; margin-top: 10px;">
                                     <label style="display:block; font-weight:600; margin-bottom:8px; font-size:0.9rem;">Banner Mode</label>
@@ -8885,6 +8906,20 @@
                     tickerTextInput.value = config.ticker_text || '';
                 }
 
+                // Announcement Settings
+                const announcementEnabledToggle = document.getElementById('portal-announcement-enabled');
+                if (announcementEnabledToggle) {
+                    announcementEnabledToggle.checked = config.announcement_enabled || false;
+                }
+                const announcementTitleInput = document.getElementById('portal-announcement-title');
+                if (announcementTitleInput) {
+                    announcementTitleInput.value = config.announcement_title || '';
+                }
+                const announcementMessageInput = document.getElementById('portal-announcement-message');
+                if (announcementMessageInput) {
+                    announcementMessageInput.value = config.announcement_message || '';
+                }
+
                 // Banner Mode
                 const mode = config.banner_mode || 'fixed';
                 if (mode === 'slideshow') {
@@ -9065,6 +9100,11 @@
             const hideVoucherCode = document.getElementById('portal-hide-voucher-code').checked;
             const tickerEnabled = document.getElementById('portal-ticker-enabled').checked;
             const tickerText = document.getElementById('portal-ticker-text').value;
+
+            // Announcement Fields
+            const announcementEnabled = document.getElementById('portal-announcement-enabled').checked;
+            const announcementTitle = document.getElementById('portal-announcement-title').value;
+            const announcementMessage = document.getElementById('portal-announcement-message').value;
             
             // New Fields
             const bannerMode = document.querySelector('input[name="banner_mode"]:checked').value;
@@ -9088,6 +9128,9 @@
                         hide_voucher_code: hideVoucherCode,
                         ticker_enabled: tickerEnabled,
                         ticker_text: tickerText,
+                        announcement_enabled: announcementEnabled,
+                        announcement_title: announcementTitle,
+                        announcement_message: announcementMessage,
                         banner_mode: bannerMode,
                         slideshow_interval: slideshowInterval,
                         footer_text: footerText,

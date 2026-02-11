@@ -2220,7 +2220,10 @@ app.get('/api/portal/config', (req, res) => {
         footer_link: configService.get('portal_footer_link', ''),
         theme: configService.get('portal_theme', 'portal.html'),
         ticker_text: configService.get('portal_ticker_text', 'Thank you for choosing our piso wifi hotspot services!'),
-        ticker_enabled: configService.get('portal_ticker_enabled', false)
+        ticker_enabled: configService.get('portal_ticker_enabled', false),
+        announcement_enabled: configService.get('portal_announcement_enabled', false),
+        announcement_title: configService.get('portal_announcement_title', 'Announcement'),
+        announcement_message: configService.get('portal_announcement_message', '')
     };
     res.json(config);
 });
@@ -2306,7 +2309,8 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
         container_width, icon_size, status_container_size, banner_height, 
         use_default_banner, default_banner_file, hide_voucher_code,
         banner_mode, slideshow_interval, footer_text, footer_link, theme,
-        ticker_text, ticker_enabled
+        ticker_text, ticker_enabled,
+        announcement_enabled, announcement_title, announcement_message
     } = req.body;
 
     if (container_width) configService.set('portal_container_width', container_width);
@@ -2324,6 +2328,10 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
 
     if (ticker_text !== undefined) configService.set('portal_ticker_text', ticker_text);
     configService.set('portal_ticker_enabled', !!ticker_enabled);
+
+    if (announcement_title !== undefined) configService.set('portal_announcement_title', announcement_title);
+    if (announcement_message !== undefined) configService.set('portal_announcement_message', announcement_message);
+    configService.set('portal_announcement_enabled', !!announcement_enabled);
 
     if (theme) {
         if (theme.startsWith('portal') && theme.endsWith('.html') && !theme.includes('/') && !theme.includes('\\')) {

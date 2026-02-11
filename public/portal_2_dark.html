@@ -1064,6 +1064,15 @@
         </div>
     </div>
 
+    <!-- Announcement Modal -->
+    <div id="announcement-modal" class="modal" style="display:none; opacity:0; transition: opacity 0.3s ease;">
+        <div class="modal-content" style="transform: scale(0.9); transition: transform 0.3s ease; position: relative; padding-bottom: 50px;">
+            <div class="modal-title" id="announcement-title">Announcement</div>
+            <p id="announcement-message" style="margin-bottom:0; color:var(--text); white-space: pre-wrap; text-align: left; max-height: 300px; overflow-y: auto;"></p>
+            <div onclick="closeAnnouncement()" style="position: absolute; bottom: 15px; left: 0; width: 100%; text-align: center; cursor: pointer; color: var(--text); font-weight: 500;">Close</div>
+        </div>
+    </div>
+
     <audio id="coin-beep" src="/beed.mp3" preload="auto"></audio>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -1198,6 +1207,9 @@
                         footer.textContent = 'POWERED BY CJTECH';
                     }
                 }
+                
+                // Show Announcement if enabled
+                showAnnouncement();
 
             } catch (e) {
                 console.error("Failed to load portal config", e);
@@ -1392,6 +1404,33 @@
                 });
             }, 3500);
         }
+
+        function showAnnouncement() {
+            if (!portalConfig || !portalConfig.announcement_enabled) return;
+            
+            const title = portalConfig.announcement_title || 'Announcement';
+            const message = portalConfig.announcement_message || '';
+            
+            if (!message) return;
+
+            const titleEl = document.getElementById('announcement-title');
+            const messageEl = document.getElementById('announcement-message');
+            
+            if (titleEl) titleEl.textContent = title;
+            if (messageEl) messageEl.textContent = message;
+            
+            const modal = document.getElementById('announcement-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+                // Force reflow
+                modal.offsetHeight;
+                modal.style.opacity = '1';
+                const content = modal.querySelector('.modal-content');
+                if (content) content.style.transform = 'scale(1)';
+            }
+        }
+
+
 
         // Init
         document.addEventListener('DOMContentLoaded', async () => {
@@ -2324,6 +2363,52 @@
                 initChatWithId(deviceId);
             }
         };
+
+        // Announcement Logic
+        function showAnnouncement() {
+            if (!portalConfig || !portalConfig.announcement_enabled) return;
+            
+            const title = portalConfig.announcement_title || 'Announcement';
+            const message = portalConfig.announcement_message || '';
+            
+            if (!message) return;
+
+            const titleEl = document.getElementById('announcement-title');
+            const messageEl = document.getElementById('announcement-message');
+            
+            if (titleEl) titleEl.textContent = title;
+            if (messageEl) messageEl.textContent = message;
+            
+            const modal = document.getElementById('announcement-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+                // Trigger reflow
+                modal.offsetHeight;
+                modal.style.opacity = '1';
+                const content = modal.querySelector('.modal-content');
+                if (content) content.style.transform = 'scale(1)';
+            }
+        }
+
+        function closeAnnouncement() {
+            const modal = document.getElementById('announcement-modal');
+            if (modal) {
+                modal.style.opacity = '0';
+                const content = modal.querySelector('.modal-content');
+                if (content) content.style.transform = 'scale(0.9)';
+                
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                }, 300);
+            }
+        }
+
+        // Close announcement when clicking outside
+        document.getElementById('announcement-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAnnouncement();
+            }
+        });
     </script>
 </body>
 </html>
