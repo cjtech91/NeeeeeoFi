@@ -3162,7 +3162,7 @@
                                 <button class="btn btn-sm" style="background:var(--bg-body);" onclick="loadSalesData('history')">All Transactions</button>
                             </div>
                         </div>
-                        <div style="flex:1 1 auto; overflow-x:auto; overflow-y:auto; min-height:0;">
+                        <div style="flex:1 1 auto; overflow-x:auto; overflow-y:auto; min-height:0; max-height:400px;">
                             <table id="sales-table" class="sales-grid-table">
                                 <thead>
                                     <tr>
@@ -3358,7 +3358,7 @@
                                 </span>
                             </div>
                         </div>
-                        <div class="table-container" style="max-height: 500px; overflow-y: auto;">
+                        <div class="table-container" style="max-height: 400px; overflow-y: auto;">
                              <table id="pppoe-sales-table" class="sales-grid-table">
                                 <thead>
                                     <tr>
@@ -4803,12 +4803,12 @@
 
                         <!-- Config Area -->
                         <div id="zt-config-area" style="display:none;">
-                            <div class="form-grid" style="align-items: end; gap:2px;">
-                                <div style="flex-grow:1;">
+                            <div style="display: flex; align-items: flex-end; gap: 8px;">
+                                <div style="flex: 0 0 350px; max-width: 70%;">
                                     <label style="display:block; font-weight:600; margin-bottom:0px; font-size:0.8rem;">Join Network</label>
-                                    <input type="text" id="zt-network-id" class="login-input" placeholder="Network ID (16 chars)" style="margin:1px 0; padding:4px;">
+                                    <input type="text" id="zt-network-id" class="login-input" placeholder="Network ID (16 chars)" style="margin:1px 0; padding:4px; width: 100%;">
                                 </div>
-                                <button class="btn btn-primary" onclick="joinZeroTier()" style="height:38px; margin-bottom:2px;">Join</button>
+                                <button class="btn btn-primary" onclick="joinZeroTier()" style="height:34px; margin-bottom:1px; padding: 0 20px;">Join</button>
                             </div>
                             
                             <div id="zt-info-area" style="margin-top:8px; display:none;">
@@ -12485,7 +12485,7 @@
                     opt.value = p.id;
                     const upMbps = p.rate_limit_up ? (p.rate_limit_up / 1024) : 0;
                     const downMbps = p.rate_limit_down ? (p.rate_limit_down / 1024) : 0;
-                    opt.textContent = `${p.name} (&uarr;${upMbps}M/&darr;${downMbps}M)`;
+                    opt.textContent = `${p.name} (↑${upMbps}M/↓${downMbps}M)`;
                     
                     pSelect.appendChild(opt);
                 });
