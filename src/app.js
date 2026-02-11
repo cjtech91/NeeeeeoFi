@@ -805,6 +805,33 @@ async function finalizeCoinSession(sessionKey, reason) {
                 interface = COALESCE(?, interface)
             WHERE id = ?
         `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, ip, clientId, iface, user.id);
+
+        try {
+            // Re-fetch user to get the accurate new total time
+            const updatedUser = db.prepare('SELECT time_remaining FROM users WHERE id = ?').get(user.id);
+            const totalRemaining = updatedUser ? updatedUser.time_remaining : 0;
+            const previousRemaining = totalRemaining - secondsToAdd;
+
+            const sourceDetails = Object.entries(sourceAmounts || {}).map(([src, amt]) => `${src} (${amt})`).join(', ') || saleSource;
+            
+            const logData = {
+                type: 'session_extended',
+                details: {
+                    message: `User ${userCode} extended time.`,
+                    amount: amount,
+                    added_time: secondsToAdd,
+                    previous_remaining: previousRemaining,
+                    total_remaining: totalRemaining,
+                    source: sourceDetails,
+                    user_code: userCode,
+                    mac_address: mac
+                }
+            };
+            
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+        } catch (e) {
+            console.error('[Log] Failed to log extension:', e);
+        }
     } else {
         db.prepare(`
             INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, last_active_at, last_traffic_at, interface) 
@@ -1426,28 +1453,40 @@ app.post('/api/auth/reset-credentials', (req, res) => {
     }
 });
 
+// Logs Suggestions API
+app.get('/api/logs/suggestions', isAuthenticated, (req, res) => {
+    const { q } = req.query;
+    try {
+        const suggestions = logService.getSearchSuggestions(q);
+        res.json(suggestions);
+    } catch (e) {
+        console.error("API Suggestions Error:", e);
+        res.status(500).json([]);
+    }
+});
+
 // Logs API
 app.get('/api/logs', isAuthenticated, async (req, res) => {
-    const { source, limit } = req.query;
+    const { source, limit, date, search } = req.query;
     const limitVal = parseInt(limit) || 100;
     try {
         let logs = [];
         switch (source) {
             case 'pppoe':
-                logs = await logService.getPppoeLogs(limitVal);
+                logs = await logService.getPppoeLogs(limitVal, date, search);
                 break;
             case 'hotspot':
-                logs = logService.getHotspotLogs(limitVal);
+                logs = logService.getHotspotLogs(limitVal, date, search);
                 break;
             case 'vouchers':
-                logs = logService.getVoucherLogs(limitVal);
+                logs = logService.getVoucherLogs(limitVal, date, search);
                 break;
             case 'errors':
-                logs = logService.getCriticalErrors(limitVal);
+                logs = logService.getCriticalErrors(limitVal, date, search);
                 break;
             case 'system':
             default:
-                logs = logService.getSystemLogs(limitVal);
+                logs = logService.getSystemLogs(limitVal, date, search);
                 break;
         }
         res.json(logs);
@@ -3697,6 +3736,14 @@ app.post('/api/coin-inserted', async (req, res) => {
                 last_traffic_at = CURRENT_TIMESTAMP
             WHERE id = ?
         `).run(secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed, user.id);
+
+        try {
+            const userCode = user.user_code || 'Unknown';
+            const logMsg = `User ${userCode} extended time by ${secondsToAdd}s. Amount: ${amount}. Source: ${source}`;
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', logMsg);
+        } catch (e) {
+            console.error('[Log] Failed to log extension:', e);
+        }
     } else {
         db.prepare(`
             INSERT INTO users (mac_address, time_remaining, total_time, upload_speed, download_speed, is_paused, is_connected, last_active_at, last_traffic_at) 
@@ -4081,6 +4128,21 @@ app.post('/api/session/pause', async (req, res) => {
     if (req.user) {
         try {
             db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.user.id);
+            
+            const userCode = req.user.user_code || 'Unknown';
+            const currentUser = db.prepare('SELECT time_remaining FROM users WHERE id = ?').get(req.user.id);
+            const remaining = currentUser ? currentUser.time_remaining : 0;
+
+            const logData = {
+                type: 'session_paused',
+                details: {
+                    message: `User ${userCode} paused their session.`,
+                    remaining_time: remaining,
+                    user_code: userCode,
+                    mac_address: req.user.mac_address
+                }
+            };
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
         } catch (e) {}
         try {
             await networkService.blockUser(req.user.mac_address, req.user.ip_address);
@@ -4110,6 +4172,25 @@ app.post('/api/session/resume', async (req, res) => {
         
         // Re-apply bandwidth limit to the CURRENT IP
         await bandwidthService.setLimit(clientIp, req.user.download_speed, req.user.upload_speed);
+
+        try {
+            const userCode = req.user.user_code || 'Unknown';
+            const currentUser = db.prepare('SELECT time_remaining FROM users WHERE id = ?').get(req.user.id);
+            const remaining = currentUser ? currentUser.time_remaining : 0;
+
+            const logData = {
+                type: 'session_resumed',
+                details: {
+                    message: `User ${userCode} resumed their session.`,
+                    remaining_time: remaining,
+                    user_code: userCode,
+                    mac_address: req.user.mac_address
+                }
+            };
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+        } catch (e) {
+            console.error('[Log] Failed to log resume:', e);
+        }
     }
     res.json({ success: true });
 });

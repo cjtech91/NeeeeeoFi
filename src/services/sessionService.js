@@ -351,6 +351,23 @@ class SessionService {
             // Update DB
             db.prepare('UPDATE users SET is_paused = 0, is_connected = 1, last_active_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
             
+            // Log Event
+            try {
+                const latestUser = db.prepare('SELECT time_remaining, user_code FROM users WHERE id = ?').get(user.id);
+                const logData = {
+                    type: 'session_resumed',
+                    details: {
+                        message: `User ${latestUser?.user_code || 'N/A'} resumed session.`,
+                        remaining_time: latestUser?.time_remaining || 0,
+                        user_code: latestUser?.user_code,
+                        mac_address: user.mac_address
+                    }
+                };
+                db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+            } catch (logErr) {
+                console.error('[Session] Failed to log resume:', logErr);
+            }
+
             // Restore Firewall Access
             // Using require inside function to avoid circular dependency
             const networkService = require('./networkService');
@@ -377,6 +394,23 @@ class SessionService {
             // Update DB - Keep is_connected = 1 so status shows "Paused" instead of "Offline"
             db.prepare('UPDATE users SET is_paused = 1, is_connected = 1 WHERE id = ?').run(user.id);
             
+            // Log Event
+            try {
+                const latestUser = db.prepare('SELECT time_remaining, user_code FROM users WHERE id = ?').get(user.id);
+                const logData = {
+                    type: 'session_paused',
+                    details: {
+                        message: `User ${latestUser?.user_code || 'N/A'} paused. Reason: ${reason}`,
+                        remaining_time: latestUser?.time_remaining || 0,
+                        user_code: latestUser?.user_code,
+                        mac_address: user.mac_address
+                    }
+                };
+                db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+            } catch (logErr) {
+                console.error('[Session] Failed to log pause:', logErr);
+            }
+
             // Remove from Firewall/Internet
             // We must call blockUser to remove the iptables mark
             // Using require inside function to avoid circular dependency if networkService requires sessionService

@@ -5456,14 +5456,22 @@
                     <div class="card">
                         <div class="card-header">
                             <div class="card-title">System Logs</div>
-                            <div class="log-controls" style="display: flex; gap: 10px;">
-                                <select id="log-category-filter" class="login-input" style="margin:0; width: auto;" onchange="loadLogs(this.value)">
+                            <div class="log-controls" style="display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; flex: 1; justify-content: flex-end;">
+                                <input type="date" id="log-date-picker" class="login-input" style="margin:0; height: 38px; padding: 0 10px; box-sizing: border-box; width: auto;" onchange="loadLogs()">
+                                <select id="log-category-filter" class="login-input" style="margin:0; height: 38px; padding: 0 30px 0 10px; box-sizing: border-box; width: auto;" onchange="loadLogs(this.value)">
                                     <option value="system">System</option>
                                     <option value="pppoe">PPPoE</option>
                                     <option value="hotspot">Hotspot</option>
                                     <option value="errors">Critical Errors</option>
                                 </select>
-                                <button class="btn btn-sm btn-primary" onclick="loadLogs(document.getElementById('log-category-filter').value)">Refresh</button>
+                                <div style="position: relative;">
+                                    <input type="text" id="log-search-input" class="login-input" style="margin:0; width: 220px; height: 38px; padding: 0 10px; box-sizing: border-box;" placeholder="Search MAC, User, Source..." autocomplete="off" oninput="handleLogSearchInput(this)">
+                                    <div id="log-search-suggestions" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card-bg); border:1px solid var(--border-color); border-radius:0 0 4px 4px; z-index:1000; max-height:200px; overflow-y:auto; box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
+                                </div>
+                                <button class="btn btn-sm btn-primary" style="height: 38px; padding: 0 20px; display: flex; align-items: center; gap: 8px;" onclick="loadLogs()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                    Refresh
+                                </button>
                             </div>
                         </div>
                         <div class="log-container" style="padding: 0;">
@@ -7311,19 +7319,130 @@
         }
 
         // --- Logs Logic ---
-        async function loadLogs(category = 'system') {
+        let loadLogsDebounceTimer;
+        let suggestionsDebounceTimer;
+
+        function handleLogSearchInput(input) {
+            const query = input.value.trim();
+            
+            // 1. Debounce Load Logs (Main Search)
+            clearTimeout(loadLogsDebounceTimer);
+            loadLogsDebounceTimer = setTimeout(() => {
+                loadLogs();
+            }, 500);
+
+            // 2. Debounce Suggestions
+            clearTimeout(suggestionsDebounceTimer);
+            if (query.length > 0) {
+                suggestionsDebounceTimer = setTimeout(() => {
+                    fetchLogSuggestions(query);
+                }, 300);
+            } else {
+                document.getElementById('log-search-suggestions').style.display = 'none';
+            }
+        }
+
+        async function fetchLogSuggestions(query) {
+            try {
+                const res = await fetch(`/api/logs/suggestions?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+                if (res.ok) {
+                    const suggestions = await res.json();
+                    renderLogSuggestions(suggestions);
+                }
+            } catch (e) {
+                console.error("Error fetching suggestions:", e);
+            }
+        }
+
+        function renderLogSuggestions(suggestions) {
+            const container = document.getElementById('log-search-suggestions');
+            if (!suggestions || suggestions.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            let html = '';
+            suggestions.forEach(s => {
+                // Escape HTML to prevent XSS
+                const safeS = s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                html += `<div style="padding: 8px 10px; cursor: pointer; color: var(--text-main); border-bottom: 1px solid var(--border-color);" 
+                              onmouseover="this.style.background='var(--bg-body)'" 
+                              onmouseout="this.style.background='transparent'"
+                              onclick="selectLogSuggestion('${safeS}')">
+                            ${safeS}
+                         </div>`;
+            });
+            container.innerHTML = html;
+            container.style.display = 'block';
+        }
+
+        function selectLogSuggestion(value) {
+            const input = document.getElementById('log-search-input');
+            input.value = value;
+            document.getElementById('log-search-suggestions').style.display = 'none';
+            loadLogs(); // Trigger immediate search
+        }
+
+        // Close suggestions when clicking outside
+        document.addEventListener('click', function(e) {
+            const container = document.getElementById('log-search-suggestions');
+            const input = document.getElementById('log-search-input');
+            if (container && container.style.display !== 'none' && !container.contains(e.target) && e.target !== input) {
+                container.style.display = 'none';
+            }
+        });
+
+        function debounceLoadLogs() {
+             // Backward compatibility or fallback
+             handleLogSearchInput(document.getElementById('log-search-input'));
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '0s';
+            const d = Math.floor(seconds / 86400);
+            const h = Math.floor((seconds % 86400) / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            const parts = [];
+            if (d > 0) parts.push(`${d}d`);
+            if (h > 0) parts.push(`${h}h`);
+            if (m > 0) parts.push(`${m}m`);
+            if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+            return parts.join(' ');
+        }
+
+        async function loadLogs(category) {
             const displayArea = document.getElementById('log-display-area');
             const categorySelect = document.getElementById('log-category-filter');
+            const datePicker = document.getElementById('log-date-picker');
+            const searchInput = document.getElementById('log-search-input');
             
-            // Sync select if called without event
-            if (categorySelect.value !== category) {
-                categorySelect.value = category;
+            // Initialize date picker if empty
+            if (datePicker && !datePicker.value) {
+                datePicker.valueAsDate = new Date();
             }
+
+            // Determine category
+            let selectedCategory = category;
+            // If category is undefined, null, or an Event object (from onclick), use the select value
+            if (!selectedCategory || typeof selectedCategory !== 'string') {
+                selectedCategory = categorySelect.value || 'system';
+            }
+            
+            // Sync select if called with a specific string category
+            if (categorySelect.value !== selectedCategory) {
+                categorySelect.value = selectedCategory;
+            }
+
+            const selectedDate = datePicker ? datePicker.value : '';
+            const searchQuery = searchInput ? searchInput.value.trim() : '';
 
             displayArea.innerHTML = '<div style="color: var(--text-muted);">Loading logs...</div>';
 
             try {
-                const res = await fetch(`/api/logs?source=${category}&limit=100`, { credentials: 'include' });
+                // Encode search query
+                const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : '';
+                const res = await fetch(`/api/logs?source=${selectedCategory}&limit=100&date=${selectedDate}${searchParam}`, { credentials: 'include' });
                 if (!res.ok) {
                     let errMsg = res.statusText;
                     try {
@@ -7345,7 +7464,7 @@
                 logs.forEach(log => {
                     let line = '';
                     // Formatting based on category
-                    if (category === 'system' || category === 'errors') {
+                    if (selectedCategory === 'system' || selectedCategory === 'errors') {
                         // system_logs table: id, level, category, message, timestamp
                         const color = log.level === 'CRITICAL' ? 'var(--danger)' : 
                                       log.level === 'ERROR' ? 'var(--danger)' : 
@@ -7357,40 +7476,46 @@
                                     <span style="color: var(--info);">[${log.category}]</span> 
                                     <span style="color: var(--log-text);">${log.message}</span>
                                 </div>`;
-                    } else if (category === 'hotspot') {
-                        // Combined Hotspot Logs (Vouchers + Coins + Expirations)
-                        // Log structure depends on backend. Assuming standardized fields or conditional formatting.
-                        
+                    } else if (selectedCategory === 'hotspot') {
+                        // Combined Hotspot Logs (Vouchers + Coins + Expirations + Session Events)
+                        const d = log.details || {};
+                        const time = `<span style="color: var(--log-timestamp);">[${new Date(log.timestamp).toLocaleString()}]</span>`;
+                        let typeLabel = '';
+                        let content = '';
+
                         if (log.type === 'voucher_usage') {
-                             line = `<div style="margin-bottom: 4px; border-bottom: 1px solid var(--log-border); padding-bottom: 2px;">
-                                    <span style="color: var(--log-timestamp);">[${new Date(log.timestamp).toLocaleString()}]</span> 
-                                    <span style="color: var(--log-voucher);">[VOUCHER]</span> 
-                                    <span style="color: var(--log-text);">Code: ${log.details.code} (${log.details.plan_name} - ₱${log.details.price})</span> 
-                                    <span style="color: var(--text-muted);">used by ${log.details.mac_address} (${log.details.ip_address || 'N/A'})</span>
-                                </div>`;
+                             typeLabel = `<span style="color: var(--log-voucher);">[VOUCHER]</span>`;
+                             content = `<span style="color: var(--log-text);">Code: ${d.code} (${d.plan_name} - ₱${d.price})</span> 
+                                        <span style="color: var(--text-muted);">used by ${d.mac_address}</span>`;
                         } else if (log.type === 'coin_insert') {
-                            line = `<div style="margin-bottom: 4px; border-bottom: 1px solid var(--log-border); padding-bottom: 2px;">
-                                    <span style="color: var(--log-timestamp);">[${new Date(log.timestamp).toLocaleString()}]</span> 
-                                    <span style="color: var(--status-active);">[COIN]</span> 
-                                    <span style="color: var(--log-text);">Amount: ₱${log.details.amount} (Source: ${log.details.source})</span> 
-                                    <span style="color: var(--text-muted);">User: ${log.details.user_code || 'Unknown'} (MAC: ${log.details.mac_address})</span>
-                                </div>`;
+                            typeLabel = `<span style="color: var(--status-active);">[COIN]</span>`;
+                            content = `<span style="color: var(--log-text);">₱${d.amount} inserted via ${d.source}</span> 
+                                       <span style="color: var(--text-muted);">by ${d.mac_address} ${d.user_code ? `(User: ${d.user_code})` : ''}</span>`;
+                        } else if (log.type === 'session_paused') {
+                            typeLabel = `<span style="color: var(--info);">[PAUSED]</span>`;
+                            content = `<span style="color: var(--log-text);">Session Paused. Remaining: ${formatDuration(d.remaining_time)}</span>
+                                       <span style="color: var(--text-muted);">User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
+                        } else if (log.type === 'session_resumed') {
+                            typeLabel = `<span style="color: var(--info);">[RESUMED]</span>`;
+                            content = `<span style="color: var(--log-text);">Session Resumed. Remaining: ${formatDuration(d.remaining_time)}</span>
+                                       <span style="color: var(--text-muted);">User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
+                        } else if (log.type === 'session_extended') {
+                            typeLabel = `<span style="color: #9b59b6;">[EXTENDED]</span>`;
+                            content = `<span style="color: var(--log-text);">Session Extended by ${formatDuration(d.added_time)}. Total Remaining: ${formatDuration(d.total_remaining)}</span>
+                                       <span style="color: var(--text-muted);">Source: ${d.source} | User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
                         } else if (log.type === 'session_expired') {
-                             line = `<div style="margin-bottom: 4px; border-bottom: 1px solid var(--log-border); padding-bottom: 2px;">
-                                    <span style="color: var(--log-timestamp);">[${new Date(log.timestamp).toLocaleString()}]</span> 
-                                    <span style="color: var(--status-expired);">[EXPIRED]</span> 
-                                    <span style="color: var(--log-text);">Session Expired</span> 
-                                    <span style="color: var(--text-muted);">User: ${log.details.user_code || 'Unknown'} (MAC: ${log.details.mac_address})</span>
-                                </div>`;
+                             typeLabel = `<span style="color: var(--status-expired);">[EXPIRED]</span>`;
+                             content = `<span style="color: var(--log-text);">Session Expired</span> 
+                                        <span style="color: var(--text-muted);">MAC: ${d.mac_address}</span>`;
                         } else {
-                            // Fallback for legacy voucher logs or generic hotspot logs
-                             line = `<div style="margin-bottom: 4px; border-bottom: 1px solid var(--log-border); padding-bottom: 2px;">
-                                    <span style="color: var(--log-timestamp);">[${new Date(log.timestamp || log.used_at).toLocaleString()}]</span> 
-                                    <span style="color: var(--info);">[HOTSPOT]</span> 
-                                    <span style="color: var(--log-text);">${log.message || JSON.stringify(log)}</span> 
-                                </div>`;
+                             typeLabel = `<span style="color: var(--info);">[${log.type.toUpperCase()}]</span>`;
+                             content = `<span style="color: var(--log-text);">${log.message || JSON.stringify(d)}</span>`;
                         }
-                    } else if (category === 'pppoe') {
+
+                        line = `<div style="margin-bottom: 4px; border-bottom: 1px solid var(--log-border); padding-bottom: 2px;">
+                                    ${time} ${typeLabel} ${content}
+                                </div>`;
+                    } else if (selectedCategory === 'pppoe') {
                         // Raw text or object
                         const msg = log.message || log.raw || JSON.stringify(log);
                         const time = log.timestamp ? `[${new Date(log.timestamp).toLocaleString()}] ` : '';

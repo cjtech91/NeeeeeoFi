@@ -2334,6 +2334,18 @@
         }
 
         // --- Logs Logic ---
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '0s';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            const parts = [];
+            if (h > 0) parts.push(`${h}h`);
+            if (m > 0) parts.push(`${m}m`);
+            if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+            return parts.join(' ');
+        }
+
         async function loadLogs(category = 'system') {
             const displayArea = document.getElementById('log-display-area');
             const categorySelect = document.getElementById('log-category-filter');
@@ -2379,6 +2391,45 @@
                                     <span style="color: ${color}; font-weight: bold;">[${log.level}]</span> 
                                     <span style="color: #3498db;">[${log.category}]</span> 
                                     <span style="color: #ecf0f1;">${log.message}</span>
+                                </div>`;
+                    } else if (category === 'hotspot') {
+                        // Combined hotspot logs (vouchers, sales, sessions)
+                        const d = log.details || {};
+                        const time = `<span style="color: #95a5a6;">[${new Date(log.timestamp).toLocaleString()}]</span>`;
+                        let typeLabel = '';
+                        let content = '';
+
+                        if (log.type === 'voucher_usage') {
+                            typeLabel = `<span style="color: #f1c40f;">[VOUCHER]</span>`;
+                            content = `<span style="color: #ecf0f1;">Code: ${d.code} (${d.plan_name} - ₱${d.price})</span> 
+                                       <span style="color: #bdc3c7;">used by ${d.mac_address}</span>`;
+                        } else if (log.type === 'coin_insert') {
+                            typeLabel = `<span style="color: #2ecc71;">[COIN]</span>`;
+                            content = `<span style="color: #ecf0f1;">₱${d.amount} inserted via ${d.source}</span>
+                                       <span style="color: #bdc3c7;">by ${d.mac_address} ${d.user_code ? `(User: ${d.user_code})` : ''}</span>`;
+                        } else if (log.type === 'session_paused') {
+                            typeLabel = `<span style="color: #3498db;">[PAUSED]</span>`;
+                            content = `<span style="color: #ecf0f1;">Session Paused. Remaining: ${formatDuration(d.remaining_time)}</span>
+                                       <span style="color: #bdc3c7;">User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
+                        } else if (log.type === 'session_resumed') {
+                            typeLabel = `<span style="color: #3498db;">[RESUMED]</span>`;
+                            content = `<span style="color: #ecf0f1;">Session Resumed. Remaining: ${formatDuration(d.remaining_time)}</span>
+                                       <span style="color: #bdc3c7;">User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
+                        } else if (log.type === 'session_extended') {
+                            typeLabel = `<span style="color: #9b59b6;">[EXTENDED]</span>`;
+                            content = `<span style="color: #ecf0f1;">Session Extended by ${formatDuration(d.added_time)}. Total Remaining: ${formatDuration(d.total_remaining)}</span>
+                                       <span style="color: #bdc3c7;">Source: ${d.source} | User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
+                        } else if (log.type === 'session_expired') {
+                            typeLabel = `<span style="color: #e74c3c;">[EXPIRED]</span>`;
+                            content = `<span style="color: #ecf0f1;">Session Expired</span>
+                                       <span style="color: #bdc3c7;">MAC: ${d.mac_address}</span>`;
+                        } else {
+                            typeLabel = `<span style="color: #95a5a6;">[${log.type.toUpperCase()}]</span>`;
+                            content = `<span style="color: #ecf0f1;">${JSON.stringify(d)}</span>`;
+                        }
+
+                        line = `<div style="margin-bottom: 4px; border-bottom: 1px solid #2c3e50; padding-bottom: 2px;">
+                                    ${time} ${typeLabel} ${content}
                                 </div>`;
                     } else if (category === 'vouchers') {
                         // voucher query result: code, plan_name, price, used_at, mac_address, ip_address
