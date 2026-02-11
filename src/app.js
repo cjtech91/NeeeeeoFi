@@ -4406,6 +4406,7 @@ app.get('/api/admin/devices', isAuthenticated, async (req, res) => {
             }
 
             let iface = null;
+            let hostname = null;
             if (connectedDevices && connectedDevices.length) {
                 const normIp = d.ip_address ? String(d.ip_address).replace('::ffff:', '') : null;
                 const normMac = d.mac_address ? String(d.mac_address).toLowerCase() : null;
@@ -4416,10 +4417,15 @@ app.get('/api/admin/devices', isAuthenticated, async (req, res) => {
                     if (normMac && cdMac && cdMac === normMac) return true;
                     return false;
                 });
-                if (match && match.interface) {
-                    let rawIface = String(match.interface);
-                    if (rawIface === 'wlan0') rawIface = 'br0';
-                    iface = rawIface;
+                if (match) {
+                    if (match.interface) {
+                        let rawIface = String(match.interface);
+                        if (rawIface === 'wlan0') rawIface = 'br0';
+                        iface = rawIface;
+                    }
+                    if (match.hostname) {
+                        hostname = match.hostname;
+                    }
                 }
             }
 
@@ -4428,7 +4434,8 @@ app.get('/api/admin/devices', isAuthenticated, async (req, res) => {
                 effective_idle_timeout: d.idle_timeout || globalIdleSec,
                 current_speed: speed,
                 total_coins: totalCoins,
-                interface: iface
+                interface: iface,
+                hostname: hostname
             };
         });
 

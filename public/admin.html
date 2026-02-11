@@ -182,13 +182,6 @@
                 devices.forEach(dev => {
                     const tr = document.createElement('tr');
                     
-                    // Format time remaining
-                    let timeDisplay = 'Expired';
-                    if (dev.time_remaining > 0) {
-                        // Reuse existing helper, expects minutes
-                        timeDisplay = formatDuration(Math.ceil(dev.time_remaining / 60)); 
-                    }
-
                     // Status Badge
                     let statusBadge = '<span class="badge bg-secondary">Offline</span>';
                     
@@ -198,22 +191,10 @@
                         statusBadge = '<span class="badge bg-success">Connected</span>';
                     }
 
-                    // Traffic Stats
-                    const dl = formatBytes(dev.total_data_down || 0);
-                    const ul = formatBytes(dev.total_data_up || 0);
-                    
-                    const toMbps = (bytes) => ((bytes || 0) * 8 / 1000000).toFixed(2);
-                    const dlSpeed = dev.current_speed ? toMbps(dev.current_speed.dl_speed) : '0.00';
-                    const ulSpeed = dev.current_speed ? toMbps(dev.current_speed.ul_speed) : '0.00';
-
                     tr.innerHTML = `
                         <td>${dev.mac_address}</td>
                         <td>${(dev.ip_address || 'N/A').replace('::ffff:', '')}</td>
-                        <td>${timeDisplay}</td>
-                        <td>
-                            <div style="font-size:0.85rem;"><span style="color:var(--status-active);">&darr;</span> ${dl} <span style="font-weight:bold; color:var(--status-active);">(${dlSpeed} Mbps)</span></div>
-                            <div style="font-size:0.85rem;"><span style="color:var(--info);">&uarr;</span> ${ul} <span style="font-weight:bold; color:var(--info);">(${ulSpeed} Mbps)</span></div>
-                        </td>
+                        <td>${dev.hostname || dev.name || 'Unknown'}</td>
                         <td>${statusBadge}</td>
                         <td>
                             <button class="btn btn-sm btn-danger" onclick="disconnectDevice(${dev.id})">Disconnect</button>
@@ -5513,17 +5494,10 @@
                                         <th>
                                             <span style="display:inline-flex;align-items:center;gap:6px;">
                                                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                                                    <path fill="currentColor" d="M12 1a9 9 0 1 0 9 9a9 9 0 0 0-9-9zm0 16a7 7 0 1 1 7-7a7 7 0 0 1-7 7zm-.5-11h1.5v4.25l3.5 2.08-.75 1.23L11.5 11z"/>
+                                                    <path fill="currentColor" d="M4 6h16v12H4z" opacity="0.3" />
+                                                    <path fill="currentColor" d="M2 6c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6zm2 0v12h16V6H4zM8 14h8v2H8v-2zm0-4h8v2H8v-2z" />
                                                 </svg>
-                                                <span>Time Remaining</span>
-                                            </span>
-                                        </th>
-                                        <th>
-                                            <span style="display:inline-flex;align-items:center;gap:6px;">
-                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                                                    <path fill="currentColor" d="M4 18h2v-5H4v5zm4 0h2V9H8v9zm4 0h2V5h-2v13zm4 0h2v-8h-2v8z"/>
-                                                </svg>
-                                                <span>Traffic (DL/UP)</span>
+                                                <span>Device Name</span>
                                             </span>
                                         </th>
                                         <th>
