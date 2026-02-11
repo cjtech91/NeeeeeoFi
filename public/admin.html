@@ -11031,12 +11031,14 @@
                              valB = num(b.total_data_down) + num(b.total_data_up);
                              break;
                          case 'idle':
-                             const parseDate = (d) => {
-                                 if (!d) return 0;
-                                 if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d + 'Z').getTime();
-                                 return new Date(d).getTime();
-                             };
-                             const getIdleTime = (u) => {
+                            const parseDate = (d) => {
+                                if (!d) return 0;
+                                // Parse as Local Time (Backend sends Local Time strings e.g. "2023-10-27 18:00:00")
+                                // Do NOT append 'Z' which forces UTC
+                                if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d.replace(' ', 'T')).getTime();
+                                return new Date(d).getTime();
+                            };
+                            const getIdleTime = (u) => {
                                  const tTraffic = u.last_traffic_at ? parseDate(u.last_traffic_at) : 0;
                                  const tActive = u.last_active_at ? parseDate(u.last_active_at) : 0;
                                  return Math.max(tTraffic, tActive) || 0;
@@ -11081,7 +11083,8 @@
 
                  const parseDate = (d) => {
                      if (!d) return null;
-                     if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d + 'Z').getTime();
+                     // Parse as Local Time
+                     if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d.replace(' ', 'T')).getTime();
                      return new Date(d).getTime();
                  };
                  const tTraffic = u.last_traffic_at ? parseDate(u.last_traffic_at) : 0;

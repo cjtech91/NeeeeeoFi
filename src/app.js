@@ -406,7 +406,7 @@ const updateTime = db.prepare('UPDATE users SET time_remaining = ? WHERE id = ?'
 const updateUserInterfaceAndIp = db.prepare('UPDATE users SET interface = ?, ip_address = ? WHERE id = ?');
 const expireUser = db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0 WHERE id = ?');
 const updateTraffic = db.prepare('UPDATE users SET total_data_up = ?, total_data_down = ? WHERE id = ?');
-const updateTrafficActivity = db.prepare('UPDATE users SET last_traffic_at = CURRENT_TIMESTAMP WHERE id = ?');
+const updateTrafficActivity = db.prepare('UPDATE users SET last_traffic_at = ? WHERE id = ?');
 const pauseUser = db.prepare('UPDATE users SET is_paused = 1, is_connected = 1 WHERE id = ?');
 const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
 
@@ -540,7 +540,11 @@ const countdownLoop = async () => {
                             const newTotalDl = (user.total_data_down || 0) + dlDelta;
                             const newTotalUl = (user.total_data_up || 0) + ulDelta;
                             updateTraffic.run(newTotalUl, newTotalDl, user.id);
-                            updateTrafficActivity.run(user.id);
+                            
+                            // Generate Local Time Timestamp (consistent with sessionService)
+                            const nowDate = new Date(now);
+                            const timestamp = new Date(nowDate.getTime() - (nowDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                            updateTrafficActivity.run(timestamp, user.id);
                         }
 
                         trafficCache[user.mac_address] = { dl: dlStat.bytes || 0, ul: ulStat.bytes || 0 };

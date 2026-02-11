@@ -191,11 +191,12 @@ class SessionService {
     // Helper to parse SQLite UTC timestamps correctly
     parseDbDate(dateStr) {
         if (!dateStr) return null;
-        // SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' in UTC
-        // If we parse this directly in JS, it might be treated as Local Time.
-        // We must ensure it's treated as UTC by appending 'Z' if missing.
+        // SQLite timestamps are stored as 'YYYY-MM-DD HH:MM:SS'
+        // If they are stored as Local Time (as generated in checkIdleUsers), we should parse them as Local Time.
+        // Appending 'Z' forces UTC interpretation, which causes "Future Time" issues if the string was Local Time.
         if (typeof dateStr === 'string' && !dateStr.endsWith('Z')) {
-            return new Date(dateStr + 'Z').getTime();
+            // Replace space with T for ISO-like parsing as Local Time
+            return new Date(dateStr.replace(' ', 'T')).getTime();
         }
         return new Date(dateStr).getTime();
     }
