@@ -5052,6 +5052,10 @@
             }, 1000);
         }
 
+        // Active Sessions Cache & Sort State
+        let cachedActiveUsers = [];
+        let currentActiveSort = { column: null, direction: 'asc' };
+
         async function loadActiveCodes() {
             try {
                 const res = await fetch('/api/admin/devices');
@@ -5063,8 +5067,12 @@
                     const serverTime = parseInt(serverTimeHeader);
                     if (!isNaN(serverTime)) {
                         // Calculate offset: ClientTime - ServerTime
-                        serverTimeOffset = Date.now() - serverTime;
-                        console.log('Time Sync: Server Time', new Date(serverTime).toLocaleTimeString(), 'Offset:', serverTimeOffset, 'ms');
+                        try {
+                            serverTimeOffset = Date.now() - serverTime;
+                            console.log('Time Sync: Server Time', new Date(serverTime).toLocaleTimeString(), 'Offset:', serverTimeOffset, 'ms');
+                        } catch(e) {
+                            window.serverTimeOffset = Date.now() - serverTime;
+                        }
                     }
                 }
 
@@ -5074,102 +5082,202 @@
                     throw new Error("Invalid data format received");
                 }
 
-                const tbody = document.querySelector('#active-codes-table tbody');
-                tbody.innerHTML = '';
-
-                const filterSelect = document.getElementById('active-codes-status-filter');
-                const statusFilter = filterSelect ? filterSelect.value : 'all';
-
-                const activeUsers = users.filter(u => u.session_code || u.time_remaining > 0);
-
-                let filteredUsers = activeUsers;
-                if (statusFilter === 'online') {
-                    filteredUsers = activeUsers.filter(u => u.is_connected && !u.is_paused);
-                } else if (statusFilter === 'offline_paused') {
-                    filteredUsers = activeUsers.filter(u => !u.is_connected || u.is_paused);
-                }
-
-                if (filteredUsers.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px;">No active codes found</td></tr>';
-                    return;
-                }
-
-                filteredUsers.forEach(u => {
-                    const tr = document.createElement('tr');
-                    tr.style.borderBottom = '1px solid #eee';
-                    
-                    const timeString = formatTime(u.time_remaining);
-                    const iface = u.interface || '-';
-                    const status = u.is_paused ? '<span style="color:orange">Paused</span>' : 
-                                   (u.is_connected ? '<span style="color:green">Connected</span>' : '<span style="color:gray">Disconnected</span>');
-
-                    // Calculate idle params
-                    const parseDate = (d) => {
-                        if (!d) return null;
-                        if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d + 'Z').getTime();
-                        return new Date(d).getTime();
-                    };
-                    // Use Max of Traffic or Active(Ping) to prevent false idle timeouts
-                    const tTraffic = u.last_traffic_at ? parseDate(u.last_traffic_at) : 0;
-                    const tActive = u.last_active_at ? parseDate(u.last_active_at) : 0;
-                    const lastTraffic = Math.max(tTraffic, tActive) || Date.now();
-                    
-                    const idleTimeoutMs = (u.effective_idle_timeout || 120) * 1000;
-                    
-                    const idleCellId = `idle-cell-${u.id}`;
-
-                    // Traffic Stats
-                    const dl = formatBytes(u.total_data_down || 0);
-                    const ul = formatBytes(u.total_data_up || 0);
-                    
-                    const toMbps = (bytes) => ((bytes || 0) * 8 / 1000000).toFixed(2);
-                    const dlSpeed = u.current_speed ? toMbps(u.current_speed.dl_speed) : '0.00';
-                    const ulSpeed = u.current_speed ? toMbps(u.current_speed.ul_speed) : '0.00';
-
-                    const totalCoins = Number(u.total_coins || 0);
-
-                    tr.innerHTML = `
-                        <td style="padding:10px; text-align:center;">
-                            ${u.last_voucher_code ? `<span style="font-weight:bold; color:#007bff;">${u.last_voucher_code}</span>` : (u.user_code || u.session_code || '-')}
-                        </td>
-                        <td style="padding:10px; text-align:center;">${u.mac_address}</td>
-                        <td style="padding:10px; text-align:center;">${(u.ip_address || '-').replace('::ffff:', '')}</td>
-                        <td style="padding:10px; text-align:center;">${iface}</td>
-                        <td style="padding:10px; text-align:center;">${timeString}</td>
-                        <td style="padding:10px; text-align:center;">₱${totalCoins.toFixed(2)}</td>
-                        <td style="padding:10px; text-align:center;">
-                            <div style="font-size:0.85rem; white-space:nowrap;">
-                                <span style="color:#2ecc71;">↓</span> ${dl} <span style="font-weight:bold; color:#27ae60;">(${dlSpeed} Mbps)</span>
-                                &nbsp;&nbsp;
-                                <span style="color:#3498db;">↑</span> ${ul} <span style="font-weight:bold; color:#2980b9;">(${ulSpeed} Mbps)</span>
-                            </div>
-                        </td>
-                        <td style="padding:10px; text-align:center;" class="idle-countdown-cell" 
-                            id="${idleCellId}"
-                            data-last-traffic="${lastTraffic}" 
-                            data-idle-timeout="${idleTimeoutMs}"
-                            data-is-paused="${u.is_paused ? 'true' : 'false'}">
-                            -
-                        </td>
-                        <td style="padding:10px; text-align:center;">${status}</td>
-                        <td style="padding:10px; text-align:center;">
-                            <div style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap;">
-                                <button class="btn btn-sm btn-primary" onclick="modifyCode('${u.id}', '${u.session_code || ''}', ${u.time_remaining}, ${u.download_speed || 5120}, ${u.upload_speed || 1024})">Edit</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteCode('${u.id}')">Delete</button>
-                            </div>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-
-                    // Initialize immediately
-                    const cell = tr.querySelector(`#${idleCellId}`);
-                    if (cell) updateIdleCell(cell);
-                });
-
-                startIdleCountdownUpdater();
+                // Cache the data
+                cachedActiveUsers = users.filter(u => u.session_code || u.time_remaining > 0);
+                
+                renderActiveSessionsTable();
 
             } catch (e) {
                 console.error("Error loading active codes", e);
+                const tbody = document.querySelector('#active-codes-table tbody');
+                if(tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:20px; color:red;">Error loading data: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderActiveSessionsTable() {
+             const tbody = document.querySelector('#active-codes-table tbody');
+             if (!tbody) return;
+             tbody.innerHTML = '';
+
+             const filterSelect = document.getElementById('active-codes-status-filter');
+             const statusFilter = filterSelect ? filterSelect.value : 'all';
+
+             let filteredUsers = [...cachedActiveUsers];
+
+             // Apply Filter
+             if (statusFilter === 'online') {
+                 filteredUsers = filteredUsers.filter(u => u.is_connected && !u.is_paused);
+             } else if (statusFilter === 'offline_paused') {
+                 filteredUsers = filteredUsers.filter(u => !u.is_connected || u.is_paused);
+             }
+
+             // Apply Sort
+             if (currentActiveSort.column) {
+                 filteredUsers.sort((a, b) => {
+                     let valA, valB;
+                     
+                     // Helper for string comparison
+                     const str = (v) => (v || '').toString().toLowerCase();
+                     // Helper for number comparison
+                     const num = (v) => Number(v) || 0;
+                     
+                     switch (currentActiveSort.column) {
+                         case 'code':
+                             valA = str(a.last_voucher_code || a.user_code || a.session_code);
+                             valB = str(b.last_voucher_code || b.user_code || b.session_code);
+                             break;
+                         case 'mac':
+                             valA = str(a.mac_address);
+                             valB = str(b.mac_address);
+                             break;
+                         case 'ip':
+                             valA = str(a.ip_address);
+                             valB = str(b.ip_address);
+                             break;
+                         case 'interface':
+                             valA = str(a.interface);
+                             valB = str(b.interface);
+                             break;
+                         case 'time':
+                             valA = num(a.time_remaining);
+                             valB = num(b.time_remaining);
+                             break;
+                         case 'coins':
+                             valA = num(a.total_coins);
+                             valB = num(b.total_coins);
+                             break;
+                         case 'traffic':
+                             valA = num(a.total_data_down) + num(a.total_data_up);
+                             valB = num(b.total_data_down) + num(b.total_data_up);
+                             break;
+                         case 'idle':
+                             const parseDate = (d) => {
+                                 if (!d) return 0;
+                                 if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d + 'Z').getTime();
+                                 return new Date(d).getTime();
+                             };
+                             const getIdleTime = (u) => {
+                                 const tTraffic = u.last_traffic_at ? parseDate(u.last_traffic_at) : 0;
+                                 const tActive = u.last_active_at ? parseDate(u.last_active_at) : 0;
+                                 return Math.max(tTraffic, tActive) || 0;
+                             };
+                             valA = getIdleTime(a);
+                             valB = getIdleTime(b);
+                             break;
+                         case 'status':
+                             const getStatusPriority = (u) => {
+                                 if (u.is_paused) return 2;
+                                 if (u.is_connected) return 1;
+                                 return 0;
+                             };
+                             valA = getStatusPriority(a);
+                             valB = getStatusPriority(b);
+                             break;
+                         default:
+                             return 0;
+                     }
+
+                     if (valA < valB) return currentActiveSort.direction === 'asc' ? -1 : 1;
+                     if (valA > valB) return currentActiveSort.direction === 'asc' ? 1 : -1;
+                     return 0;
+                 });
+             }
+
+             updateSortIndicators();
+
+             if (filteredUsers.length === 0) {
+                 tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px;">No active codes found</td></tr>';
+                 return;
+             }
+
+             filteredUsers.forEach(u => {
+                 const tr = document.createElement('tr');
+                 tr.style.borderBottom = '1px solid #eee';
+                 
+                 const timeString = formatTime(u.time_remaining);
+                 const iface = u.interface || '-';
+                 const status = u.is_paused ? '<span style="color:orange">Paused</span>' : 
+                                (u.is_connected ? '<span style="color:green">Connected</span>' : '<span style="color:gray">Disconnected</span>');
+
+                 const parseDate = (d) => {
+                     if (!d) return null;
+                     if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d + 'Z').getTime();
+                     return new Date(d).getTime();
+                 };
+                 const tTraffic = u.last_traffic_at ? parseDate(u.last_traffic_at) : 0;
+                 const tActive = u.last_active_at ? parseDate(u.last_active_at) : 0;
+                 const lastTraffic = Math.max(tTraffic, tActive) || Date.now();
+                 
+                 const idleTimeoutMs = (u.effective_idle_timeout || 120) * 1000;
+                 const idleCellId = `idle-cell-${u.id}`;
+
+                 const dl = formatBytes(u.total_data_down || 0);
+                 const ul = formatBytes(u.total_data_up || 0);
+                 
+                 const toMbps = (bytes) => ((bytes || 0) * 8 / 1000000).toFixed(2);
+                 const dlSpeed = u.current_speed ? toMbps(u.current_speed.dl_speed) : '0.00';
+                 const ulSpeed = u.current_speed ? toMbps(u.current_speed.ul_speed) : '0.00';
+
+                 const totalCoins = Number(u.total_coins || 0);
+
+                 tr.innerHTML = `
+                     <td style="padding:10px; text-align:center;">
+                         ${u.last_voucher_code ? `<span style="font-weight:bold; color:#007bff;">${u.last_voucher_code}</span>` : (u.user_code || u.session_code || '-')}
+                     </td>
+                     <td style="padding:10px; text-align:center;">${u.mac_address}</td>
+                     <td style="padding:10px; text-align:center;">${(u.ip_address || '-').replace('::ffff:', '')}</td>
+                     <td style="padding:10px; text-align:center;">${iface}</td>
+                     <td style="padding:10px; text-align:center;">${timeString}</td>
+                     <td style="padding:10px; text-align:center;">₱${totalCoins.toFixed(2)}</td>
+                     <td style="padding:10px; text-align:center;">
+                         <div style="font-size:0.85rem; white-space:nowrap;">
+                             <span style="color:#2ecc71;">↓</span> ${dl} <span style="font-weight:bold; color:#27ae60;">(${dlSpeed} Mbps)</span>
+                             &nbsp;&nbsp;
+                             <span style="color:#3498db;">↑</span> ${ul} <span style="font-weight:bold; color:#2980b9;">(${ulSpeed} Mbps)</span>
+                         </div>
+                     </td>
+                     <td style="padding:10px; text-align:center;" class="idle-countdown-cell" 
+                         id="${idleCellId}"
+                         data-last-traffic="${lastTraffic}" 
+                         data-idle-timeout="${idleTimeoutMs}"
+                         data-is-paused="${u.is_paused ? 'true' : 'false'}">
+                         -
+                     </td>
+                     <td style="padding:10px; text-align:center;">${status}</td>
+                     <td style="padding:10px; text-align:center;">
+                         <div style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap;">
+                             <button class="btn btn-sm btn-primary" onclick="modifyCode('${u.id}', '${u.session_code || ''}', ${u.time_remaining}, ${u.download_speed || 5120}, ${u.upload_speed || 1024})">Edit</button>
+                             <button class="btn btn-sm btn-danger" onclick="deleteCode('${u.id}')">Delete</button>
+                         </div>
+                     </td>
+                 `;
+                 tbody.appendChild(tr);
+
+                 const cell = tr.querySelector(`#${idleCellId}`);
+                 if (cell && typeof updateIdleCell === 'function') updateIdleCell(cell);
+             });
+             
+             if (typeof startIdleCountdownUpdater === 'function') startIdleCountdownUpdater();
+        }
+
+        function sortActiveSessions(column) {
+            if (currentActiveSort.column === column) {
+                currentActiveSort.direction = currentActiveSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentActiveSort.column = column;
+                currentActiveSort.direction = 'asc';
+            }
+            renderActiveSessionsTable();
+        }
+
+        function updateSortIndicators() {
+            document.querySelectorAll('.sort-indicator').forEach(el => el.textContent = '');
+            if (currentActiveSort.column) {
+                const th = document.getElementById(`th-sort-${currentActiveSort.column}`);
+                if (th) {
+                    const indicator = th.querySelector('.sort-indicator');
+                    if (indicator) indicator.textContent = currentActiveSort.direction === 'asc' ? ' ▲' : ' ▼';
+                }
             }
         }
 
