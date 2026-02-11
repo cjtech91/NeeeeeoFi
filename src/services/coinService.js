@@ -30,7 +30,7 @@ class CoinService extends EventEmitter {
         this.lastPulseTime = 0;
         this.debounceTimer = null;
         this.timer = null;
-        this.debounceTime = 50; // Ignore signal noise < 50ms
+        this.debounceTime = parseInt(configService.get('coin_debounce', 10)); // Default 10ms (was 50ms) to fix missed pulses
         this.commitTime = 300;  // Wait 300ms for more pulses before committing
         
         this.isBanned = false;
@@ -120,8 +120,9 @@ class CoinService extends EventEmitter {
 
         if (Gpio) {
             const initPin = async (pinNum, edge, label) => {
+                const debounce = this.debounceTime;
                 try {
-                    const gpio = new Gpio(pinNum, 'in', edge, { debounceTimeout: 50 });
+                    const gpio = new Gpio(pinNum, 'in', edge, { debounceTimeout: debounce });
                     return gpio;
                 } catch (err) {
                     if (err.code === 'EBUSY') {
@@ -133,14 +134,14 @@ class CoinService extends EventEmitter {
                         
                         try {
                             // Retry 1
-                            return new Gpio(pinNum, 'in', edge, { debounceTimeout: 50 });
+                            return new Gpio(pinNum, 'in', edge, { debounceTimeout: debounce });
                         } catch (retryErr) {
                             if (retryErr.code === 'EBUSY') {
                                 console.warn(`CoinService: GPIO ${pinNum} still BUSY. Trying second cleanup (2s)...`);
                                 this.forceCleanup(pinNum);
                                 await new Promise(resolve => setTimeout(resolve, 2000));
                                 try {
-                                    return new Gpio(pinNum, 'in', edge, { debounceTimeout: 50 });
+                                    return new Gpio(pinNum, 'in', edge, { debounceTimeout: debounce });
                                 } catch (err2) {
                                     console.error(`CoinService: Failed to init ${label} GPIO ${pinNum} after 2nd cleanup:`, err2.message);
                                     return null;
