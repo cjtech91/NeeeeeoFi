@@ -121,8 +121,11 @@ class VoucherService {
             }
 
             // 1. Mark voucher as used
-            db.prepare('UPDATE vouchers SET is_used = 1, used_by_user_id = ?, used_at = datetime("now", "localtime") WHERE id = ?')
-              .run(user.id, voucher.id);
+            const now = new Date();
+            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
+            db.prepare('UPDATE vouchers SET is_used = 1, used_by_user_id = ?, used_at = ? WHERE id = ?')
+              .run(user.id, timestamp, voucher.id);
 
             // 1.1 Calculate and Award Points
             const pointsEarningRate = Number(configService.get('points_earning_rate')) || 0;

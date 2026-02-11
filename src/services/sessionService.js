@@ -105,12 +105,15 @@ class SessionService {
                      // Adjusted for 1s interval (500 bytes/sec ~= 4Kbps).
                      // Ignores very light background noise but catches active usage.
                      if (totalDelta > 500) {
+                         const now = new Date();
+                         const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
                          db.prepare(`
                             UPDATE users 
-                            SET last_active_at = CURRENT_TIMESTAMP,
-                                last_traffic_at = CURRENT_TIMESTAMP
+                            SET last_active_at = ?,
+                                last_traffic_at = ?
                             WHERE ip_address = ? AND is_connected = 1
-                         `).run(ip);
+                         `).run(timestamp, timestamp, ip);
                          // console.log(`[Session] Activity detected for ${ip}: ${totalDelta} bytes. Resetting idle timer.`);
                      }
                 }

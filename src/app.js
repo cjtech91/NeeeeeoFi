@@ -828,15 +828,21 @@ async function finalizeCoinSession(sessionKey, reason) {
                 }
             };
             
-            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+            const now = new Date();
+            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, ?)').run('Hotspot', 'info', JSON.stringify(logData), timestamp);
         } catch (e) {
             console.error('[Log] Failed to log extension:', e);
         }
     } else {
+        const now = new Date();
+        const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
         db.prepare(`
             INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, last_active_at, last_traffic_at, interface) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-        `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, iface);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?)
+        `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, timestamp, timestamp, iface);
     }
 
     await networkService.allowUser(mac, ip);
@@ -1145,12 +1151,16 @@ app.use(async (req, res, next) => {
                 const newIface = await networkService.getInterfaceForIp(clientIp);
                 
                 // Update current user
-                db.prepare('UPDATE users SET ip_address = ?, interface = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(clientIp, newIface, user.id);
+                const now = new Date();
+                const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                db.prepare('UPDATE users SET ip_address = ?, interface = ?, updated_at = ? WHERE id = ?').run(clientIp, newIface, timestamp, user.id);
             }
             
             // Mark user connected in DB to reflect live status
             if (user.is_connected === 0) {
-                db.prepare('UPDATE users SET is_connected = 1, is_paused = 0, updated_at = CURRENT_TIMESTAMP, last_active_at = CURRENT_TIMESTAMP, last_traffic_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+                const now = new Date();
+                const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                db.prepare('UPDATE users SET is_connected = 1, is_paused = 0, updated_at = ?, last_active_at = ?, last_traffic_at = ? WHERE id = ?').run(timestamp, timestamp, timestamp, user.id);
                 user.is_connected = 1;
                 user.is_paused = 0;
             }
@@ -1161,7 +1171,9 @@ app.use(async (req, res, next) => {
             // Only disconnect if time is up (preserve Connected status if just Paused)
             if (user.time_remaining <= 0) {
                 if (user.is_connected !== 0) {
-                    db.prepare('UPDATE users SET is_connected = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+                    const now = new Date();
+                    const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                    db.prepare('UPDATE users SET is_connected = 0, updated_at = ? WHERE id = ?').run(timestamp, user.id);
                     user.is_connected = 0;
                 }
             }
@@ -4019,6 +4031,9 @@ app.post('/api/claim-free-time', async (req, res) => {
 
     try {
         if (user) {
+            const now = new Date();
+            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
             db.prepare(`
                 UPDATE users
                 SET time_remaining = time_remaining + ?,
@@ -4030,15 +4045,18 @@ app.post('/api/claim-free-time', async (req, res) => {
                     ip_address = COALESCE(?, ip_address),
                     client_id = COALESCE(?, client_id),
                     is_connected = 1,
-                    last_active_at = CURRENT_TIMESTAMP,
-                    last_traffic_at = CURRENT_TIMESTAMP
+                    last_active_at = ?,
+                    last_traffic_at = ?
                 WHERE id = ?
-            `).run(secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed, userCode, ip, clientId, user.id);
+            `).run(secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed, userCode, ip, clientId, timestamp, timestamp, user.id);
         } else {
+            const now = new Date();
+            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
             db.prepare(`
                 INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, upload_speed, download_speed, is_paused, is_connected, user_code, last_active_at, last_traffic_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, downloadSpeed, uploadSpeed, userCode);
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)
+            `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, downloadSpeed, uploadSpeed, userCode, timestamp, timestamp);
         }
 
         db.prepare('INSERT INTO free_time_claims (mac_address, interface) VALUES (?, ?)').run(mac, deviceConfig.free_time_vlan || null);
@@ -4110,14 +4128,17 @@ app.post('/api/voucher/redeem', async (req, res) => {
             errorMsg = `You are banned for ${banDuration} minutes due to too many failed attempts.`;
         }
 
+        const now = new Date();
+        const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
         db.prepare(`
             INSERT INTO access_control (mac_address, failed_attempts, banned_until, updated_at) 
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP) 
+            VALUES (?, ?, ?, ?) 
             ON CONFLICT(mac_address) DO UPDATE SET 
                 failed_attempts = ?,
                 banned_until = ?,
-                updated_at = CURRENT_TIMESTAMP
-        `).run(mac, currentFailures, bannedUntil, currentFailures, bannedUntil);
+                updated_at = ?
+        `).run(mac, currentFailures, bannedUntil, timestamp, currentFailures, bannedUntil, timestamp);
 
         res.json({ success: false, error: errorMsg });
     }
@@ -4127,7 +4148,10 @@ app.post('/api/voucher/redeem', async (req, res) => {
 app.post('/api/session/pause', async (req, res) => {
     if (req.user) {
         try {
-            db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.user.id);
+            const now = new Date();
+            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
+            db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, updated_at = ? WHERE id = ?').run(timestamp, req.user.id);
             
             const userCode = req.user.user_code || 'Unknown';
             const currentUser = db.prepare('SELECT time_remaining FROM users WHERE id = ?').get(req.user.id);
@@ -4142,7 +4166,7 @@ app.post('/api/session/pause', async (req, res) => {
                     mac_address: req.user.mac_address
                 }
             };
-            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, ?)').run('Hotspot', 'info', JSON.stringify(logData), timestamp);
         } catch (e) {}
         try {
             await networkService.blockUser(req.user.mac_address, req.user.ip_address);
@@ -4162,8 +4186,11 @@ app.post('/api/session/resume', async (req, res) => {
         let clientIp = req.ip;
         if (clientIp.startsWith('::ffff:')) clientIp = clientIp.substring(7);
 
+        const now = new Date();
+        const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+
         // Update IP in case it changed while paused, and set is_paused=0
-        db.prepare('UPDATE users SET is_paused = 0, ip_address = ?, last_active_at = CURRENT_TIMESTAMP, last_traffic_at = CURRENT_TIMESTAMP WHERE id = ?').run(clientIp, req.user.id);
+        db.prepare('UPDATE users SET is_paused = 0, ip_address = ?, last_active_at = ?, last_traffic_at = ? WHERE id = ?').run(clientIp, timestamp, timestamp, req.user.id);
         
         // Safety: Ensure no one else holds this IP
         db.prepare('UPDATE users SET ip_address = NULL WHERE ip_address = ? AND id != ?').run(clientIp, req.user.id);
@@ -4187,7 +4214,7 @@ app.post('/api/session/resume', async (req, res) => {
                     mac_address: req.user.mac_address
                 }
             };
-            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run('Hotspot', 'info', JSON.stringify(logData));
+            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, ?)').run('Hotspot', 'info', JSON.stringify(logData), timestamp);
         } catch (e) {
             console.error('[Log] Failed to log resume:', e);
         }

@@ -8,8 +8,12 @@ class LogService {
 
     log(level, category, message) {
         try {
-            db.prepare("INSERT INTO system_logs (level, category, message, timestamp) VALUES (?, ?, ?, datetime('now', 'localtime'))")
-              .run(level, category, message);
+            // Use JS Date to ensure consistent local time with Node.js process (matches sales/vouchers)
+            const now = new Date();
+            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+            
+            db.prepare("INSERT INTO system_logs (level, category, message, timestamp) VALUES (?, ?, ?, ?)")
+              .run(level, category, message, timestamp);
         } catch (e) {
             console.error("Failed to write log to DB:", e);
         }
