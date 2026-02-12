@@ -10,6 +10,19 @@ class SessionService {
         this.currentSpeeds = new Map();
     }
 
+    formatLogTime(seconds) {
+        if (seconds <= 0) return '00:00:00';
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        const pad = (v) => String(v).padStart(2, '0');
+        if (d > 0) {
+            return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
+        }
+        return `${pad(h)}:${pad(m)}:${pad(s)}`;
+    }
+
     startMonitoring(intervalMs = 5000) {
         if (this.checkInterval) clearInterval(this.checkInterval);
         
@@ -362,7 +375,7 @@ class SessionService {
                     type: 'session_resumed',
                     details: {
                         message: `User ${latestUser?.user_code || 'N/A'} resumed session.`,
-                        remaining_time: latestUser?.time_remaining || 0,
+                        remaining_time: this.formatLogTime(latestUser?.time_remaining || 0),
                         user_code: latestUser?.user_code,
                         mac_address: user.mac_address
                     }
@@ -405,7 +418,7 @@ class SessionService {
                     type: 'session_paused',
                     details: {
                         message: `User ${latestUser?.user_code || 'N/A'} paused. Reason: ${reason}`,
-                        remaining_time: latestUser?.time_remaining || 0,
+                        remaining_time: this.formatLogTime(latestUser?.time_remaining || 0),
                         user_code: latestUser?.user_code,
                         mac_address: user.mac_address
                     }

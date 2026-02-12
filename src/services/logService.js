@@ -184,7 +184,7 @@ class LogService {
                 timestamp: s.timestamp,
                 details: {
                     amount: s.amount,
-                    source: s.vendo_name || s.source,
+                    source: s.vendo_name || (s.source === 'hardware' ? 'Main Vendo' : s.source),
                     user_code: s.user_code,
                     mac_address: s.mac_address
                 }

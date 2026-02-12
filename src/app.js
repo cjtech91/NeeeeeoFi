@@ -405,17 +405,9 @@ const selectActiveUsers = db.prepare('SELECT id, user_code, mac_address, ip_addr
 const updateTime = db.prepare('UPDATE users SET time_remaining = ? WHERE id = ?');
 const updateUserInterfaceAndIp = db.prepare('UPDATE users SET interface = ?, ip_address = ? WHERE id = ?');
 const expireUser = db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0 WHERE id = ?');
-const updateTraffic = db.prepare('UPDATE users SET total_data_up = ?, total_data_down = ? WHERE id = ?');
-const updateTrafficActivity = db.prepare('UPDATE users SET last_traffic_at = ? WHERE id = ?');
 const pauseUser = db.prepare('UPDATE users SET is_paused = 1, is_connected = 1 WHERE id = ?');
 const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
 
-// Traffic Cache to calculate deltas
-// Key: mac_address, Value: { dl: last_dl_bytes, ul: last_ul_bytes }
-const trafficCache = {};
-
-// Counter for traffic sync (run every 5s)
-let trafficSyncCounter = 0;
 // Counter for interface sync (run every 10s - faster for roaming)
 let interfaceSyncCounter = 0;
 
@@ -432,12 +424,8 @@ const countdownLoop = async () => {
             const users = selectActiveUsers.all();
             
             // 2. Fetch Traffic Stats if sync interval (every 1s)
-            trafficSyncCounter += deltaSeconds;
-            let trafficStats = null;
-            if (trafficSyncCounter >= 1) {
-                trafficStats = await monitoringService.getClientTraffic(configService.get('lan_interface') || 'br0');
-                trafficSyncCounter = 0;
-            }
+            // Removed redundant traffic fetching (handled by sessionService.js)
+
 
             // 3. Interface Sync (every 10s)
             interfaceSyncCounter += deltaSeconds;
@@ -475,8 +463,7 @@ const countdownLoop = async () => {
                         console.error('Failed to log session expiration:', e);
                     }
 
-                    // Clean up cache
-                    delete trafficCache[user.mac_address];
+
                 } else {
                     // Update time
                     updateTime.run(newTime, user.id);
@@ -516,41 +503,7 @@ const countdownLoop = async () => {
                         }
                     }
 
-                    // Update Traffic & Check Idle (only if stats fetched)
-                    if (trafficStats) {
-                        const normalizedIp = normalizeIp(user.ip_address);
-                        const hasUl = !!normalizedIp && !!trafficStats.uploads[normalizedIp];
-                        const tcId = getTcClassIdFromIp(normalizedIp);
-                        const hasDlByIp = !!tcId && !!trafficStats.downloads[tcId];
-                        const dlStat = (tcId && trafficStats.downloads[tcId]) || { bytes: 0, idle: 0 };
-                        const ulStat = (normalizedIp && trafficStats.uploads[normalizedIp]) || { bytes: 0, idle: 0 };
-                        
-                        // Calculate Deltas
-                        const cache = trafficCache[user.mac_address];
-                        if (!cache) {
-                            trafficCache[user.mac_address] = { dl: dlStat.bytes || 0, ul: ulStat.bytes || 0 };
-                        }
-                        
-                        // Handle tc reset (if current bytes < last bytes, assume reset and take current as delta)
-                        const dlDelta = cache ? (dlStat.bytes >= cache.dl ? dlStat.bytes - cache.dl : dlStat.bytes) : 0;
-                        const ulDelta = cache ? (ulStat.bytes >= cache.ul ? ulStat.bytes - cache.ul : ulStat.bytes) : 0;
-                        
-                        // Update DB if there is traffic
-                        if (dlDelta > 0 || ulDelta > 0) {
-                            const newTotalDl = (user.total_data_down || 0) + dlDelta;
-                            const newTotalUl = (user.total_data_up || 0) + ulDelta;
-                            updateTraffic.run(newTotalUl, newTotalDl, user.id);
-                            
-                            // Generate Local Time Timestamp (consistent with sessionService)
-                            const nowDate = new Date(now);
-                            const timestamp = new Date(nowDate.getTime() - (nowDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
-                            updateTrafficActivity.run(timestamp, user.id);
-                        }
 
-                        trafficCache[user.mac_address] = { dl: dlStat.bytes || 0, ul: ulStat.bytes || 0 };
-                        
-                        // Auto-Pause on Idle is handled by SessionService (checkIdleUsers)
-                    }
                 }
             }
             // Update lastTick to now (roughly)
@@ -816,16 +769,16 @@ async function finalizeCoinSession(sessionKey, reason) {
             const totalRemaining = updatedUser ? updatedUser.time_remaining : 0;
             const previousRemaining = totalRemaining - secondsToAdd;
 
-            const sourceDetails = Object.entries(sourceAmounts || {}).map(([src, amt]) => `${src} (${amt})`).join(', ') || saleSource;
+            const sourceDetails = Object.entries(sourceAmounts || {}).map(([src, amt]) => `${src === 'hardware' ? 'Main Vendo' : src} (${amt})`).join(', ') || (saleSource === 'hardware' ? 'Main Vendo' : saleSource);
             
             const logData = {
                 type: 'session_extended',
                 details: {
                     message: `User ${userCode} extended time.`,
                     amount: amount,
-                    added_time: secondsToAdd,
-                    previous_remaining: previousRemaining,
-                    total_remaining: totalRemaining,
+                    added_time: sessionService.formatLogTime(secondsToAdd),
+                    previous_remaining: sessionService.formatLogTime(previousRemaining),
+                    total_remaining: sessionService.formatLogTime(totalRemaining),
                     source: sourceDetails,
                     user_code: userCode,
                     mac_address: mac
@@ -1783,11 +1736,11 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
         total_sales_today: db.prepare(`
             SELECT SUM(amount) as total
             FROM sales
-            WHERE date(datetime(timestamp, '+8 hours')) = date('now', '+8 hours')
+            WHERE date(timestamp) = date('now', '+8 hours')
         `).get().total || 0,
-        total_sales_week: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(datetime(timestamp, '+8 hours')) >= date('now', '+8 hours', '-7 days')").get().total || 0,
-        total_sales_month: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(datetime(timestamp, '+8 hours')) >= date('now', '+8 hours', 'start of month')").get().total || 0,
-        total_sales_year: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(datetime(timestamp, '+8 hours')) >= date('now', '+8 hours', 'start of year')").get().total || 0,
+        total_sales_week: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(timestamp) >= date('now', '+8 hours', '-7 days')").get().total || 0,
+        total_sales_month: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(timestamp) >= date('now', '+8 hours', 'start of month')").get().total || 0,
+        total_sales_year: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(timestamp) >= date('now', '+8 hours', 'start of year')").get().total || 0,
         clients_connected: db.prepare("SELECT COUNT(*) as c FROM users WHERE is_connected = 1 AND is_paused = 0 AND time_remaining > 0").get().c || 0,
         clients_paused: db.prepare("SELECT COUNT(*) as c FROM users WHERE is_paused = 1 AND time_remaining > 0").get().c || 0,
         clients_disconnected: db.prepare("SELECT COUNT(*) as c FROM users WHERE is_connected = 0 AND is_paused = 0 AND time_remaining > 0").get().c || 0,
@@ -4165,7 +4118,7 @@ app.post('/api/session/pause', async (req, res) => {
                 type: 'session_paused',
                 details: {
                     message: `User ${userCode} paused their session.`,
-                    remaining_time: remaining,
+                    remaining_time: sessionService.formatLogTime(remaining),
                     user_code: userCode,
                     mac_address: req.user.mac_address
                 }
@@ -4213,7 +4166,7 @@ app.post('/api/session/resume', async (req, res) => {
                 type: 'session_resumed',
                 details: {
                     message: `User ${userCode} resumed their session.`,
-                    remaining_time: remaining,
+                    remaining_time: sessionService.formatLogTime(remaining),
                     user_code: userCode,
                     mac_address: req.user.mac_address
                 }

@@ -7411,6 +7411,11 @@
             return parts.join(' ');
         }
 
+        function formatSource(source) {
+            if (!source) return 'Unknown';
+            return source.replace(/hardware/gi, 'Main Vendo');
+        }
+
         async function loadLogs(category) {
             const displayArea = document.getElementById('log-display-area');
             const categorySelect = document.getElementById('log-category-filter');
@@ -7489,20 +7494,24 @@
                                         <span style="color: var(--text-muted);">used by ${d.mac_address}</span>`;
                         } else if (log.type === 'coin_insert') {
                             typeLabel = `<span style="color: var(--status-active);">[COIN]</span>`;
-                            content = `<span style="color: var(--log-text);">₱${d.amount} inserted via ${d.source}</span> 
+                            content = `<span style="color: var(--log-text);">₱${d.amount} inserted via ${formatSource(d.source)}</span> 
                                        <span style="color: var(--text-muted);">by ${d.mac_address} ${d.user_code ? `(User: ${d.user_code})` : ''}</span>`;
                         } else if (log.type === 'session_paused') {
                             typeLabel = `<span style="color: var(--info);">[PAUSED]</span>`;
-                            content = `<span style="color: var(--log-text);">Session Paused. Remaining: ${formatDuration(d.remaining_time)}</span>
+                            const rTime = isNaN(d.remaining_time) ? d.remaining_time : formatTime(d.remaining_time);
+                            content = `<span style="color: var(--log-text);">Session Paused. Remaining: ${rTime}</span>
                                        <span style="color: var(--text-muted);">User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
                         } else if (log.type === 'session_resumed') {
                             typeLabel = `<span style="color: var(--info);">[RESUMED]</span>`;
-                            content = `<span style="color: var(--log-text);">Session Resumed. Remaining: ${formatDuration(d.remaining_time)}</span>
+                            const rTime = isNaN(d.remaining_time) ? d.remaining_time : formatTime(d.remaining_time);
+                            content = `<span style="color: var(--log-text);">Session Resumed. Remaining: ${rTime}</span>
                                        <span style="color: var(--text-muted);">User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
                         } else if (log.type === 'session_extended') {
                             typeLabel = `<span style="color: #9b59b6;">[EXTENDED]</span>`;
-                            content = `<span style="color: var(--log-text);">Session Extended by ${formatDuration(d.added_time)}. Total Remaining: ${formatDuration(d.total_remaining)}</span>
-                                       <span style="color: var(--text-muted);">Source: ${d.source} | User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
+                            const addedTime = isNaN(d.added_time) ? d.added_time : formatTime(d.added_time);
+                            const totalTime = isNaN(d.total_remaining) ? d.total_remaining : formatTime(d.total_remaining);
+                            content = `<span style="color: var(--log-text);">Session Extended by ${addedTime}. Total Remaining: ${totalTime}</span>
+                                       <span style="color: var(--text-muted);">Source: ${formatSource(d.source)} | User: ${d.user_code || 'N/A'} (MAC: ${d.mac_address})</span>`;
                         } else if (log.type === 'session_expired') {
                              typeLabel = `<span style="color: var(--status-expired);">[EXPIRED]</span>`;
                              content = `<span style="color: var(--log-text);">Session Expired</span> 
