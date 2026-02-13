@@ -5755,25 +5755,7 @@
                                             <button class="btn btn-primary" onclick="saveSubVendoKey()">Save</button>
                                         </div>
                                         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">
-                                            Used to authenticate ESP8266/ESP32 devices.
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Firmware Downloads -->
-                                    <div class="form-group" style="margin-top:20px; border-top:1px solid var(--border); padding-top:15px;">
-                                        <label style="display:block; font-weight:600; margin-bottom:10px;">Firmware Downloads</label>
-                                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                                            <a href="/firmware/esp8266_subvendo/esp8266_subvendo.ino" download class="btn" style="border:1px solid var(--border); background:var(--bg-body); color:var(--text-main); text-align:center; display:flex; flex-direction:column; align-items:center; padding:15px; gap:5px; text-decoration:none;">
-                                                <span style="font-weight:bold;">ESP8266</span>
-                                                <span style="font-size:0.8rem; color:var(--text-muted);">Source Code (.ino)</span>
-                                            </a>
-                                            <a href="/firmware/esp32_subvendo/esp32_subvendo.ino" download class="btn" style="border:1px solid var(--border); background:var(--bg-body); color:var(--text-main); text-align:center; display:flex; flex-direction:column; align-items:center; padding:15px; gap:5px; text-decoration:none;">
-                                                <span style="font-weight:bold;">ESP32</span>
-                                                <span style="font-size:0.8rem; color:var(--text-muted);">Source Code (.ino)</span>
-                                            </a>
-                                        </div>
-                                        <div style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">
-                                            Compile and upload using Arduino IDE. Ensure required libraries are installed.
+                                            Used to authenticate ESP8266 devices.
                                         </div>
                                     </div>
                                     <!-- Main Vendo Free Time Modal (Moved to bottom) -->
@@ -12027,7 +12009,7 @@
             <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
                 <div>
                     <label style="display:block; font-weight:600; margin-bottom:4px;">Session Code</label>
-                    <input type="text" id="edit-code-input" placeholder="Enter Code" style="margin:0; width:100%; padding:10px; border:1px solid var(--border); background:var(--bg-body); color:var(--text-main); border-radius:4px; box-sizing:border-box;">
+                    <input type="text" id="edit-code-input" placeholder="Enter Code" disabled style="margin:0; width:100%; padding:10px; border:1px solid var(--border); background:var(--bg-body); color:var(--text-muted); border-radius:4px; box-sizing:border-box; opacity: 0.7; cursor: not-allowed;">
                 </div>
                 <div>
                     <label style="display:block; font-weight:600; margin-bottom:4px;">Time Remaining (d H:M:S)</label>

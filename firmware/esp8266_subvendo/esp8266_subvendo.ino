@@ -15,8 +15,6 @@ struct Config {
   int coinPin;
   int relayPin;
   int pesoPerPulse;
-  int standbyLedPin;
-  int insertLedPin;
   bool configured;
 };
 
@@ -26,17 +24,8 @@ DNSServer dnsServer;
 volatile uint16_t coinPulseCount = 0;
 volatile unsigned long lastCoinPulseMs = 0;
 unsigned long lastCoinSendMs = 0;
-
-// Default Pin Configuration (from User Request)
-const int DEFAULT_COIN_PIN = 12;
-const int DEFAULT_RELAY_PIN = 14;
-const int DEFAULT_STANDBY_LED_PIN = 2;
-const int DEFAULT_INSERT_LED_PIN = 0;
-
-uint8_t currentCoinPin = DEFAULT_COIN_PIN;
-uint8_t currentRelayPin = DEFAULT_RELAY_PIN;
-uint8_t currentStandbyLedPin = DEFAULT_STANDBY_LED_PIN;
-uint8_t currentInsertLedPin = DEFAULT_INSERT_LED_PIN;
+uint8_t currentCoinPin = 6;
+uint8_t currentRelayPin = 5;
 
 // --- Constants ---
 const int EEPROM_SIZE = 512;
@@ -67,11 +56,11 @@ String extractJsonString(const String& payload, const String& key, String defaul
 void setup() {
   Serial.begin(115200);
   EEPROM.begin(EEPROM_SIZE);
-  pinMode(DEFAULT_STANDBY_LED_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
   pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
   
   // Turn off LED initially (HIGH is usually off for ESP8266 built-in LED)
-  digitalWrite(DEFAULT_STANDBY_LED_PIN, HIGH);
+  digitalWrite(LED_PIN, HIGH);
 
   delay(2000);
   Serial.println("\n\n--- NeoFi Sub Vendo Node ---");
@@ -81,8 +70,8 @@ void setup() {
     Serial.println("Reset Button Pressed: Forcing Config Mode...");
     // Blink fast to indicate reset
     for(int i=0; i<10; i++) {
-        digitalWrite(DEFAULT_STANDBY_LED_PIN, LOW); delay(50);
-        digitalWrite(DEFAULT_STANDBY_LED_PIN, HIGH); delay(50);
+        digitalWrite(LED_PIN, LOW); delay(50);
+        digitalWrite(LED_PIN, HIGH); delay(50);
     }
     startAPMode();
     return;
@@ -100,7 +89,7 @@ void setup() {
 }
 
 void checkFactoryReset() {
-  // Check D4 (GPIO2 / Standby Pin) for Grounding
+  // Check D4 (GPIO2 / LED_PIN) for Grounding
   // D4 is usually HIGH (LED OFF) or driven LOW (LED ON).
   // We momentarily switch to INPUT_PULLUP to read external state.
   
@@ -111,16 +100,16 @@ void checkFactoryReset() {
     lastCheck = millis();
     
     // Save current mode/state
-    // We assume currentStandbyLedPin is OUTPUT. 
+    // We assume LED_PIN is OUTPUT. 
     // If user grounds D4, it will read LOW.
     // If floating (pullup), it reads HIGH.
     
-    pinMode(currentStandbyLedPin, INPUT_PULLUP);
+    pinMode(LED_PIN, INPUT_PULLUP);
     delayMicroseconds(100); 
-    int val = digitalRead(currentStandbyLedPin);
+    int val = digitalRead(LED_PIN);
     
     // Restore
-    pinMode(currentStandbyLedPin, OUTPUT);
+    pinMode(LED_PIN, OUTPUT);
     // Note: We don't know exact previous state here easily without global tracking, 
     // but in loop() we update LED state immediately anyway.
     
@@ -137,8 +126,8 @@ void checkFactoryReset() {
       
       // Blink Fast 5 times to confirm
       for(int i=0; i<5; i++) {
-        digitalWrite(currentStandbyLedPin, LOW); delay(100);
-        digitalWrite(currentStandbyLedPin, HIGH); delay(100);
+        digitalWrite(LED_PIN, LOW); delay(100);
+        digitalWrite(LED_PIN, HIGH); delay(100);
       }
       
       config.configured = false;
@@ -159,31 +148,30 @@ void loop() {
   if (!config.configured) {
     dnsServer.processNextRequest();
     server.handleClient();
-    // Blink slowly in AP mode (Standby LED)
+    // Blink slowly in AP mode
     static unsigned long lastBlink = 0;
     if (millis() - lastBlink > 500) {
       lastBlink = millis();
-      digitalWrite(currentStandbyLedPin, !digitalRead(currentStandbyLedPin));
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
     }
   } else {
     // Client Mode Loop
     server.handleClient(); // Handle incoming requests (like /relay)
 
     if (WiFi.status() == WL_CONNECTED) {
-      // Logic: Standby LED always ON (Heartbeat)
-      // Insert LED: Blink on activity, otherwise ON (Ready)
+      // LED Logic: ON if Relay is ON (Active Low) OR Pulse Detected recently (within 500ms)
+      bool relayOn = (digitalRead(currentRelayPin) == LOW); 
+      // If Active High, logic is inverted
+      if (strcmp(config.relayActiveState, "HIGH") == 0) {
+         relayOn = (digitalRead(currentRelayPin) == HIGH);
+      }
       
       bool pulseActive = (millis() - lastCoinPulseMs < 500);
 
-      // Standby LED: Always ON (LOW for Active LOW)
-      digitalWrite(currentStandbyLedPin, LOW); 
-
-      // Insert LED: Blink on activity, otherwise ON
-      if (pulseActive) {
-          // Fast Blink
-          digitalWrite(currentInsertLedPin, (millis() / 100) % 2 == 0 ? LOW : HIGH);
+      if (relayOn || pulseActive) {
+         digitalWrite(LED_PIN, LOW); // LED ON
       } else {
-          digitalWrite(currentInsertLedPin, LOW); // Solid ON = Ready
+         digitalWrite(LED_PIN, HIGH); // LED OFF
       }
 
       if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 300 && (millis() - lastCoinSendMs) > 250) {
@@ -207,9 +195,7 @@ void loop() {
       static unsigned long lastBlink = 0;
       if (millis() - lastBlink > 200) {
         lastBlink = millis();
-        digitalWrite(currentStandbyLedPin, !digitalRead(currentStandbyLedPin));
-        // Turn off Insert LED
-        digitalWrite(currentInsertLedPin, HIGH); // OFF (Active LOW)
+        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
       }
     }
   }
@@ -224,12 +210,8 @@ void loadConfig() {
     config.configured = false;
   }
 
-  // Set Defaults if invalid
-  if (config.coinPin < 0 || config.coinPin > 16) config.coinPin = DEFAULT_COIN_PIN;
-  if (config.relayPin < 0 || config.relayPin > 16) config.relayPin = DEFAULT_RELAY_PIN;
-  if (config.standbyLedPin < 0 || config.standbyLedPin > 16) config.standbyLedPin = DEFAULT_STANDBY_LED_PIN;
-  if (config.insertLedPin < 0 || config.insertLedPin > 16) config.insertLedPin = DEFAULT_INSERT_LED_PIN;
-  
+  if (config.coinPin < 0 || config.coinPin > 16) config.coinPin = 6;
+  if (config.relayPin < 0 || config.relayPin > 16) config.relayPin = 5;
   if (config.pesoPerPulse < 1 || config.pesoPerPulse > 100) config.pesoPerPulse = 1;
   if (config.relayActiveState[0] == 0 || config.relayActiveState[0] == 0xFF) strcpy(config.relayActiveState, "LOW");
 }
@@ -509,14 +491,8 @@ void handleSave() {
     // serverIp.toCharArray(config.serverIp, 16);
     key.toCharArray(config.subVendoKey, 32);
     name.toCharArray(config.deviceName, 32);
-    
-    // Set Defaults for Hardware Pins (Do not overwrite if already set, but here we are saving new config)
-    // If this is a fresh save, we should respect the defaults defined at top of file
-    config.coinPin = DEFAULT_COIN_PIN;
-    config.relayPin = DEFAULT_RELAY_PIN;
-    config.standbyLedPin = DEFAULT_STANDBY_LED_PIN;
-    config.insertLedPin = DEFAULT_INSERT_LED_PIN;
-    
+    config.coinPin = 6;
+    config.relayPin = 5;
     config.pesoPerPulse = 1;
     strcpy(config.relayActiveState, "LOW"); // Default
 
@@ -630,16 +606,27 @@ String getMacAddress() {
 }
 
 uint8_t resolvePin(int configuredPin, uint8_t defaultPin) {
-  // Pass-through raw GPIO numbers. Removed legacy D-pin mapping.
+  if (configuredPin >= 0 && configuredPin <= 8) {
+    switch (configuredPin) {
+      case 0: return 16;
+      case 1: return 5;
+      case 2: return 4;
+      case 3: return 0;
+      case 4: return 2;
+      case 5: return 14;
+      case 6: return 12;
+      case 7: return 13;
+      case 8: return 15;
+      default: return defaultPin;
+    }
+  }
   if (configuredPin >= 0 && configuredPin <= 16) return (uint8_t)configuredPin;
   return defaultPin;
 }
 
 void applyHardwareConfig() {
-  currentCoinPin = resolvePin(config.coinPin, DEFAULT_COIN_PIN);
-  currentRelayPin = resolvePin(config.relayPin, DEFAULT_RELAY_PIN);
-  currentStandbyLedPin = resolvePin(config.standbyLedPin, DEFAULT_STANDBY_LED_PIN);
-  currentInsertLedPin = resolvePin(config.insertLedPin, DEFAULT_INSERT_LED_PIN);
+  currentCoinPin = resolvePin(config.coinPin, 12);
+  currentRelayPin = resolvePin(config.relayPin, 14);
 
   detachInterrupt(currentCoinPin);
   pinMode(currentCoinPin, INPUT_PULLUP);
@@ -648,53 +635,12 @@ void applyHardwareConfig() {
   pinMode(currentRelayPin, OUTPUT);
   
   // Set default state based on Active Config
+  // If Active HIGH -> OFF is LOW
+  // If Active LOW -> OFF is HIGH
   bool activeHigh = (strcmp(config.relayActiveState, "HIGH") == 0);
   digitalWrite(currentRelayPin, activeHigh ? LOW : HIGH); 
   
-  // LED Setup
-  pinMode(currentStandbyLedPin, OUTPUT);
-  pinMode(currentInsertLedPin, OUTPUT);
-
-  // Default LED States
-  // Standby: ON (High if active high, Low if active low? Usually LEDs on ESP8266 are Active LOW if built-in)
-  // BUT user said "GPIO 2" for Standby LED. On NodeMCU, GPIO 2 is Built-in LED (Active LOW).
-  // User said "GPIO 0" for Insert LED. GPIO 0 is also often Active LOW (Flash button pullup).
-  // I will assume Active LOW for built-in behavior compatibility, or Active HIGH for external modules?
-  // ESP32 code uses Active HIGH for external LEDs.
-  // ESP8266 code used Active LOW for built-in LED (LOW = ON).
-  // I will stick to Active LOW for GPIO 2 (Standby) because it's likely the built-in LED.
-  // For GPIO 0 (Insert), if it's an external LED, it might be Active High.
-  // However, GPIO 0 needs to be High at boot. If I drive it Low to turn ON, that's fine.
-  // Let's assume Active LOW for GPIO 2 (Standby) and Active HIGH for GPIO 0 (Insert)??
-  // No, that's confusing.
-  // The ESP32 code I wrote: digitalWrite(pin, HIGH) // Default ON. (Active HIGH).
-  // If the user connects an LED module to ESP8266, they usually connect Anode to Pin, Cathode to GND (Active HIGH).
-  // OR Anode to VCC, Cathode to Pin (Active LOW).
-  // The built-in LED on GPIO 2 is Active LOW.
-  // If I use `digitalWrite(currentStandbyLedPin, LOW)` it turns ON the built-in LED.
-  // If the user uses an external LED on GPIO 2, they might wire it differently.
-  // Given the image shows "Standby LED: GPIO 2", and GPIO 2 is the built-in LED, I'll assume they want the built-in LED behavior (Active LOW).
-  // But wait, the user says "Insert LED: GPIO 0".
-  // If I assume Active LOW for both:
-  
-  digitalWrite(currentStandbyLedPin, LOW); // ON (Active LOW)
-  digitalWrite(currentInsertLedPin, HIGH); // OFF (Active LOW) - Wait, Insert LED should be ON or OFF?
-  // ESP32 logic: Standby ON, Insert ON (Ready).
-  // If Active LOW:
-  // Standby: LOW (ON)
-  // Insert: LOW (ON)
-  
-  // Let's check loop logic in ESP32:
-  // digitalWrite(currentStandbyLedPin, HIGH); (ON) -> Active HIGH assumed.
-  // digitalWrite(currentInsertLedPin, HIGH); (ON) -> Active HIGH assumed.
-  
-  // For ESP8266 GPIO 2 (Built-in), HIGH is OFF.
-  // If I treat it as Active HIGH, it will be OFF when I want it ON.
-  // This is a discrepancy.
-  // I'll assume Active LOW for ESP8266 because of the specific pins (0 and 2 are boot strapping pins, usually pulled high, so driving low is the active operation).
-  
-  digitalWrite(currentStandbyLedPin, LOW); // ON (Active LOW)
-  digitalWrite(currentInsertLedPin, LOW);  // ON (Active LOW)
+  digitalWrite(LED_PIN, HIGH); // Default LED OFF
 }
 
 void IRAM_ATTR onCoinPulse() {

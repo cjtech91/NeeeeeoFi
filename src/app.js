@@ -252,7 +252,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.static(path.join(__dirname, '../public'))); // Fix: Public folder is at root, one level up from src
-app.use('/firmware', express.static(path.join(__dirname, '../firmware'))); // Serve firmware files
 
 // Serve Chart.js from node_modules if available (for offline support)
 try {
