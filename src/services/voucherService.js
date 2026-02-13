@@ -137,6 +137,7 @@ class VoucherService {
             }
 
             // 2. Add time, update speeds, and set user_code if missing
+            const newCode = generateUniqueUserCode();
             db.prepare(`
                 UPDATE users 
                 SET time_remaining = time_remaining + ?, 
@@ -145,6 +146,7 @@ class VoucherService {
                 upload_speed = COALESCE(?, upload_speed), 
                 download_speed = COALESCE(?, download_speed),
                 user_code = COALESCE(user_code, ?),
+                session_code = COALESCE(session_code, user_code, ?),
                 client_id = ?,
                 is_connected = 1,
                 is_paused = 0,
@@ -152,7 +154,7 @@ class VoucherService {
                 last_traffic_at = CURRENT_TIMESTAMP,
                 interface = COALESCE(?, interface)
                 WHERE id = ?
-            `).run(voucher.duration, voucher.duration, voucher.upload_speed, voucher.download_speed, generateUniqueUserCode(), clientId, iface, user.id);
+            `).run(voucher.duration, voucher.duration, voucher.upload_speed, voucher.download_speed, newCode, newCode, clientId, iface, user.id);
             
             // Apply speed limit
             const bandwidthService = require('./bandwidthService'); // Lazy load to avoid circular dep

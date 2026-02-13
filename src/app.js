@@ -754,6 +754,7 @@ async function finalizeCoinSession(sessionKey, reason) {
                 download_speed = COALESCE(?, download_speed), 
                 is_paused = 0,
                 user_code = COALESCE(user_code, ?),
+                session_code = COALESCE(session_code, user_code, ?),
                 ip_address = COALESCE(?, ip_address),
                 client_id = ?,
                 is_connected = 1,
@@ -761,7 +762,7 @@ async function finalizeCoinSession(sessionKey, reason) {
                 last_traffic_at = CURRENT_TIMESTAMP,
                 interface = COALESCE(?, interface)
             WHERE id = ?
-        `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, ip, clientId, iface, user.id);
+        `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, userCode, ip, clientId, iface, user.id);
 
         try {
             // Re-fetch user to get the accurate new total time
@@ -797,9 +798,9 @@ async function finalizeCoinSession(sessionKey, reason) {
         const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
 
         db.prepare(`
-            INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, last_active_at, last_traffic_at, interface) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?)
-        `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, timestamp, timestamp, iface);
+            INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, session_code, last_active_at, last_traffic_at, interface) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
+        `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, userCode, timestamp, timestamp, iface);
     }
 
     await networkService.allowUser(mac, ip);
