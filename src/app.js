@@ -1366,12 +1366,17 @@ app.post('/api/auth/login', (req, res) => {
     if (admin && admin.password_hash === password) {
         logService.info('SYSTEM', `Admin login successful (User: ${username})`);
         
-        // Generate new persistent token
-        const newToken = crypto.randomBytes(32).toString('hex');
-        db.prepare('UPDATE admins SET session_token = ? WHERE id = 1').run(newToken);
-        currentAdminSessionToken = newToken;
+        // Multi-device login support: Reuse existing token if available, else generate new
+        let sessionToken = admin.session_token;
+        if (!sessionToken) {
+            sessionToken = crypto.randomBytes(32).toString('hex');
+            db.prepare('UPDATE admins SET session_token = ? WHERE id = 1').run(sessionToken);
+        }
+        
+        // Update global token reference
+        currentAdminSessionToken = sessionToken;
 
-        res.cookie('admin_session', currentAdminSessionToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+        res.cookie('admin_session', sessionToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
         res.json({ success: true });
     } else {
         logService.warn('SYSTEM', `Admin login failed (User: ${username})`);
