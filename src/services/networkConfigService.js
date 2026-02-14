@@ -157,18 +157,29 @@ class NetworkConfigService {
             console.error("Failed to update WAN interface in DB", e);
         }
 
-        // Force write PPPoE config immediately if mode is pppoe
+        const pppoeScript = path.join(__dirname, '../scripts/init_pppoe.sh');
+        
+        // 1. Always stop any existing PPPoE session first (to ensure clean state)
+        console.log('Stopping any existing PPPoE sessions...');
+        await new Promise((resolve) => {
+            // Ensure executable
+            exec(`chmod +x ${pppoeScript}`);
+            // Run stop with dummy args
+            exec(`${pppoeScript} none none none stop`, (err) => {
+                if (err) console.log('PPPoE Stop (benign error or not running):', err.message);
+                resolve();
+            });
+        });
+
+        // 2. Configure PPPoE (Write files) if mode is pppoe
         if (this.config.wan.mode === 'pppoe') {
             const { interface: iface, pppoe } = this.config.wan;
             if (iface && pppoe && pppoe.username && pppoe.password) {
-                 const pppoeScript = path.join(__dirname, '../scripts/init_pppoe.sh');
                  const dns1 = pppoe.dns1 || '';
                  const dns2 = pppoe.dns2 || '';
                  
-                 console.log('Forcing PPPoE configuration write...');
+                 console.log('Writing PPPoE configuration...');
                  await new Promise((resolve) => {
-                     // Ensure executable
-                     exec(`chmod +x ${pppoeScript}`);
                      exec(`${pppoeScript} ${iface} "${pppoe.username}" "${pppoe.password}" configure "${dns1}" "${dns2}"`, (err, stdout, stderr) => {
                          if (err) console.error('Failed to write PPPoE config:', stderr || err.message);
                          else console.log('PPPoE config written successfully.');
@@ -178,10 +189,32 @@ class NetworkConfigService {
             }
         }
 
+        // 3. Apply Network Changes (Netplan)
+        // This will configure the physical interface (e.g. eth0 to manual if PPPoE, or dynamic/static otherwise)
         try {
             await this.applyNetworkChanges();
         } catch (e) {
             console.error("Failed to apply changes", e);
+        }
+        
+        // 4. Start PPPoE if mode is pppoe
+        if (this.config.wan.mode === 'pppoe') {
+            const { interface: iface, pppoe } = this.config.wan;
+            if (iface && pppoe && pppoe.username && pppoe.password) {
+                 const dns1 = pppoe.dns1 || '';
+                 const dns2 = pppoe.dns2 || '';
+                 
+                 console.log('Starting PPPoE connection...');
+                 await new Promise((resolve) => {
+                     // We use 'start' action which runs 'pppd call ... updetach'
+                     // This waits until connection is established or fails
+                     exec(`${pppoeScript} ${iface} "${pppoe.username}" "${pppoe.password}" start "${dns1}" "${dns2}"`, (err, stdout, stderr) => {
+                         if (err) console.error('Failed to start PPPoE:', stderr || err.message);
+                         else console.log('PPPoE started successfully.');
+                         resolve();
+                     });
+                 });
+            }
         }
         
         return true;
