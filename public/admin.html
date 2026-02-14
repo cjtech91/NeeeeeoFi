@@ -2890,7 +2890,7 @@
                                         <span class="info-value" id="clients-paused-count">0</span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="info-label">Disconnected</span>
+                                        <span class="info-label">DCd./EXP</span>
                                         <span class="info-value" id="clients-disconnected-count">0</span>
                                     </div>
                                 </div>
@@ -4268,6 +4268,65 @@
                                                     <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/>
                                                 </svg>
                                                 <span>Action</span>
+                                            </span>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody style="color:var(--text-main);"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- EXPIRED SESSION Card -->
+                    <div class="card" style="margin-top: 25px;">
+                        <div class="card-header" id="expired-sessions-header">
+                            <div class="card-title" id="expired-sessions-header-title">EXPIRED SESSION</div>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <button class="btn btn-sm btn-primary" onclick="loadExpiredSessions()">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="table-container" style="max-height: 500px; overflow-y: auto;">
+                            <table id="expired-sessions-table" class="sales-grid-table" style="width:100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: var(--table-header-bg); text-align:center;">
+                                        <th style="padding:10px; text-align:center;">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M7 2v2H5v14h14V4h-2V2h-2v2H9V2H7zm0 6h10v8H7V8z"/>
+                                                </svg>
+                                                <span>CODE</span>
+                                            </span>
+                                        </th>
+                                        <th style="padding:10px; text-align:center;">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M3 5v14h18V5H3zm16 12H5V7h14v10zM7 9h5v2H7V9zm0 4h3v2H7v-2z"/>
+                                                </svg>
+                                                <span>MAC ADDRESS</span>
+                                            </span>
+                                        </th>
+                                        <th style="padding:10px; text-align:center;">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M3 5v14h18V5H3zm16 12H5V7h14v10zM7 9h3v2H7V9zm0 4h5v2H7v-2z"/>
+                                                </svg>
+                                                <span>IP ADDRESS</span>
+                                            </span>
+                                        </th>
+                                        <th style="padding:10px; text-align:center;">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M12 1C8.13 1 5 4.13 5 8v2H4a1 1 0 0 0-1 1v9h18v-9a1 1 0 0 0-1-1h-1V8c0-3.87-3.13-7-7-7zM9 14h6v2H9v-2z"/>
+                                                </svg>
+                                                <span>TOTAL COINS</span>
+                                            </span>
+                                        </th>
+                                        <th style="padding:10px; text-align:center;">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M12 2A10 10 0 1 0 22 12A10.011 10.011 0 0 0 12 2zm-1 15l-5-5l1.41-1.41L11 14.17l5.59-5.58L18 10z"/>
+                                                </svg>
+                                                <span>STATUS</span>
                                             </span>
                                         </th>
                                     </tr>
@@ -6966,11 +7025,13 @@
                 loadVoucherBatches();
                 loadVouchersData();
                 loadActiveCodes();
+                loadExpiredSessions();
                 
                 // 1. Refresh Vouchers/Batches every 5s (Less frequent)
                 IntervalManager.start('voucher', () => {
                     loadVoucherBatches();
                     loadVouchersData();
+                    loadExpiredSessions();
                 }, 5000);
 
                 // 2. Refresh Active Codes every 1s (Real-time traffic/time)
@@ -7091,7 +7152,9 @@
                 const disconnectedEl = document.getElementById('clients-disconnected-count');
                 if (connectedEl) connectedEl.textContent = (data.clients_connected || 0);
                 if (pausedEl) pausedEl.textContent = (data.clients_paused || 0);
-                if (disconnectedEl) disconnectedEl.textContent = (data.clients_disconnected || 0);
+                if (disconnectedEl) {
+                    disconnectedEl.textContent = (data.clients_disconnected || 0);
+                }
 
                 if (document.getElementById('pppoe-online-count')) document.getElementById('pppoe-online-count').textContent = (data.pppoe_online || 0);
                 if (document.getElementById('pppoe-offline-count')) document.getElementById('pppoe-offline-count').textContent = (data.pppoe_offline || 0);
@@ -7515,7 +7578,7 @@
                         } else if (log.type === 'session_expired') {
                              typeLabel = `<span style="color: var(--status-expired);">[EXPIRED]</span>`;
                              content = `<span style="color: var(--log-text);">Session Expired</span> 
-                                        <span style="color: var(--text-muted);">MAC: ${d.mac_address}</span>`;
+                                        <span style="color: var(--text-muted);">MAC: ${d.mac_address}  User:${d.user_code || 'N/A'}</span>`;
                         } else {
                              typeLabel = `<span style="color: var(--info);">[${log.type.toUpperCase()}]</span>`;
                              content = `<span style="color: var(--log-text);">${log.message || JSON.stringify(d)}</span>`;
@@ -10906,9 +10969,16 @@
             const lastTraffic = parseInt(cell.dataset.lastTraffic);
             const idleTimeout = parseInt(cell.dataset.idleTimeout);
             const isPaused = cell.dataset.isPaused === 'true';
+            const isExpired = cell.dataset.isExpired === 'true';
 
             if (isNaN(lastTraffic) || isNaN(idleTimeout)) {
                 cell.textContent = '-';
+                return;
+            }
+
+            if (isExpired) {
+                cell.textContent = '--';
+                cell.style.color = 'var(--text-muted)';
                 return;
             }
 
@@ -10972,7 +11042,7 @@
                 }
 
                 // Cache the data (filter valid sessions first)
-                cachedActiveUsers = users.filter(u => u.session_code || u.time_remaining > 0);
+                cachedActiveUsers = users.filter(u => u.time_remaining > 0);
                 
                 renderActiveSessionsTable();
 
@@ -11132,9 +11202,10 @@
                          id="${idleCellId}"
                          data-last-traffic="${lastTraffic}" 
                          data-idle-timeout="${idleTimeoutMs}"
-                         data-is-paused="${u.is_paused ? 'true' : 'false'}">
-                         -
-                     </td>
+                        data-is-paused="${u.is_paused ? 'true' : 'false'}"
+                        data-is-expired="${u.time_remaining <= 0 ? 'true' : 'false'}">
+                        -
+                    </td>
                      <td style="padding:10px; text-align:center;">${status}</td>
                      <td style="padding:10px; text-align:center;">
                          <div style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap;">
@@ -11270,6 +11341,40 @@
                 }
             } catch (e) {
                 console.error('Error deleting session', e);
+            }
+        }
+
+        async function loadExpiredSessions() {
+            try {
+                const res = await fetch('/api/admin/expired-sessions', { credentials: 'include' });
+                const sessions = await res.json();
+                const tbody = document.querySelector('#expired-sessions-table tbody');
+                if (!tbody) return;
+
+                tbody.innerHTML = '';
+                if (!sessions || sessions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:15px;">No expired sessions found</td></tr>';
+                    return;
+                }
+
+                sessions.forEach(s => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid var(--border)';
+                    tr.innerHTML = `
+                        <td style="padding:10px; text-align:center; font-family:monospace;">${s.code || '-'}</td>
+                        <td style="padding:10px; text-align:center; font-family:monospace;">${s.mac_address || '-'}</td>
+                        <td style="padding:10px; text-align:center;">${s.ip_address || '-'}</td>
+                        <td style="padding:10px; text-align:center;">${s.total_coins || 0}</td>
+                        <td style="padding:10px; text-align:center;">
+                            <span class="badge" style="background:var(--danger); color:white; padding:4px 8px; border-radius:4px; font-size:0.8rem;">Expired</span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error('Error loading expired sessions:', e);
+                const tbody = document.querySelector('#expired-sessions-table tbody');
+                if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:15px;">Error loading data</td></tr>';
             }
         }
 

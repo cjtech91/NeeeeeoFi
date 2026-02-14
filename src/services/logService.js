@@ -142,11 +142,11 @@ class LogService {
         const sales = db.prepare(sQuery).all(...sParams);
 
         // 3. Expirations (from system_logs)
-        // We look for category='Hotspot' and type='session_expired' in the message
+        // We look for category='Hotspot' (case-insensitive) and type='session_expired' in the message
         let slQuery = `
             SELECT timestamp, message 
             FROM system_logs 
-            WHERE category LIKE 'Hotspot'
+            WHERE category COLLATE NOCASE IN ('Hotspot', 'HOTSPOT')
         `;
         const slParams = [];
         if (date) {

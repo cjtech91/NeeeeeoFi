@@ -1840,21 +1840,51 @@
         }
 
         function attemptAutoRedirect() {
+            if (window.checkInternetInterval) return;
+
             hasRedirected = true;
-            console.log('Attempting auto-redirect...');
+            console.log('Attempting auto-redirect with connectivity check...');
             
-            // Show a toast or message?
             const statusText = document.getElementById('status-text');
-            statusText.textContent = 'Connected! Redirecting...';
-            statusText.className = 'status-text connected';
+            if (statusText) {
+                statusText.textContent = 'Verifying Connection...';
+                statusText.className = 'status-text connected';
+            }
             setPortalStatus('connected');
             
-            // Delay slightly to let the user see the message, then redirect
-            setTimeout(() => {
-                // Try to break out of captive portal
-                // Android/iOS often close the portal if they hit a generate_204 URL successfully
-                window.location.href = 'http://connectivitycheck.gstatic.com/generate_204';
-            }, 1500);
+            let attempts = 0;
+            const maxAttempts = 15;
+
+            const checkInternet = () => {
+                attempts++;
+                const img = new Image();
+                img.src = 'http://www.gstatic.com/webp/gallery/1.jpg?t=' + Date.now();
+                
+                img.onload = function() {
+                    console.log('Internet connectivity confirmed.');
+                    if (window.checkInternetInterval) clearInterval(window.checkInternetInterval);
+                    window.checkInternetInterval = null;
+
+                    if (statusText) statusText.textContent = 'Connected! Redirecting...';
+                    
+                    setTimeout(() => {
+                        window.location.href = 'http://connectivitycheck.gstatic.com/generate_204';
+                    }, 500);
+                };
+                
+                img.onerror = function() {
+                    console.log('Internet check failed (Attempt ' + attempts + ')');
+                    if (attempts >= maxAttempts) {
+                        if (window.checkInternetInterval) clearInterval(window.checkInternetInterval);
+                        window.checkInternetInterval = null;
+                        if (statusText) statusText.textContent = 'Connected';
+                        console.log('Max attempts reached. Staying on portal.');
+                    }
+                };
+            };
+
+            checkInternet();
+            window.checkInternetInterval = setInterval(checkInternet, 1000);
         }
 
         function updateTimer(seconds) {

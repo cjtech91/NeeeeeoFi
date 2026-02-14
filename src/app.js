@@ -406,7 +406,7 @@ const updateTime = db.prepare('UPDATE users SET time_remaining = ? WHERE id = ?'
 const updateUserInterfaceAndIp = db.prepare('UPDATE users SET interface = ?, ip_address = ? WHERE id = ?');
 const expireUser = db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0 WHERE id = ?');
 const pauseUser = db.prepare('UPDATE users SET is_paused = 1, is_connected = 1 WHERE id = ?');
-const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
+const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, ?)');
 
 // Counter for interface sync (run every 10s - faster for roaming)
 let interfaceSyncCounter = 0;
@@ -458,7 +458,11 @@ const countdownLoop = async () => {
                                 ip_address: user.ip_address
                             }
                         });
-                        insertSystemLog.run('HOTSPOT', 'info', logMsg);
+                        
+                        const logDate = new Date();
+                        const timestamp = new Date(logDate.getTime() - (logDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                        
+                        insertSystemLog.run('Hotspot', 'info', logMsg, timestamp);
                     } catch (e) {
                         console.error('Failed to log session expiration:', e);
                     }
@@ -744,7 +748,26 @@ async function finalizeCoinSession(sessionKey, reason) {
         iface = await networkService.getInterfaceForIp(ip);
     }
 
+    let isPausedValue = 0; // Default for new users (Active)
+
     if (user) {
+        // Calculate Paused State Logic (BEFORE Update)
+        const remaining = Number(user.time_remaining) || 0;
+        const isConnected = Number(user.is_connected);
+        const isPaused = Number(user.is_paused);
+        
+        // Auto-start if:
+        // 1. Time is up (Expired) -> We are adding time, so they should become active
+        // If paused with time remaining, keep paused (is_paused = 1) regardless of connection state
+        // FIX: Use Math.floor to ignore fractional seconds which might prevent auto-start
+        if (Math.floor(remaining) <= 0) {
+            isPausedValue = 0;
+            console.log(`[Coin] User ${mac} expired (Rem: ${remaining}). Auto-starting session.`);
+        } else {
+            isPausedValue = isPaused;
+            console.log(`[Coin] User ${mac} active/paused (Rem: ${remaining}, Paused: ${isPaused}). Keeping state: ${isPausedValue}`);
+        }
+
         db.prepare(`
             UPDATE users 
             SET time_remaining = time_remaining + ?, 
@@ -752,7 +775,7 @@ async function finalizeCoinSession(sessionKey, reason) {
                 points_balance = points_balance + ?,
                 upload_speed = COALESCE(?, upload_speed), 
                 download_speed = COALESCE(?, download_speed), 
-                is_paused = 0,
+                is_paused = ?,
                 user_code = COALESCE(user_code, ?),
                 session_code = COALESCE(session_code, user_code, ?),
                 ip_address = COALESCE(?, ip_address),
@@ -762,7 +785,7 @@ async function finalizeCoinSession(sessionKey, reason) {
                 last_traffic_at = CURRENT_TIMESTAMP,
                 interface = COALESCE(?, interface)
             WHERE id = ?
-        `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, userCode, ip, clientId, iface, user.id);
+        `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, isPausedValue, userCode, userCode, ip, clientId, iface, user.id);
 
         try {
             // Re-fetch user to get the accurate new total time
@@ -772,6 +795,8 @@ async function finalizeCoinSession(sessionKey, reason) {
 
             const sourceDetails = Object.entries(sourceAmounts || {}).map(([src, amt]) => `${src === 'hardware' ? 'Main Vendo' : src} (${amt})`).join(', ') || (saleSource === 'hardware' ? 'Main Vendo' : saleSource);
             
+            console.log(`[Coin] Logging session extension for ${mac}. Added: ${secondsToAdd}s`);
+
             const logData = {
                 type: 'session_extended',
                 details: {
@@ -797,14 +822,26 @@ async function finalizeCoinSession(sessionKey, reason) {
         const now = new Date();
         const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
 
+        // New users are always Active (is_paused = 0)
+        isPausedValue = 0;
+
         db.prepare(`
             INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, session_code, last_active_at, last_traffic_at, interface) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
         `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, userCode, timestamp, timestamp, iface);
     }
 
-    await networkService.allowUser(mac, ip);
-    if (ip) await bandwidthService.setLimit(ip, downloadSpeed, uploadSpeed);
+    // Only allow network access if NOT paused
+    if (isPausedValue === 0) {
+        try {
+            console.log(`[Coin] Authorizing user ${mac} (IP: ${ip})...`);
+            await networkService.allowUser(mac, ip);
+            if (ip) await bandwidthService.setLimit(ip, downloadSpeed, uploadSpeed);
+            console.log(`[Coin] User ${mac} authorized.`);
+        } catch (e) {
+            console.error(`[Coin] Failed to authorize user ${mac}:`, e);
+        }
+    }
 
     io.emit('user_code_generated', { mac, code: userCode });
     // Emit points update if points were earned
@@ -1744,7 +1781,8 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
         total_sales_year: db.prepare("SELECT SUM(amount) as total FROM sales WHERE date(timestamp) >= date('now', '+8 hours', 'start of year')").get().total || 0,
         clients_connected: db.prepare("SELECT COUNT(*) as c FROM users WHERE is_connected = 1 AND is_paused = 0 AND time_remaining > 0").get().c || 0,
         clients_paused: db.prepare("SELECT COUNT(*) as c FROM users WHERE is_paused = 1 AND time_remaining > 0").get().c || 0,
-        clients_disconnected: db.prepare("SELECT COUNT(*) as c FROM users WHERE is_connected = 0 AND is_paused = 0 AND time_remaining > 0").get().c || 0,
+        clients_disconnected: db.prepare("SELECT COUNT(*) as c FROM users WHERE (is_connected = 0 AND is_paused = 0 AND time_remaining > 0) OR time_remaining <= 0").get().c || 0,
+        clients_expired: db.prepare("SELECT COUNT(*) as c FROM users WHERE time_remaining <= 0").get().c || 0,
         pppoe_online: db.prepare("SELECT COUNT(*) as c FROM pppoe_users WHERE current_ip IS NOT NULL AND current_ip != ''").get().c || 0,
         pppoe_offline: db.prepare("SELECT COUNT(*) as c FROM pppoe_users WHERE current_ip IS NULL OR current_ip = ''").get().c || 0,
         pppoe_expired: db.prepare("SELECT COUNT(*) as c FROM pppoe_users WHERE datetime(expiration_date) < datetime('now')").get().c || 0
@@ -4411,6 +4449,33 @@ app.delete('/api/admin/point-rates/:id', isAuthenticated, (req, res) => {
 });
 
 // Admin: Get Devices
+app.get('/api/admin/expired-sessions', isAuthenticated, (req, res) => {
+    try {
+        const rows = db.prepare(`
+            SELECT 
+                id,
+                COALESCE(session_code, user_code) as code,
+                mac_address,
+                ip_address,
+                (
+                    SELECT COALESCE(SUM(amount), 0) 
+                    FROM sales 
+                    WHERE (sales.user_code IS NOT NULL AND sales.user_code != '' AND sales.user_code = users.user_code)
+                       OR ((sales.user_code IS NULL OR sales.user_code = '') AND sales.mac_address = users.mac_address)
+                ) as total_coins,
+                'Expired' as status
+            FROM users 
+            WHERE time_remaining <= 0 
+            ORDER BY updated_at DESC
+            LIMIT 100
+        `).all();
+        res.json(rows);
+    } catch (e) {
+        console.error('Error fetching expired sessions:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/admin/devices', isAuthenticated, async (req, res) => {
     try {
         const globalIdleSec = Number(configService.get('idle_timeout_seconds')) || 120;

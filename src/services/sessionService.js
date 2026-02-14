@@ -114,10 +114,10 @@ class SessionService {
                      `);
                      updateTraffic.run(deltaUp, deltaDown, ip);
 
-                     // Reset idle timer if SIGNIFICANT traffic detected (Threshold: 500 bytes / 0.5KB)
-                     // Adjusted for 1s interval (500 bytes/sec ~= 4Kbps).
+                     // Reset idle timer if SIGNIFICANT traffic detected (Threshold: 1000 bytes /1KB)
+                     // Adjusted for 1s interval (1000 bytes/sec ~= 4Kbps).
                      // Ignores very light background noise but catches active usage.
-                     if (totalDelta > 500) {
+                     if (totalDelta > 1000) {
                          const now = new Date();
                          const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
 
