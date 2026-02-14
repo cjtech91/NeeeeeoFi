@@ -1,10 +1,12 @@
 const { db } = require('../database/db');
 const bandwidthService = require('./bandwidthService');
+const EventEmitter = require('events');
 
 const { exec } = require('child_process');
 
-class SessionService {
+class SessionService extends EventEmitter {
     constructor() {
+        super();
         this.checkInterval = null;
         this.lastTrafficStats = new Map();
         this.currentSpeeds = new Map();
@@ -396,6 +398,9 @@ class SessionService {
                     await bandwidthService.setLimit(user.ip_address, user.download_speed, user.upload_speed);
                 }
             }
+            
+            // Emit update event
+            this.emit('session_updated', { mac: user.mac_address, is_paused: 0 });
         } catch (e) {
             console.error(`[Session] Failed to resume user ${user.mac_address}:`, e);
         }
@@ -438,6 +443,9 @@ class SessionService {
             if (bandwidthService && bandwidthService.removeLimit) {
                 await bandwidthService.removeLimit(user.ip_address);
             }
+            
+            // Emit update event
+            this.emit('session_updated', { mac: user.mac_address, is_paused: 1 });
         } catch (e) {
             console.error(`[Session] Failed to pause user ${user.mac_address}:`, e);
         }

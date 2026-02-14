@@ -57,6 +57,11 @@ const io = new Server(server, {
     }
 });
 
+// Session state update broadcast
+sessionService.on('session_updated', (data) => {
+    io.emit('session_updated', data);
+});
+
 const PORT = process.env.PORT || 3000;
 const PORTAL_DOMAIN = 'pisowifi.local';
 const PORTAL_URL = `http://${PORTAL_DOMAIN}:${PORT}/portal`;
@@ -760,13 +765,9 @@ async function finalizeCoinSession(sessionKey, reason) {
         // 1. Time is up (Expired) -> We are adding time, so they should become active
         // If paused with time remaining, keep paused (is_paused = 1) regardless of connection state
         // FIX: Use Math.floor to ignore fractional seconds which might prevent auto-start
-        if (Math.floor(remaining) <= 0) {
-            isPausedValue = 0;
-            console.log(`[Coin] User ${mac} expired (Rem: ${remaining}). Auto-starting session.`);
-        } else {
-            isPausedValue = isPaused;
-            console.log(`[Coin] User ${mac} active/paused (Rem: ${remaining}, Paused: ${isPaused}). Keeping state: ${isPausedValue}`);
-        }
+        // Auto-start logic: Always unpause when coins are inserted (User Request)
+        isPausedValue = 0;
+        console.log(`[Coin] User ${mac} coin inserted. Auto-starting session (Rem: ${remaining}, PrevPaused: ${isPaused}).`);
 
         db.prepare(`
             UPDATE users 
@@ -844,6 +845,8 @@ async function finalizeCoinSession(sessionKey, reason) {
     }
 
     io.emit('user_code_generated', { mac, code: userCode });
+    // Emit session update to ensure client UI updates immediately
+    io.emit('session_updated', { mac, is_paused: 0 });
     // Emit points update if points were earned
     if (pointsEarned > 0) {
         io.emit('points_earned', { mac, points: pointsEarned, total: (user ? user.points_balance : 0) + pointsEarned });

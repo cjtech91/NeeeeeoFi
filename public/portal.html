@@ -1328,7 +1328,7 @@
                 renderCoinCountdown();
                 if (coinCountdownSeconds <= 0) {
                     stopCoinCountdown();
-                    closeModal('coin-modal');
+                    closeCoinModal();
                 }
             }, 1000);
         }
@@ -1552,7 +1552,7 @@
 
         async function updateStatus() {
             try {
-                const res = await fetch('/api/status');
+                const res = await fetch('/api/status?t=' + Date.now());
                 const data = await res.json();
                 currentUser = data;
                 const lastIp = localStorage.getItem('last_ip') || '';
@@ -1890,10 +1890,40 @@
             isInserting = false;
             stopCoinCountdown();
             try {
-                await fetch('/api/coin/done', { method: 'POST' });
+                const res = await fetch('/api/coin/done', { method: 'POST' });
+                // Optimistic UI update to ensure button flips immediately
+                if (res.ok) {
+                    if (currentUser) currentUser.is_paused = 0;
+                    const btn = document.getElementById('btn-pause');
+                    if (btn) {
+                        btn.textContent = 'Pause Time';
+                        btn.style.background = 'var(--danger)';
+                        btn.style.display = 'block';
+                    }
+                    const st = document.getElementById('status-text');
+                    if (st) {
+                        st.textContent = 'Connected';
+                        st.className = 'status-text connected';
+                    }
+                }
             } catch (e) {}
             closeModal('coin-modal');
-            updateStatus();
+            await updateStatus();
+            
+            // Aggressive Resume Loop (3 attempts)
+            // Force auto-resume if still paused after coin insertion
+            for (let i = 0; i < 3; i++) {
+                if (currentUser && currentUser.is_paused) {
+                    console.log(`[Auto-Resume] Attempt ${i+1}: Force resuming user...`);
+                    try {
+                        await fetch('/api/session/resume?t=' + Date.now(), { method: 'POST' });
+                        await updateStatus();
+                    } catch(e) { console.error(e); }
+                    await new Promise(r => setTimeout(r, 500));
+                } else {
+                    break; // Already active
+                }
+            }
         }
 
         async function togglePause() {
