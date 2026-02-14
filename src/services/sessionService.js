@@ -73,6 +73,9 @@ class SessionService extends EventEmitter {
             
             if (!this.lastTrafficStats) this.lastTrafficStats = new Map();
 
+            const updates = [];
+            const activityUpdates = [];
+
             for (const [ip, stats] of currentStats) {
                 let deltaUp = 0;
                 let deltaDown = 0;
@@ -103,35 +106,46 @@ class SessionService extends EventEmitter {
                 this.currentSpeeds.set(ip, { dl_speed: speedDown, ul_speed: speedUp });
 
                 // Update DB if there is change
-                // Use a threshold to avoid resetting idle timer on stray packets (e.g. TCP FIN/RST or ARP noise)
-                // 1KB (1024 bytes) seems reasonable. Real activity (browsing) will easily exceed this.
                 const totalDelta = deltaUp + deltaDown;
                 if (totalDelta > 0) {
-                     // We update traffic stats regardless of size
-                     const updateTraffic = db.prepare(`
+                     updates.push({ deltaUp, deltaDown, ip });
+
+                     // Reset idle timer if SIGNIFICANT traffic detected (Threshold: 1000 bytes /1KB)
+                     if (totalDelta > 1000) {
+                         activityUpdates.push(ip);
+                     }
+                }
+            }
+            
+            // Batch Process Updates (Transaction)
+            if (updates.length > 0) {
+                const timestamp = new Date(now - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                
+                const batchTransaction = db.transaction((trafficUpdates, activeIps, ts) => {
+                    const updateTraffic = db.prepare(`
                         UPDATE users 
                         SET total_data_up = total_data_up + ?, 
                             total_data_down = total_data_down + ?
                         WHERE ip_address = ? AND is_connected = 1
-                     `);
-                     updateTraffic.run(deltaUp, deltaDown, ip);
+                    `);
 
-                     // Reset idle timer if SIGNIFICANT traffic detected (Threshold: 1000 bytes /1KB)
-                     // Adjusted for 1s interval (1000 bytes/sec ~= 4Kbps).
-                     // Ignores very light background noise but catches active usage.
-                     if (totalDelta > 1000) {
-                         const now = new Date();
-                         const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                    const updateActivity = db.prepare(`
+                        UPDATE users 
+                        SET last_active_at = ?,
+                            last_traffic_at = ?
+                        WHERE ip_address = ? AND is_connected = 1
+                    `);
 
-                         db.prepare(`
-                            UPDATE users 
-                            SET last_active_at = ?,
-                                last_traffic_at = ?
-                            WHERE ip_address = ? AND is_connected = 1
-                         `).run(timestamp, timestamp, ip);
-                         // console.log(`[Session] Activity detected for ${ip}: ${totalDelta} bytes. Resetting idle timer.`);
-                     }
-                }
+                    for (const u of trafficUpdates) {
+                        updateTraffic.run(u.deltaUp, u.deltaDown, u.ip);
+                    }
+
+                    for (const ip of activeIps) {
+                        updateActivity.run(ts, ts, ip);
+                    }
+                });
+
+                batchTransaction(updates, activityUpdates, timestamp);
             }
             
             // Update last known stats
@@ -179,8 +193,10 @@ class SessionService extends EventEmitter {
                     user.ip_address = newIp; // Update local object
                 }
             }
-
-            this.pingUser(user);
+            
+            // Removed pingUser(user) to reduce CPU load (spawn process).
+            // We rely on traffic stats (updateTrafficStats) for "Active" status.
+            // this.pingUser(user); 
         }
     }
 
@@ -304,10 +320,11 @@ class SessionService extends EventEmitter {
                 const idleTimeout = ((user.idle_timeout || globalIdleSec)) * 1000;
                 
                 const tTraffic = user.last_traffic_at ? this.parseDbDate(user.last_traffic_at) : 0;
-                // const tActive = user.last_active_at ? this.parseDbDate(user.last_active_at) : 0;
-                // Use ONLY Traffic for Idle Timeout. 
-                // Relying on Ping (tActive) prevents pausing users who are connected (WiFi) but not using data.
-                const lastActivity = tTraffic || now;
+                const tActive = user.last_active_at ? this.parseDbDate(user.last_active_at) : 0;
+                
+                // Use Traffic time if available, otherwise fallback to Login/Resume time (tActive).
+                // If both are missing (shouldn't happen), use now (no timeout).
+                const lastActivity = tTraffic || tActive || now;
 
                 if (now - lastActivity > idleTimeout) {
                     console.log(`[Session] User ${user.mac_address} timed out (Idle - No Active Connections). Pausing session. Last activity: ${new Date(lastActivity).toISOString()}`);

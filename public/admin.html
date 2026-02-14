@@ -7011,6 +7011,10 @@
             if (view === 'dashboard') {
                 loadDashboardData();
                 IntervalManager.start('dashboard', loadDashboardData, 5000);
+                
+                // Bandwidth Chart (3s update)
+                updateBandwidthChart();
+                IntervalManager.start('bandwidth_chart', updateBandwidthChart, 3000);
             } else if (view === 'sales') {
                 loadSalesData('daily');
             } else if (view === 'pppoe-sales') {
@@ -7236,10 +7240,10 @@
                 }
 
 
+// Bandwidth Chart (1s update)
+updateBandwidthChart();
+IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
 
-               // Bandwidth Chart (Mocking data for now as backend doesn't provide history yet)
-                // In production, backend should send [rx, tx]
-                updateBandwidthChart();
                 
                 // If on Network tab, refresh specific network data
                 if (document.getElementById('view-network').style.display === 'block') {

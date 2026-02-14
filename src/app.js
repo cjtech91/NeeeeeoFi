@@ -416,23 +416,23 @@ const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, me
 // Counter for interface sync (run every 10s - faster for roaming)
 let interfaceSyncCounter = 0;
 
+// --- Batch Update Transaction (CPU Optimization) ---
+const batchProcessUpdates = db.transaction((timeUpdates, expiredIds, roamingUpdates) => {
+    for (const u of timeUpdates) updateTime.run(u.time, u.id);
+    for (const id of expiredIds) expireUser.run(id);
+    for (const r of roamingUpdates) updateUserInterfaceAndIp.run(r.interface, r.ip, r.id);
+});
+
 const countdownLoop = async () => {
     try {
         const now = Date.now();
-        // Calculate elapsed seconds since last successful tick
-        // Use Math.max to prevent negative issues if clock changes
         const deltaSeconds = Math.max(0, Math.floor((now - lastTick) / 1000));
         
-        // Only run update if at least 1 second has passed
         if (deltaSeconds >= 1) {
             // 1. Get all active, unpaused users
             const users = selectActiveUsers.all();
             
-            // 2. Fetch Traffic Stats if sync interval (every 1s)
-            // Removed redundant traffic fetching (handled by sessionService.js)
-
-
-            // 3. Interface Sync (every 10s)
+            // 2. Interface Sync (every 10s)
             interfaceSyncCounter += deltaSeconds;
             let currentClients = null;
             if (interfaceSyncCounter >= 10) {
@@ -440,44 +440,19 @@ const countdownLoop = async () => {
                 interfaceSyncCounter = 0;
             }
 
+            const timeUpdates = [];
+            const expiredUsers = [];
+            const roamingUpdates = [];
+            const roamingActions = []; // Async actions for roaming
+
             for (const user of users) {
-                // Decrement by actual elapsed time
                 const newTime = user.time_remaining - deltaSeconds;
                 
                 if (newTime <= 0) {
-                    // Time Expired
-                    expireUser.run(user.id);
-                    await networkService.blockUser(user.mac_address, user.ip_address);
-                    if (user.ip_address) {
-                        await bandwidthService.removeLimit(user.ip_address);
-                    }
-                    console.log(`[Session] User ${user.mac_address} expired (IP: ${user.ip_address || 'N/A'}). Connection removed.`);
-                    
-                    // Log to System Logs for Hotspot History
-                    try {
-                        const logMsg = JSON.stringify({
-                            type: 'session_expired',
-                            details: {
-                                user_code: user.user_code,
-                                mac_address: user.mac_address,
-                                ip_address: user.ip_address
-                            }
-                        });
-                        
-                        const logDate = new Date();
-                        const timestamp = new Date(logDate.getTime() - (logDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
-                        
-                        insertSystemLog.run('Hotspot', 'info', logMsg, timestamp);
-                    } catch (e) {
-                        console.error('Failed to log session expiration:', e);
-                    }
-
-
+                    expiredUsers.push(user);
                 } else {
-                    // Update time
-                    updateTime.run(newTime, user.id);
+                    timeUpdates.push({ id: user.id, time: newTime });
                     
-                    // Update Interface/IP if detected change (Roaming Logic)
                     if (currentClients && user.mac_address) {
                         const normalizedMac = user.mac_address.toLowerCase();
                         const clientInfo = currentClients[normalizedMac];
@@ -487,35 +462,66 @@ const countdownLoop = async () => {
                             const hasIfaceChanged = clientInfo.interface !== user.interface;
 
                             if (hasIpChanged || hasIfaceChanged) {
-                                // 1. Update DB
-                                updateUserInterfaceAndIp.run(clientInfo.interface, clientInfo.ip, user.id);
-                                
-                                // 2. Clean up old limits/rules if IP changed
-                                if (hasIpChanged && user.ip_address) {
-                                     bandwidthService.removeLimit(user.ip_address).catch(() => {});
-                                     // blockUser/allowUser handles iptables, allowUser clears old? 
-                                     // networkService.allowUser adds to internet_users set.
-                                     // Ideally we should remove old IP from set, but ipset might handle it or we leave it to expire?
-                                     // For now, focusing on enabling the NEW connection.
-                                }
-
-                                // 3. Apply new limits/rules
-                                if (user.download_speed || user.upload_speed) {
-                                    bandwidthService.setLimit(clientInfo.ip, user.download_speed, user.upload_speed).catch(() => {});
-                                }
-                                
-                                // 4. Re-authorize in Firewall (ipset)
-                                networkService.allowUser(user.mac_address, clientInfo.ip).catch(() => {});
-                                
-                                console.log(`[Roaming] User ${user.mac_address} moved to ${clientInfo.interface} (IP: ${clientInfo.ip})`);
+                                roamingUpdates.push({ 
+                                    id: user.id, 
+                                    interface: clientInfo.interface, 
+                                    ip: clientInfo.ip 
+                                });
+                                roamingActions.push({
+                                    user,
+                                    clientInfo,
+                                    hasIpChanged
+                                });
                             }
                         }
                     }
-
-
                 }
             }
-            // Update lastTick to now (roughly)
+
+            // 3. Execute DB Transaction (Sync & Fast)
+            if (timeUpdates.length > 0 || expiredUsers.length > 0 || roamingUpdates.length > 0) {
+                batchProcessUpdates(timeUpdates, expiredUsers.map(u => u.id), roamingUpdates);
+            }
+
+            // 4. Handle Expired Users (Async)
+            for (const user of expiredUsers) {
+                await networkService.blockUser(user.mac_address, user.ip_address);
+                if (user.ip_address) {
+                    await bandwidthService.removeLimit(user.ip_address);
+                }
+                console.log(`[Session] User ${user.mac_address} expired (IP: ${user.ip_address || 'N/A'}). Connection removed.`);
+                
+                try {
+                    const logMsg = JSON.stringify({
+                        type: 'session_expired',
+                        details: {
+                            user_code: user.user_code,
+                            mac_address: user.mac_address,
+                            ip_address: user.ip_address
+                        }
+                    });
+                    
+                    const logDate = new Date();
+                    const timestamp = new Date(logDate.getTime() - (logDate.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
+                    insertSystemLog.run('Hotspot', 'info', logMsg, timestamp);
+                } catch (e) {
+                    console.error('Failed to log session expiration:', e);
+                }
+            }
+
+            // 5. Handle Roaming Actions (Async)
+            for (const action of roamingActions) {
+                const { user, clientInfo, hasIpChanged } = action;
+                if (hasIpChanged && user.ip_address) {
+                     bandwidthService.removeLimit(user.ip_address).catch(() => {});
+                }
+                if (user.download_speed || user.upload_speed) {
+                    bandwidthService.setLimit(clientInfo.ip, user.download_speed, user.upload_speed).catch(() => {});
+                }
+                networkService.allowUser(user.mac_address, clientInfo.ip).catch(() => {});
+                console.log(`[Roaming] User ${user.mac_address} moved to ${clientInfo.interface} (IP: ${clientInfo.ip})`);
+            }
+
             lastTick = now;
         }
     } catch (e) {
