@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -11164,15 +11164,15 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                  const status = u.is_paused ? '<span style="color:var(--warning)">Paused</span>' : 
                                 (u.is_connected ? '<span style="color:var(--success)">Connected</span>' : '<span style="color:var(--text-muted)">Disconnected</span>');
 
-                 const parseDate = (d) => {
+                const parseDate = (d) => {
                      if (!d) return null;
                      // Parse as Local Time
                      if (typeof d === 'string' && !d.endsWith('Z')) return new Date(d.replace(' ', 'T')).getTime();
                      return new Date(d).getTime();
                  };
                  const tTraffic = u.last_traffic_at ? parseDate(u.last_traffic_at) : 0;
-                 // const tActive = u.last_active_at ? parseDate(u.last_active_at) : 0;
-                 const lastTraffic = tTraffic || Date.now();
+                 const tActive = u.last_active_at ? parseDate(u.last_active_at) : 0;
+                 const lastTraffic = Math.max(tTraffic || 0, tActive || 0) || Date.now();
                  
                  const idleTimeoutMs = (u.effective_idle_timeout || 120) * 1000;
                  const idleCellId = `idle-cell-${u.id}`;
@@ -13343,7 +13343,6 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
     <script src="/js/admin-toast.js"></script>
 </body>
 </html>
-
 
 
 

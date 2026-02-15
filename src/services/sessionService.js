@@ -29,22 +29,37 @@ class SessionService extends EventEmitter {
         if (this.checkInterval) clearInterval(this.checkInterval);
         
         const runChecks = async () => {
-            try {
-                const networkService = require('./networkService');
+            const networkService = require('./networkService');
 
-                // Update traffic stats first (before blocking anyone)
-                await this.updateTrafficStats();
-
-                const activeMacs = await networkService.getActiveMacs();
-                
-                await this.checkConnectivity(activeMacs);
-                await this.checkPausedUsers(activeMacs);
-                await this.checkIdleUsers();
-                await this.checkSessionTimeout();
-                await this.syncFirewall(activeMacs);
-            } catch (e) {
-                console.error("[Session] Error in monitoring loop:", e);
+            // Run each step independently so a failure in one does not block the rest
+            try { 
+                await this.updateTrafficStats(); 
+            } catch (e) { 
+                console.error("[Session] updateTrafficStats failed:", e); 
             }
+
+            let activeMacs = null;
+            try { 
+                activeMacs = await networkService.getActiveMacs(); 
+            } catch (e) { 
+                console.error("[Session] getActiveMacs failed:", e); 
+                activeMacs = null;
+            }
+            
+            try { await this.checkConnectivity(activeMacs); } 
+            catch (e) { console.error("[Session] checkConnectivity failed:", e); }
+
+            try { await this.checkPausedUsers(activeMacs); } 
+            catch (e) { console.error("[Session] checkPausedUsers failed:", e); }
+
+            try { await this.checkIdleUsers(); } 
+            catch (e) { console.error("[Session] checkIdleUsers failed:", e); }
+
+            try { await this.checkSessionTimeout(); } 
+            catch (e) { console.error("[Session] checkSessionTimeout failed:", e); }
+
+            try { await this.syncFirewall(activeMacs); } 
+            catch (e) { console.error("[Session] syncFirewall failed:", e); }
         };
 
         // Run immediately
@@ -322,9 +337,9 @@ class SessionService extends EventEmitter {
                 const tTraffic = user.last_traffic_at ? this.parseDbDate(user.last_traffic_at) : 0;
                 const tActive = user.last_active_at ? this.parseDbDate(user.last_active_at) : 0;
                 
-                // Use Traffic time if available, otherwise fallback to Login/Resume time (tActive).
-                // If both are missing (shouldn't happen), use now (no timeout).
-                const lastActivity = tTraffic || tActive || now;
+                // Use the most recent activity between traffic and active timestamps
+                // Fallback to 'now' when both are missing/invalid.
+                const lastActivity = Math.max(tTraffic || 0, tActive || 0) || now;
 
                 if (now - lastActivity > idleTimeout) {
                     console.log(`[Session] User ${user.mac_address} timed out (Idle - No Active Connections). Pausing session. Last activity: ${new Date(lastActivity).toISOString()}`);

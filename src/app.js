@@ -303,7 +303,6 @@ app.get('/admin', (req, res) => {
         configService.init();
         networkConfigService.init();
         
-        // Initialize Coin Service (depends on config)
         await coinService.init();
 
         // Ensure Sub Vendo Key exists
@@ -315,11 +314,17 @@ app.get('/admin', (req, res) => {
         }
 
         await networkService.init();
-        await bandwidthService.init(networkService.wanInterface, 'br0'); // Initialize QoS (CAKE)
-        await firewallService.init(); // Initialize Firewall/AdBlocker
-        await walledGardenService.init(); // Initialize Walled Garden
-        hardwareService.init(); // Initialize Hardware (Relay/Temp)
-        await pppoeServerService.init(networkService.wanInterface); // Initialize PPPoE Server
+        await bandwidthService.init(networkService.wanInterface, 'br0');
+        await firewallService.init();
+        await walledGardenService.init();
+        hardwareService.init();
+        await pppoeServerService.init(networkService.wanInterface);
+        
+        try {
+            await networkConfigService.applyNetworkChanges();
+        } catch (e) {
+            console.error('Failed to auto-apply VLAN network changes on startup:', e);
+        }
         
         // Restore sessions for active users after restart
         const activeUsers = db.prepare('SELECT mac_address, ip_address, download_speed, upload_speed FROM users WHERE time_remaining > 0 AND is_paused = 0').all();
