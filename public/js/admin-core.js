@@ -937,9 +937,11 @@
             const isMe = msg.is_from_admin == 1; 
             
             div.className = `message ${isMe ? 'sent' : 'received'}`;
+            const d = msg.timestamp ? new Date(msg.timestamp) : new Date();
+            const ts = d.toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
             div.innerHTML = `
                 ${msg.message}
-                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+                <div class="message-time">${ts}</div>
             `;
             container.appendChild(div);
             scrollToBottom();
@@ -6163,5 +6165,4 @@
     
 
 // --- END BLOCK ---
-
 

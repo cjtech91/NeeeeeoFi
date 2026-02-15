@@ -427,6 +427,29 @@ const initDb = () => {
     console.error('Migration error (chat_messages):', e);
   }
 
+  try {
+    const migrated = db.prepare("SELECT value FROM settings WHERE key = 'chat_timestamp_migrated'").get();
+    if (!migrated) {
+      const rows = db.prepare('SELECT id, timestamp FROM chat_messages WHERE timestamp IS NOT NULL').all();
+      const updateStmt = db.prepare('UPDATE chat_messages SET timestamp = ? WHERE id = ?');
+      const tx = db.transaction((items) => {
+        for (const r of items) {
+          if (!r.timestamp) continue;
+          const iso = r.timestamp.replace(' ', 'T') + 'Z';
+          const d = new Date(iso);
+          if (Number.isNaN(d.getTime())) continue;
+          const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+          const s = local.toISOString().slice(0, 19).replace('T', ' ');
+          updateStmt.run(s, r.id);
+        }
+      });
+      tx(rows);
+      db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('chat_timestamp_migrated', '1', 'string', 'system')").run();
+    }
+  } catch (e) {
+    console.error('Migration error (chat_messages timestamp localize):', e);
+  }
+
   // Table for Sub Vendo Devices
   db.exec(`
     CREATE TABLE IF NOT EXISTS sub_vendo_devices (

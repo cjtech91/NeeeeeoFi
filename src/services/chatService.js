@@ -2,8 +2,13 @@ const { db } = require('../database/db');
 
 class ChatService {
     saveMessage(senderMac, message, isFromAdmin, chatType = 'hotspot') {
-        const stmt = db.prepare('INSERT INTO chat_messages (sender_mac, message, is_from_admin, timestamp, chat_type) VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)');
-        return stmt.run(senderMac, message, isFromAdmin ? 1 : 0, chatType);
+        const now = new Date();
+        const localTimestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000))
+            .toISOString()
+            .slice(0, 19)
+            .replace('T', ' ');
+        const stmt = db.prepare('INSERT INTO chat_messages (sender_mac, message, is_from_admin, timestamp, chat_type) VALUES (?, ?, ?, ?, ?)');
+        return stmt.run(senderMac, message, isFromAdmin ? 1 : 0, localTimestamp, chatType);
     }
 
     getMessages(senderMac, limit = 50, type = null) {

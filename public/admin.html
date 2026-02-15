@@ -853,7 +853,11 @@
                     div.dataset.chatLabel = displayName;
                     div.onclick = () => selectConversation(mac, displayName);
                     
-                    const time = c.timestamp ? new Date(c.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+                    let time = '';
+                    if (c.timestamp) {
+                        const d = new Date(c.timestamp);
+                        time = d.toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+                    }
                     const unreadHtml = c.unread_count > 0 ? `<span class="chat-badge">${c.unread_count}</span>` : '';
                     const preview = c.message || '<i>No messages</i>';
                     
@@ -939,9 +943,11 @@
             const isMe = msg.is_from_admin == 1; 
             
             div.className = `message ${isMe ? 'sent' : 'received'}`;
+            const d = msg.timestamp ? new Date(msg.timestamp) : new Date();
+            const ts = d.toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
             div.innerHTML = `
                 ${msg.message}
-                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+                <div class="message-time">${ts}</div>
             `;
             container.appendChild(div);
             scrollToBottom();
@@ -5694,8 +5700,8 @@
                                     <svg style="width: 20px; height: 20px; fill: var(--text-muted);" viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
                                 </div>
 
-                                <!-- Time & NTP Settings Item -->
-                                <div onclick="document.getElementById('time-settings-modal').style.display='flex'" class="settings-item">
+                        <!-- Time & NTP Settings Item -->
+                        <div onclick="document.getElementById('time-settings-modal').style.display='flex'; loadTimeSettings();" class="settings-item">
                                     <span style="font-weight: 500; color: var(--text-main);">Time & NTP Settings</span>
                                     <svg style="width: 20px; height: 20px; fill: var(--text-muted);" viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
                                 </div>
@@ -8463,7 +8469,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                 
                 document.getElementById('time-sync-mode').value = settings.time_sync_mode || 'auto';
                 
-                const ntpServers = (settings.ntp_server || '132.163.97.3 202.90.132.242 pool.ntp.org').split(' ');
+                let ntpRaw = typeof settings.ntp_server === 'string' ? settings.ntp_server : '';
+                if (!ntpRaw || !ntpRaw.trim()) {
+                    ntpRaw = '132.163.97.3 202.90.132.242 pool.ntp.org';
+                }
+                const ntpServers = ntpRaw.split(/\s+/);
                 document.getElementById('ntp-server-1').value = ntpServers[0] || '';
                 document.getElementById('ntp-server-2').value = ntpServers[1] || '';
                 document.getElementById('ntp-server-3').value = ntpServers[2] || '';
@@ -13343,9 +13353,6 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
     <script src="/js/admin-toast.js"></script>
 </body>
 </html>
-
-
-
 
 
 

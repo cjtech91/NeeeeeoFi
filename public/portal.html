@@ -2299,16 +2299,26 @@
 
         function appendMessage(msg) {
             const container = document.getElementById('chat-messages');
-            // Remove placeholders
             if (container.textContent.includes('Connecting...')) {
                 container.innerHTML = '';
             }
 
             const div = document.createElement('div');
             const isMe = !msg.is_from_admin;
+            const d = msg.timestamp ? new Date(msg.timestamp) : new Date();
+            const ts = d.toLocaleString([], {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
             
             div.className = `chat-msg ${isMe ? 'sent' : 'received'}`;
-            div.innerHTML = msg.message;
+            div.innerHTML = `
+                <div>${msg.message}</div>
+                <div style="font-size:11px; opacity:0.8; margin-top:2px;">${ts}</div>
+            `;
             container.appendChild(div);
         }
 

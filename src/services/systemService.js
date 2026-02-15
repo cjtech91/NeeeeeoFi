@@ -157,13 +157,13 @@ class SystemService {
 
     async saveTimeSettings(data) {
         console.log('Saving time settings:', data);
-        const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-        const keys = ['time_sync_mode', 'ntp_server', 'timezone_mode', 'timezone'];
+        const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, category) VALUES (?, ?, ?)');
+        const keys = ['time_sync_mode', 'ntp_server', 'timezone_mode', 'timezone', 'manual_datetime'];
         
         const transaction = db.transaction((settings) => {
             keys.forEach(key => {
                 if (settings[key] !== undefined) {
-                    stmt.run(key, settings[key]);
+                    stmt.run(key, settings[key], 'time');
                 }
             });
         });
