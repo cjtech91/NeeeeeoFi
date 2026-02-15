@@ -384,7 +384,39 @@
                 else alert('Failed to update QoS Mode');
             } catch(e) { console.error(e); alert('Error saving mode'); }
         }
-        // --- Security & Maintenance ---
+        let currentAdminInfo = null;
+
+        async function loadAdminInfo() {
+            try {
+                const res = await fetch('/api/auth/me', { credentials: 'include' });
+                if (!res.ok) return;
+                const data = await res.json();
+                currentAdminInfo = data;
+                const securityItem = document.getElementById('security-settings-item');
+                if (securityItem) {
+                    securityItem.style.display = 'flex';
+                }
+                const adminAccountsItem = document.getElementById('admin-accounts-item');
+                if (adminAccountsItem) {
+                    adminAccountsItem.style.display = data.is_super_admin ? 'flex' : 'none';
+                }
+                const superBadge = document.getElementById('super-admin-indicator');
+                if (superBadge) {
+                    superBadge.style.display = data.is_super_admin ? 'inline-flex' : 'none';
+                }
+                const btnCreateUpdate = document.getElementById('btn-create-update');
+                const btnUpgrade = document.getElementById('btn-upgrade');
+                const btnVerify = document.getElementById('btn-verify');
+                if (!data.is_super_admin) {
+                    if (btnCreateUpdate) btnCreateUpdate.style.display = 'none';
+                    if (btnUpgrade) btnUpgrade.style.display = 'none';
+                    if (btnVerify) btnVerify.style.display = 'none';
+                }
+            } catch (e) {
+                console.error('Failed to load admin info', e);
+            }
+        }
+
         async function loadSecurityCredentials() {
             try {
                 const res = await fetch('/api/admin/security/credentials');
@@ -401,6 +433,138 @@
                 }
             } catch (e) {
                 console.error("Failed to load security credentials", e);
+            }
+        }
+
+        function openAdminAccountsModal() {
+            document.getElementById('admin-accounts-modal').style.display = 'flex';
+            loadAdminAccounts();
+        }
+
+        async function loadAdminAccounts() {
+            const tbody = document.getElementById('admin-accounts-body');
+            if (!tbody) return;
+            tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 10px; text-align:center; color:var(--text-muted);">Loading...</td></tr>';
+            try {
+                const res = await fetch('/api/super-admin/admins');
+                if (!res.ok) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 10px; text-align:center; color:var(--danger);">Failed to load admins</td></tr>';
+                    return;
+                }
+                const admins = await res.json();
+                if (!Array.isArray(admins) || admins.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 10px; text-align:center; color:var(--text-muted);">No admin accounts</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                admins.forEach(a => {
+                    const tr = document.createElement('tr');
+                    const roleLabel = a.is_super_admin ? 'Super Admin' : (a.role || 'Admin');
+                    const created = a.created_at || '';
+                    let actionsHtml = '';
+                    if (a.is_super_admin) {
+                        actionsHtml = '<span style="font-size:0.8rem; color:var(--text-muted);">Primary account</span>';
+                    } else {
+                        actionsHtml = `
+                            <button class="btn btn-sm btn-secondary" onclick="resetAdminPassword(${a.id})" style="margin-right:6px;">Reset Password</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteAdminAccount(${a.id})">Delete</button>
+                        `;
+                    }
+                    tr.innerHTML = `
+                        <td style="padding:6px 10px;">${a.id}</td>
+                        <td style="padding:6px 10px;">${a.username}</td>
+                        <td style="padding:6px 10px;">${roleLabel}</td>
+                        <td style="padding:6px 10px;">${created}</td>
+                        <td style="padding:6px 10px; text-align:right;">${actionsHtml}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error('Failed to load admin accounts', e);
+                tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 10px; text-align:center; color:var(--danger);">Error loading admins</td></tr>';
+            }
+        }
+
+        async function createAdminAccount() {
+            const uEl = document.getElementById('new-admin-username');
+            const pEl = document.getElementById('new-admin-password');
+            if (!uEl || !pEl) return;
+            const username = uEl.value.trim();
+            const password = pEl.value.trim();
+            if (!username || !password) {
+                alert('Username and password are required');
+                return;
+            }
+            try {
+                const res = await fetch('/api/super-admin/admins', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    alert(data.error || 'Failed to create admin');
+                    return;
+                }
+                uEl.value = '';
+                pEl.value = '';
+                await loadAdminAccounts();
+                alert('Admin account created');
+            } catch (e) {
+                console.error('Failed to create admin', e);
+                alert('Failed to create admin');
+            }
+        }
+
+        async function resetAdminPassword(id) {
+            if (!id) return;
+            let newPassword = null;
+            if (typeof showPrompt === 'function') {
+                newPassword = await showPrompt('Enter new password for this admin:', 'New Password', 'Reset Password');
+            } else {
+                newPassword = prompt('Enter new password for this admin:');
+            }
+            if (!newPassword) return;
+            try {
+                const res = await fetch('/api/super-admin/admins/' + id + '/reset-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password: newPassword })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    alert(data.error || 'Failed to reset password');
+                    return;
+                }
+                alert('Password reset successfully');
+            } catch (e) {
+                console.error('Failed to reset password', e);
+                alert('Failed to reset password');
+            }
+        }
+
+        async function deleteAdminAccount(id) {
+            if (!id) return;
+            if (typeof showConfirm === 'function') {
+                const ok = await showConfirm('Are you sure you want to delete this admin account?', true, 'Delete Admin');
+                if (!ok) return;
+            } else {
+                if (!confirm('Are you sure you want to delete this admin account?')) return;
+            }
+            try {
+                const res = await fetch('/api/super-admin/admins/' + id, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    alert(data.error || 'Failed to delete admin');
+                    return;
+                }
+                await loadAdminAccounts();
+                alert('Admin account deleted');
+            } catch (e) {
+                console.error('Failed to delete admin', e);
+                alert('Failed to delete admin');
             }
         }
 
@@ -2814,6 +2978,9 @@
                     </div>
                     <div class="status-badge" style="white-space: nowrap; z-index: 10;">
                         <div class="status-dot"></div> System Online
+                    </div>
+                    <div id="super-admin-indicator" class="status-badge" style="display:none; white-space: nowrap; z-index: 10; background: var(--gauge-3);">
+                        Super Admin
                     </div>
                     <button id="theme-toggle" class="btn" onclick="toggleTheme()" style="padding: 6px; background: transparent; color: var(--text-main); display: flex; align-items: center; justify-content: center; border-radius: 50%; width: 32px; height: 32px; border: 1px solid var(--border);">
                         <svg id="theme-icon-sun" viewBox="0 0 24 24" style="width:20px; height:20px; fill: currentColor; display: none;">
@@ -5688,15 +5855,18 @@
                                 <div class="card-title" style="text-transform: uppercase; color: var(--text-muted); font-size: 0.85rem; font-weight: 700;">General Settings</div>
                             </div>
                             <div style="display: flex; flex-direction: column;">
-                                <!-- Vendo Settings Item -->
                                 <div onclick="document.getElementById('vendo-settings-modal').style.display='flex'" class="settings-item">
                                     <span style="font-weight: 500; color: var(--text-main);">Vendo Settings</span>
                                     <svg style="width: 20px; height: 20px; fill: var(--text-muted);" viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
                                 </div>
 
-                                <!-- Security Configuration Item -->
-                                <div onclick="document.getElementById('security-config-modal').style.display='flex'; loadSecurityCredentials();" class="settings-item">
+                                <div id="security-settings-item" onclick="document.getElementById('security-config-modal').style.display='flex'; loadSecurityCredentials();" class="settings-item">
                                     <span style="font-weight: 500; color: var(--text-main);">Security Configuration</span>
+                                    <svg style="width: 20px; height: 20px; fill: var(--text-muted);" viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+                                </div>
+
+                                <div id="admin-accounts-item" onclick="openAdminAccountsModal()" class="settings-item" style="display:none;">
+                                    <span style="font-weight: 500; color: var(--text-main);">Admin Accounts (Super Admin)</span>
                                     <svg style="width: 20px; height: 20px; fill: var(--text-muted);" viewBox="0 0 24 24"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
                                 </div>
 
@@ -5737,12 +5907,12 @@
                                     <span>Upload Update</span>
                                 </button>
                                 
-                                <button onclick="createUpdatePackage()" class="btn sys-maint-btn" style="background:var(--gauge-6);">
+                                <button id="btn-create-update" onclick="createUpdatePackage()" class="btn sys-maint-btn" style="background:var(--gauge-6);">
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
                                     <span>Create Update</span>
                                 </button>
 
-                                 <button onclick="upgradeSystem('online')" class="btn sys-maint-btn" style="background:var(--gauge-3);">
+                                <button id="btn-upgrade" onclick="upgradeSystem('online')" class="btn sys-maint-btn" style="background:var(--gauge-3);">
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                                     <span>Upgrade</span>
                                 </button>
@@ -5762,7 +5932,7 @@
                                     <span>Reset</span>
                                 </button>
 
-                                <button onclick="verifyConfiguration()" class="btn sys-maint-btn" style="background: var(--status-active);">
+                                <button id="btn-verify" onclick="verifyConfiguration()" class="btn sys-maint-btn" style="background: var(--status-active);">
                                     <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                     <span>Verify</span>
                                 </button>
@@ -6066,6 +6236,44 @@
                     </div>
                     <button type="submit" class="btn btn-primary">Update Credentials</button>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="admin-accounts-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:620px; max-height:95vh; overflow-y:auto; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size: 0.9rem;">
+            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center;">
+                <span>Admin Accounts</span>
+                <button onclick="document.getElementById('admin-accounts-modal').style.display='none'" style="background:none; border:none; font-size:1.2rem; cursor:pointer;">&times;</button>
+            </div>
+            <div style="padding:15px;">
+                <div style="margin-bottom:15px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
+                    <div style="flex:1; min-width:160px;">
+                        <label style="display:block; font-weight:600; margin-bottom:4px;">New Admin Username</label>
+                        <input type="text" id="new-admin-username" class="login-input" style="margin:0; padding: 4px 8px;">
+                    </div>
+                    <div style="flex:1; min-width:160px;">
+                        <label style="display:block; font-weight:600; margin-bottom:4px;">New Admin Password</label>
+                        <input type="password" id="new-admin-password" class="login-input" style="margin:0; padding: 4px 8px;">
+                    </div>
+                    <button onclick="createAdminAccount()" class="btn btn-primary" style="margin-top:4px;">Create Admin</button>
+                </div>
+                <div style="border:1px solid var(--border); border-radius:6px; overflow:hidden;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                        <thead style="background:var(--bg-elevated);">
+                            <tr>
+                                <th style="text-align:left; padding:8px 10px;">ID</th>
+                                <th style="text-align:left; padding:8px 10px;">Username</th>
+                                <th style="text-align:left; padding:8px 10px;">Role</th>
+                                <th style="text-align:left; padding:8px 10px;">Created</th>
+                                <th style="text-align:right; padding:8px 10px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-accounts-body">
+                            <tr><td colspan="5" style="padding:12px 10px; text-align:center; color:var(--text-muted);">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -6934,6 +7142,7 @@
             initCharts();
             initIdleTimer();
             initSystemClock(); // Start the clock
+            loadAdminInfo();
             
             // Init Chat (Authenticated)
             initChatSocket();
@@ -13353,11 +13562,3 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
     <script src="/js/admin-toast.js"></script>
 </body>
 </html>
-
-
-
-
-
-
-
-

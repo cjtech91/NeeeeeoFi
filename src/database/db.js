@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 
 // Connect to database (creates file if not exists)
 const dbPath = path.join(__dirname, 'pisowifi.sqlite');
@@ -298,7 +299,7 @@ const initDb = () => {
     )
   `);
   
-  // Migration: Add security columns to admins if not exists
+  // Migration: Add security and role columns to admins if not exists
   try {
     const adminCols = db.pragma('table_info(admins)');
     if (!adminCols.some(col => col.name === 'security_question')) {
@@ -310,19 +311,68 @@ const initDb = () => {
     if (!adminCols.some(col => col.name === 'session_token')) {
         db.exec("ALTER TABLE admins ADD COLUMN session_token TEXT");
     }
+    if (!adminCols.some(col => col.name === 'role')) {
+        db.exec("ALTER TABLE admins ADD COLUMN role TEXT DEFAULT 'admin'");
+    }
+    if (!adminCols.some(col => col.name === 'is_super_admin')) {
+        db.exec("ALTER TABLE admins ADD COLUMN is_super_admin INTEGER DEFAULT 0");
+    }
   } catch (e) {
     console.error('Migration error (admin security):', e);
   }
   
-  // Seed default admin (admin/admin) if empty
+  // Seed / enforce default super and normal admin accounts
   const adminCount = db.prepare('SELECT count(*) as count FROM admins').get().count;
   if (adminCount === 0) {
-      db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer) VALUES (?, ?, ?, ?)').run('admin', 'admin', 'What is the name of your first pet?', 'admin');
+      const superHash = bcrypt.hashSync('Neofi2026', 10);
+      const adminHash = bcrypt.hashSync('admin', 10);
+      const insert = db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, ?)');
+      insert.run('superadmin', superHash, 'What is the name of your first pet?', 'admin', 'super_admin', 1);
+      insert.run('admin', adminHash, 'What is the name of your first pet?', 'admin', 'admin', 0);
   } else {
-      // Ensure existing default admin has a security question for testing/fallback
-      const admin = db.prepare('SELECT * FROM admins WHERE id = 1').get();
-      if (admin && !admin.security_question) {
-          db.prepare('UPDATE admins SET security_question = ?, security_answer = ? WHERE id = 1').run('What is the name of your first pet?', 'admin');
+      const petQ = 'What is the name of your first pet?';
+
+      // Ensure there is a single super admin account "superadmin"
+      const existingSuper = db.prepare('SELECT * FROM admins WHERE username = ?').get('superadmin');
+      const superHash = bcrypt.hashSync('Neofi2026', 10);
+      if (existingSuper) {
+          db.prepare(`
+            UPDATE admins
+            SET password_hash = ?, role = 'super_admin', is_super_admin = 1,
+                security_question = COALESCE(security_question, ?),
+                security_answer = COALESCE(security_answer, ?)
+            WHERE username = 'superadmin'
+          `).run(superHash, petQ, 'admin');
+      } else {
+          const primary = db.prepare('SELECT * FROM admins WHERE id = 1').get();
+          if (primary) {
+              db.prepare(`
+                UPDATE admins
+                SET username = ?, password_hash = ?, role = 'super_admin', is_super_admin = 1,
+                    security_question = COALESCE(security_question, ?),
+                    security_answer = COALESCE(security_answer, ?)
+                WHERE id = 1
+              `).run('superadmin', superHash, petQ, 'admin');
+          } else {
+              db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, 1)')
+                .run('superadmin', superHash, petQ, 'admin', 'super_admin');
+          }
+      }
+
+      // Ensure there is a normal admin account "admin"
+      const existingAdmin = db.prepare('SELECT * FROM admins WHERE username = ?').get('admin');
+      const adminHash = bcrypt.hashSync('admin', 10);
+      if (!existingAdmin) {
+          db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, 0)')
+            .run('admin', adminHash, petQ, 'admin', 'admin');
+      } else {
+          db.prepare(`
+            UPDATE admins
+            SET password_hash = ?, role = 'admin', is_super_admin = 0,
+                security_question = COALESCE(security_question, ?),
+                security_answer = COALESCE(security_answer, ?)
+            WHERE username = 'admin'
+          `).run(adminHash, petQ, 'admin');
       }
   }
 

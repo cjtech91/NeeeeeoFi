@@ -21,6 +21,7 @@ const dnsService = require('./services/dnsService');
 const sessionService = require('./services/sessionService');
 const systemService = require('./services/systemService');
 const logService = require('./services/logService');
+const bcrypt = require('bcryptjs');
 const chatService = require('./services/chatService');
 const walledGardenService = require('./services/walledGardenService');
 const wifiService = require('./services/wifiService');
@@ -1352,53 +1353,98 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- Auth Helper ---
+// --- Auth Helpers ---
 function isAuthenticated(req, res, next) {
-    // Debug Auth
-    // console.log(`[Auth Check] Path: ${req.path}`);
-    // console.log(`[Auth Check] Cookie: ${req.cookies.admin_session}`);
-    // console.log(`[Auth Check] Token:  ${currentAdminSessionToken}`);
-    
-    if (req.cookies.admin_session && req.cookies.admin_session === currentAdminSessionToken) {
-        return next();
+    const token = req.cookies.admin_session;
+    if (!token) {
+        console.warn(`[Auth Check] Failed for ${req.path}. Client sent: No Cookie`);
+        return res.status(401).json({ error: 'Unauthorized' });
     }
-    console.warn(`[Auth Check] Failed for ${req.path}. Client sent: ${req.cookies.admin_session ? 'Invalid Cookie' : 'No Cookie'}`);
-    res.status(401).json({ error: 'Unauthorized' });
+    let admin;
+    try {
+        admin = db.prepare('SELECT id, username, role, is_super_admin FROM admins WHERE session_token = ?').get(token);
+    } catch (e) {
+        console.error('Auth lookup failed:', e);
+        return res.status(500).json({ error: 'Auth lookup failed' });
+    }
+    if (!admin) {
+        console.warn(`[Auth Check] Failed for ${req.path}. Client sent: Invalid Cookie`);
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    req.admin = admin;
+    next();
+}
+
+function requireSuperAdmin(req, res, next) {
+    if (!req.admin || !req.admin.is_super_admin) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
 }
 
 // --- Routes ---
 
+function isBcryptHash(value) {
+    return typeof value === 'string' && value.startsWith('$2') && value.length >= 40;
+}
+
 // 0. Admin Auth
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body;
     const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
     
-    // Simple check (In production use bcrypt.compare)
-    if (admin && admin.password_hash === password) {
-        logService.info('SYSTEM', `Admin login successful (User: ${username})`);
-        
-        // Multi-device login support: Reuse existing token if available, else generate new
-        let sessionToken = admin.session_token;
-        if (!sessionToken) {
-            sessionToken = crypto.randomBytes(32).toString('hex');
-            db.prepare('UPDATE admins SET session_token = ? WHERE id = 1').run(sessionToken);
-        }
-        
-        // Update global token reference
-        currentAdminSessionToken = sessionToken;
-
-        res.cookie('admin_session', sessionToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
-        res.json({ success: true });
-    } else {
+    if (!admin || !admin.password_hash) {
         logService.warn('SYSTEM', `Admin login failed (User: ${username})`);
-        res.status(401).json({ error: 'Invalid credentials' });
+        return res.status(401).json({ error: 'Invalid credentials' });
     }
+
+    const stored = admin.password_hash;
+    let authenticated = false;
+
+    try {
+        if (isBcryptHash(stored)) {
+            const ok = await bcrypt.compare(password, stored);
+            authenticated = ok;
+        } else if (stored === password) {
+            authenticated = true;
+            const newHash = await bcrypt.hash(password, 10);
+            db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(newHash, admin.id);
+        }
+    } catch (e) {
+        console.error('Auth error (hash compare):', e);
+        return res.status(500).json({ error: 'Auth error' });
+    }
+
+    if (!authenticated) {
+        logService.warn('SYSTEM', `Admin login failed (User: ${username})`);
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    logService.info('SYSTEM', `Admin login successful (User: ${username})`);
+        
+    let sessionToken = admin.session_token;
+    if (!sessionToken) {
+        sessionToken = crypto.randomBytes(32).toString('hex');
+        db.prepare('UPDATE admins SET session_token = ? WHERE id = ?').run(sessionToken, admin.id);
+    }
+
+    res.cookie('admin_session', sessionToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+    res.json({ success: true });
 });
 
 app.post('/api/auth/logout', (req, res) => {
     logService.info('SYSTEM', 'Admin logout');
     res.clearCookie('admin_session');
     res.json({ success: true });
+});
+
+app.get('/api/auth/me', isAuthenticated, (req, res) => {
+    res.json({
+        id: req.admin.id,
+        username: req.admin.username,
+        role: req.admin.role || 'admin',
+        is_super_admin: !!req.admin.is_super_admin
+    });
 });
 
 const resetTokens = new Map(); // Token -> Expiry Timestamp
@@ -1551,10 +1597,10 @@ app.get('/api/admin/chat/history/:mac', isAuthenticated, (req, res) => {
 
 // --- System Routes ---
 
-// Get Admin Credentials (Safe)
+// Get current admin credentials (per-account)
 app.get('/api/admin/security/credentials', isAuthenticated, (req, res) => {
     try {
-        const admin = db.prepare('SELECT username, security_question, security_answer FROM admins WHERE id = 1').get();
+        const admin = db.prepare('SELECT username, security_question, security_answer FROM admins WHERE id = ?').get(req.admin.id);
         if (admin) {
             res.json(admin);
         } else {
@@ -1566,21 +1612,29 @@ app.get('/api/admin/security/credentials', isAuthenticated, (req, res) => {
     }
 });
 
-// Update Admin Credentials
-app.post('/api/admin/security/credentials', isAuthenticated, (req, res) => {
+// Update current admin credentials (per-account)
+app.post('/api/admin/security/credentials', isAuthenticated, async (req, res) => {
     const { username, password, security_question, security_answer } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
     
     try {
+        const exists = db.prepare('SELECT id FROM admins WHERE username = ? AND id != ?').get(username, req.admin.id);
+        if (exists) {
+            return res.status(400).json({ error: 'Username already in use' });
+        }
+
+        const hash = await bcrypt.hash(password, 10);
         let sql = 'UPDATE admins SET username = ?, password_hash = ?';
-        const params = [username, password];
+        const params = [username, hash];
 
         if (security_question && security_answer) {
             sql += ', security_question = ?, security_answer = ?';
             params.push(security_question, security_answer);
         }
 
-        sql += ' WHERE id = 1';
+        sql += ' WHERE id = ?';
+        params.push(req.admin.id);
+
         db.prepare(sql).run(...params);
         
         logService.warn('SYSTEM', `Admin credentials updated (User: ${username})`);
@@ -1592,8 +1646,70 @@ app.post('/api/admin/security/credentials', isAuthenticated, (req, res) => {
     }
 });
 
+app.get('/api/super-admin/admins', isAuthenticated, requireSuperAdmin, (req, res) => {
+    try {
+        const admins = db.prepare('SELECT id, username, role, is_super_admin, created_at FROM admins ORDER BY id ASC').all();
+        res.json(admins);
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to fetch admins' });
+    }
+});
+
+app.post('/api/super-admin/admins', isAuthenticated, requireSuperAdmin, async (req, res) => {
+    const { username, password, role } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+    const finalRole = role === 'super_admin' ? 'admin' : 'admin';
+    try {
+        const hash = await bcrypt.hash(password, 10);
+        const stmt = db.prepare('INSERT INTO admins (username, password_hash, role, is_super_admin) VALUES (?, ?, ?, ?)');
+        const info = stmt.run(username, hash, finalRole, 0);
+        logService.info('SYSTEM', `Admin account created (User: ${username})`);
+        res.json({ success: true, id: info.lastInsertRowid });
+    } catch (e) {
+        console.error(e);
+        if (e && e.message && e.message.includes('UNIQUE')) {
+            return res.status(400).json({ error: 'Username already exists' });
+        }
+        res.status(500).json({ error: 'Failed to create admin' });
+    }
+});
+
+app.post('/api/super-admin/admins/:id/reset-password', isAuthenticated, requireSuperAdmin, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const { password } = req.body;
+    if (!id || !password) return res.status(400).json({ error: 'ID and password required' });
+    try {
+        const admin = db.prepare('SELECT id, is_super_admin FROM admins WHERE id = ?').get(id);
+        if (!admin) return res.status(404).json({ error: 'Admin not found' });
+        const hash = await bcrypt.hash(password, 10);
+        db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(hash, id);
+        logService.warn('SYSTEM', `Admin password reset (ID: ${id})`);
+        res.json({ success: true });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to reset password' });
+    }
+});
+
+app.delete('/api/super-admin/admins/:id', isAuthenticated, requireSuperAdmin, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'ID required' });
+    try {
+        const admin = db.prepare('SELECT id, is_super_admin FROM admins WHERE id = ?').get(id);
+        if (!admin) return res.status(404).json({ error: 'Admin not found' });
+        if (admin.is_super_admin) return res.status(400).json({ error: 'Cannot delete super admin account' });
+        db.prepare('DELETE FROM admins WHERE id = ?').run(id);
+        logService.warn('SYSTEM', `Admin account deleted (ID: ${id})`);
+        res.json({ success: true });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to delete admin' });
+    }
+});
+
 // System Maintenance
-app.get('/api/admin/system/verify', isAuthenticated, async (req, res) => {
+app.get('/api/admin/system/verify', isAuthenticated, requireSuperAdmin, async (req, res) => {
     try {
         const results = await systemService.verifyConfiguration();
         res.json(results);
@@ -1691,7 +1807,7 @@ app.post('/api/admin/system/reset', isAuthenticated, async (req, res) => {
     }
 });
 
-app.get('/api/admin/system/create-update', isAuthenticated, async (req, res) => {
+app.get('/api/admin/system/create-update', isAuthenticated, requireSuperAdmin, async (req, res) => {
     try {
         const filePath = await systemService.createUpdatePackage();
         res.download(filePath, (err) => {
@@ -1719,7 +1835,7 @@ app.post('/api/admin/system/apply-update', isAuthenticated, async (req, res) => 
     }
 });
 
-app.post('/api/admin/system/upgrade', isAuthenticated, async (req, res) => {
+app.post('/api/admin/system/upgrade', isAuthenticated, requireSuperAdmin, async (req, res) => {
     try {
         const { type } = req.body;
         await systemService.upgrade(type);
@@ -3330,7 +3446,7 @@ app.delete('/api/admin/firewall/rules/:id', isAuthenticated, async (req, res) =>
 });
 
 // 1. Dashboard Data
-app.get('/api/admin/system/verify', isAuthenticated, async (req, res) => {
+app.get('/api/admin/system/verify', isAuthenticated, requireSuperAdmin, async (req, res) => {
     try {
         const results = await systemService.verifyConfiguration();
         res.json(results);

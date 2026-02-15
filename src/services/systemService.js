@@ -1,5 +1,6 @@
 const { exec } = require('child_process');
 const { db } = require('../database/db');
+const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
@@ -42,10 +43,13 @@ class SystemService {
             db.prepare('DELETE FROM free_time_claims').run();
             db.prepare('DELETE FROM coins_out_logs').run();
             
-            // Reset settings to defaults if needed
-            // Keep admin credentials or reset to default? 
-            // Usually factory reset resets admin to default.
-            db.prepare('UPDATE admins SET username = ?, password_hash = ? WHERE id = 1').run('admin', 'admin');
+            // Reset admin accounts to default: superadmin/superadmin and admin/admin
+            db.prepare('DELETE FROM admins').run();
+            const superHash = bcrypt.hashSync('Neofi2026', 10);
+            const adminHash = bcrypt.hashSync('admin', 10);
+            const insert = db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, ?)');
+            insert.run('superadmin', superHash, 'What is the name of your first pet?', 'admin', 'super_admin', 1);
+            insert.run('admin', adminHash, 'What is the name of your first pet?', 'admin', 'admin', 0);
             
             logService.info('SYSTEM', 'Factory Reset completed successfully');
             return true;
