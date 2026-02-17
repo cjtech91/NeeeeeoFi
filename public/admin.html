@@ -4339,7 +4339,7 @@
                     <!-- ACTIVE CODES Card -->
                     <div class="card" style="margin-top: 25px;">
                         <div class="card-header" id="active-codes-header">
-                            <div class="card-title" id="active-codes-header-title">ACTIVE CODES (SESSIONS)</div>
+                            <div class="card-title" id="active-codes-header-title">ACTIVE CODES (SESSIONS) <span id="active-codes-title-counts" style="font-size:0.85rem; margin-left:8px; color:var(--text-muted)"></span></div>
                             <div id="active-codes-header-filter" style="display:flex; align-items:center; gap:10px;">
                                 <div style="display:flex; align-items:center; gap:5px;">
                                     <span style="font-size:0.8rem; color:var(--text-muted);">Show:</span>
@@ -7136,6 +7136,16 @@
             }
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                IntervalManager.stop('bandwidth_chart');
+            } else {
+                if (currentView && currentView === 'dashboard') {
+                    updateBandwidthChart();
+                    IntervalManager.start('bandwidth_chart', updateBandwidthChart, 5000);
+                }
+            }
+        });
         function showDashboard(forceDashboard) {
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('dashboard-ui').style.display = 'flex';
@@ -7227,9 +7237,9 @@
                 loadDashboardData();
                 IntervalManager.start('dashboard', loadDashboardData, 5000);
                 
-                // Bandwidth Chart (3s update)
+                // Bandwidth Chart (5s update)
                 updateBandwidthChart();
-                IntervalManager.start('bandwidth_chart', updateBandwidthChart, 3000);
+                IntervalManager.start('bandwidth_chart', updateBandwidthChart, 5000);
             } else if (view === 'sales') {
                 loadSalesData('daily');
             } else if (view === 'pppoe-sales') {
@@ -7363,8 +7373,18 @@
                     if(storageEl) storageEl.textContent = `Used: ${usedGB} GB / Total: ${totalGB} GB`;
                 }
 
-                const uptimeHrs = (data.uptime / 3600).toFixed(1);
-                document.getElementById('uptime').textContent = uptimeHrs + ' hrs';
+                const upSec = Number(data.uptime) || 0;
+                let uptimeText = '';
+                if (upSec >= 86400) {
+                    const days = Math.floor(upSec / 86400);
+                    const hours = Math.floor((upSec % 86400) / 3600);
+                    const minutes = Math.floor((upSec % 3600) / 60);
+                    uptimeText = `${days}day ${hours}hrs ${minutes}mins`;
+                } else {
+                    const uptimeHrs = (upSec / 3600).toFixed(1);
+                    uptimeText = uptimeHrs + ' hrs';
+                }
+                document.getElementById('uptime').textContent = uptimeText;
 
                 const connectedEl = document.getElementById('clients-connected-count');
                 const pausedEl = document.getElementById('clients-paused-count');
@@ -7455,9 +7475,10 @@
                 }
 
 
-// Bandwidth Chart (1s update)
+// Bandwidth Chart (5s update)
 updateBandwidthChart();
-IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
+IntervalManager.stop('bandwidth_chart');
+IntervalManager.start('bandwidth_chart', updateBandwidthChart, 5000);
 
                 
                 // If on Network tab, refresh specific network data
@@ -8006,18 +8027,23 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                 const select = document.getElementById('monitored-interface-select');
                 let selectedIface = select ? select.value : '';
 
+                const relevantStats = Array.isArray(stats) ? stats.filter(s => {
+                    const n = (s && s.interface) ? s.interface : '';
+                    return n === 'br0' || n.startsWith('wlan') || n.startsWith('wlx') || n.startsWith('ppp') || n.includes('pppoe') || n.includes('vlan') || n.includes('.');
+                }) : [];
+
                 // Populate Dropdown if empty or "Detecting..."
                 if (select && (select.options.length <= 1 && select.options[0].disabled)) {
                     select.innerHTML = '';
                     
                     // Add "All Interfaces" option
                     const allOpt = document.createElement('option');
-                    allOpt.value = 'Aggregate';
-                    allOpt.textContent = 'All Interfaces (Aggregate)';
+                    allOpt.value = 'AggregateHotspotPppoeVlan';
+                    allOpt.textContent = 'Hotspot + PPPoE + VLAN (Aggregate)';
                     select.appendChild(allOpt);
 
                     // Add detected interfaces
-                    stats.forEach(s => {
+                    relevantStats.forEach(s => {
                         const opt = document.createElement('option');
                         opt.value = s.interface;
                         opt.textContent = s.interface;
@@ -8031,20 +8057,20 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
 
                 // Auto-detect if nothing selected yet
                 if (!selectedIface) {
-                    selectedIface = 'Aggregate';
+                    selectedIface = 'AggregateHotspotPppoeVlan';
                     if (select) select.value = selectedIface;
                 }
 
                 // Fetch data based on selection
-                if (selectedIface === 'Aggregate') {
-                    stats.forEach(iface => {
+                if (selectedIface === 'AggregateHotspotPppoeVlan') {
+                    relevantStats.forEach(iface => {
                         if (iface.interface !== 'lo') {
                             currentRx += iface.rx_bytes;
                             currentTx += iface.tx_bytes;
                         }
                     });
                 } else {
-                    targetStats = stats.find(s => s.interface === selectedIface);
+                    targetStats = relevantStats.find(s => s.interface === selectedIface);
                     if (targetStats) {
                         currentRx = targetStats.rx_bytes;
                         currentTx = targetStats.tx_bytes;
@@ -8076,7 +8102,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                 
                 // Determine if interface is WAN-like (Aggregate or specific WAN)
                 let isWanInterface = false;
-                if (selectedIface === 'Aggregate') {
+                if (selectedIface && selectedIface.startsWith('Aggregate')) {
                     isWanInterface = true; // Treat aggregate as system In/Out
                 } else {
                     const wanPrefixes = ['pppoe', 'ppp', 'eth', 'usb', 'wwan'];
@@ -11293,6 +11319,20 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                  filteredUsers = filteredUsers.filter(u => !u.is_connected || u.is_paused);
              }
 
+            const titleCountsEl = document.getElementById('active-codes-title-counts');
+            if (titleCountsEl) {
+                const totalAll = cachedActiveUsers.length;
+                const totalOnline = cachedActiveUsers.filter(u => u.is_connected && !u.is_paused).length;
+                const totalOffline = cachedActiveUsers.filter(u => !u.is_connected || u.is_paused).length;
+                if (statusFilter === 'online') {
+                    titleCountsEl.textContent = `Online: ${totalOnline}`;
+                } else if (statusFilter === 'offline_paused') {
+                    titleCountsEl.textContent = `Offline/Paused: ${totalOffline}`;
+                } else {
+                    titleCountsEl.textContent = `All: ${totalAll}`;
+                }
+            }
+
              // Apply Sort
              if (currentActiveSort.column) {
                  filteredUsers.sort((a, b) => {
@@ -11571,6 +11611,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
             try {
                 const res = await fetch('/api/admin/expired-sessions', { credentials: 'include' });
                 const sessions = await res.json();
+                const titleEl = document.getElementById('expired-sessions-header-title');
+                if (titleEl) titleEl.textContent = `EXPIRED SESSION ${Array.isArray(sessions) ? sessions.length : 0}`;
                 const tbody = document.querySelector('#expired-sessions-table tbody');
                 if (!tbody) return;
 
@@ -11598,6 +11640,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                 console.error('Error loading expired sessions:', e);
                 const tbody = document.querySelector('#expired-sessions-table tbody');
                 if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:15px;">Error loading data</td></tr>';
+                const titleEl = document.getElementById('expired-sessions-header-title');
+                if (titleEl) titleEl.textContent = 'EXPIRED SESSION 0';
             }
         }
 
