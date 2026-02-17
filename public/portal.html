@@ -437,6 +437,29 @@
             margin-bottom: 10px;
         }
 
+        /* Loading Overlay with Bouncing Logo */
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.25);
+            z-index: 3000;
+        }
+        .loading-logo {
+            width: 96px;
+            height: auto;
+            animation: bounce 1s ease-in-out infinite;
+            filter: drop-shadow(0 6px 12px rgba(0,0,0,0.35));
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-12px); }
+        }
         /* Rates List in Modal */
         .rate-list {
             max-height: 300px;
@@ -997,6 +1020,11 @@
             <p id="announcement-message" style="margin-bottom:0; color:var(--text); white-space: pre-wrap; text-align: left; max-height: 300px; overflow-y: auto;"></p>
             <div onclick="closeAnnouncement()" style="position: absolute; bottom: 15px; left: 0; width: 100%; text-align: center; cursor: pointer; color: var(--text); font-weight: 500;">Close</div>
         </div>
+    </div>
+    
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <img src="neologo.png" alt="Loading" class="loading-logo" />
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -2107,6 +2135,8 @@
             btn.disabled = true;
 
             try {
+                const overlay = document.getElementById('loading-overlay');
+                if (overlay) overlay.style.display = 'flex';
                 const res = await fetch('/api/voucher/redeem', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2147,6 +2177,8 @@
             } catch (e) {
                 showToast('Connection failed.', 'error');
             } finally {
+                const overlay = document.getElementById('loading-overlay');
+                if (overlay) overlay.style.display = 'none';
                 btn.textContent = originalText;
                 btn.disabled = false;
             }
