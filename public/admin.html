@@ -4523,7 +4523,7 @@
                                 <label style="display:block; margin-bottom:4px; font-weight:600; font-size:0.85rem;">Batch Code (Group ID)</label>
                                 <div style="display:flex; gap:5px;">
                                     <input type="text" id="v-batch-id" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--text-main); box-sizing:border-box;">
-                                    <button class="btn btn-sm btn-secondary" onclick="generateRandomBatchId()" title="Regenerate" style="padding: 0 12px; font-size: 1.2rem;">&#8635;</button>
+                                    <button id="v-batch-regenerate" class="btn btn-sm btn-secondary" onclick="generateRandomBatchId()" title="Regenerate" style="padding: 0 12px; font-size: 1.2rem;">&#8635;</button>
                                 </div>
                             </div>
 
@@ -4538,7 +4538,7 @@
                             <!-- Row: Qty | Type -->
                             <div>
                                 <label style="display:block; margin-bottom:4px; font-weight:600; font-size:0.85rem;">Quantity</label>
-                                <input type="number" id="v-qty" value="1" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--text-main); box-sizing:border-box;">
+                                <input type="number" id="v-qty" value="1" min="1" max="1000" oninput="var v=parseInt(this.value,10)||0; this.value=Math.max(1,v); updateBatchIdState()" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--text-main); box-sizing:border-box;">
                             </div>
                             <div>
                                 <label style="display:block; margin-bottom:4px; font-weight:600; font-size:0.85rem;">Type</label>
@@ -4604,7 +4604,7 @@
 
                             <!-- Custom Code (Full Width) -->
                             <div style="grid-column: span 2;">
-                                <input type="text" id="v-custom" placeholder="Enter Custom Code (Uncheck Random first)" disabled style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-body); color:var(--text-main); opacity:0.7; box-sizing:border-box;">
+                                <input type="text" id="v-custom" placeholder="Enter Custom Code (Uncheck Random first)" disabled oninput="this.value=this.value.toUpperCase()" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-body); color:var(--text-main); opacity:0.7; box-sizing:border-box; text-transform:uppercase;" autocapitalize="characters">
                             </div>
 
                             <!-- Plan Name (Full Width) -->
@@ -9713,21 +9713,56 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 5000);
         }
 
         // Voucher Management Functions
-        function generateRandomBatchId() {
-            const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-            let rand = '';
-            for(let i=0; i<4; i++) {
-                rand += chars.charAt(Math.floor(Math.random() * chars.length));
+        const VoucherConfig = { batchThreshold: 10 };
+        const voucherSettingsReady = (async function(){ 
+            try { 
+                const res = await fetch('/api/admin/settings'); 
+                const settings = await res.json(); 
+                VoucherConfig.batchThreshold = Number(settings.voucher_batch_threshold) || 10; 
+            } catch (e) {} 
+        })();
+        async function generateRandomBatchId() {
+            const cryptoObj = (window.crypto || window.msCrypto || self.crypto);
+            let id = '';
+            if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+                try {
+                    const arr = new Uint8Array(8);
+                    cryptoObj.getRandomValues(arr);
+                    const hex = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+                    id = 'B' + hex;
+                } catch (e) {
+                    console.error('Web Crypto getRandomValues failed; falling back to server', e);
+                    if (typeof showToast === 'function') showToast('Secure crypto failed; using server fallback', 'warning');
+                }
             }
-            const id = 'B' + Date.now().toString(36).toUpperCase() + rand;
+            if (!id) {
+                try {
+                    const res = await fetch('/api/admin/voucher-batch-id');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    if (!data || !data.id) throw new Error('Invalid server response for batch ID');
+                    id = data.id;
+                } catch (err) {
+                    console.error('Failed to fetch secure batch ID from server', err);
+                }
+            }
+            
+            // Last resort fallback if both methods fail
+            if (!id) {
+                console.warn('All secure methods failed, using Math.random fallback');
+                if (typeof showToast === 'function') showToast('Warning: Using insecure fallback for Batch ID', 'warning');
+                const randomHex = Array.from({length: 16}, () => Math.floor(Math.random() * 16).toString(16)).join('').toUpperCase();
+                id = 'B' + randomHex;
+            }
+
             const el = document.getElementById('v-batch-id');
-            if(el) el.value = id;
+            if (el) el.value = id;
             return id;
         }
 
-        function openVoucherModal() {
-            generateRandomBatchId();
+        async function openVoucherModal() {
             document.getElementById('voucher-modal').style.display = 'flex';
+            await updateBatchIdState();
         }
 
         function closeVoucherModal() {
@@ -9739,6 +9774,31 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 5000);
             const customInput = document.getElementById('v-custom');
             customInput.disabled = isRandom;
             customInput.style.opacity = isRandom ? 0.7 : 1;
+        }
+
+        async function updateBatchIdState() {
+            await voucherSettingsReady;
+            const qtyEl = document.getElementById('v-qty');
+            const batchEl = document.getElementById('v-batch-id');
+            const regenBtn = document.getElementById('v-batch-regenerate');
+            const qty = parseInt(qtyEl ? qtyEl.value : '0') || 0;
+            if (!batchEl) return;
+            if (qty <= VoucherConfig.batchThreshold) {
+                batchEl.disabled = true;
+                batchEl.style.opacity = '0.7';
+                if (regenBtn) regenBtn.disabled = true;
+            } else {
+                batchEl.disabled = false;
+                batchEl.style.opacity = '1';
+                if (regenBtn) regenBtn.disabled = false;
+                if (!batchEl.value) {
+                    try { 
+                        await generateRandomBatchId(); 
+                    } catch (e) { 
+                        console.error('generateRandomBatchId failed', e); 
+                    }
+                }
+            }
         }
 
         // --- Voucher Bulk Actions ---

@@ -52,7 +52,9 @@ class VoucherService {
         } = options;
 
         const vouchers = [];
-        const batchId = options.batch_id || `B${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+        const threshold = Number(configService.get('voucher_batch_threshold', 10));
+        const shouldCreateBatch = count > threshold;
+        const batchId = shouldCreateBatch ? (options.batch_id || `B${crypto.randomBytes(8).toString('hex').toUpperCase()}`) : null;
         const durationSeconds = duration * 60;
         
         const insert = db.prepare(`
@@ -88,7 +90,7 @@ class VoucherService {
         });
 
         transaction();
-        logService.info('VOUCHER', `Generated ${count} vouchers (Plan: ${plan_name}, Price: ${price}, Batch: ${batchId})`);
+        logService.info('VOUCHER', `Generated ${count} vouchers (Plan: ${plan_name}, Price: ${price}, Batch: ${batchId || 'None'})`);
         return { codes: vouchers, batchId };
     }
 

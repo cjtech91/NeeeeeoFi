@@ -4364,6 +4364,16 @@ app.post('/api/admin/vouchers/generate', isAuthenticated, (req, res) => {
     }
 });
 
+// Admin: Generate secure Batch ID
+app.get('/api/admin/voucher-batch-id', isAuthenticated, (req, res) => {
+    try {
+        const id = 'B' + crypto.randomBytes(8).toString('hex').toUpperCase();
+        res.json({ id });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to generate batch ID' });
+    }
+});
+
 // Admin: List Vouchers
 app.get('/api/admin/vouchers', isAuthenticated, (req, res) => {
     const includeUsed = req.query.includeUsed === '1' || req.query.includeUsed === 'true';

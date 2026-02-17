@@ -917,7 +917,7 @@
         <!-- Voucher Input (Inline) -->
         <div class="voucher-section">
             <div class="voucher-input-wrapper">
-                <input type="text" class="voucher-input" id="voucher-input-main" placeholder="Enter Voucher Code...">
+                <input type="text" class="voucher-input" id="voucher-input-main" placeholder="Enter Voucher Code..." oninput="this.value=this.value.toUpperCase()" style="text-transform:uppercase;" autocapitalize="characters">
                 <button class="btn-submit" onclick="redeemVoucherMain()">Submit</button>
             </div>
         </div>
@@ -2096,7 +2096,7 @@
 
         async function redeemVoucherMain() {
             const codeInput = document.getElementById('voucher-input-main');
-            const code = codeInput.value.trim();
+            const code = codeInput.value.trim().toUpperCase();
             const mac = document.getElementById('mac-display').textContent;
 
             if (!code) return showToast('Please enter a voucher code', 'warning');
