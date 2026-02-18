@@ -17,8 +17,8 @@ class LicenseService {
         this.isValid = false;
         this.deviceModel = 'Loading...';
         
-        // Default to the official activation server
-        this.apiUrl = configService.get('license_api_url') || 'https://neofisystem.com/api/index.php?endpoint=activate'; 
+        // Default activation server
+        this.apiUrl = configService.get('license_api_url') || 'http://localhost:8080/api/activate'; 
 
         this.init();
     }
@@ -211,6 +211,7 @@ class LicenseService {
             const jsonBody = JSON.stringify(payload);
             console.log('LicenseService: Body Payload (JSON):', jsonBody);
 
+            this.apiUrl = configService.get('license_api_url') || this.apiUrl;
             const urlObj = new URL(this.apiUrl);
             // Ensure endpoint is in URL for routing
             if (!urlObj.searchParams.has('endpoint')) {

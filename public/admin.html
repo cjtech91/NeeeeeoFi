@@ -5970,6 +5970,14 @@
                             <p style="font-size: 0.8rem; color:var(--text-muted); margin-top: 10px;">
                                 Need a license? Contact <a href="https://neofisystem.com" target="_blank">NeoFi System</a> support.
                             </p>
+                            
+                            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+                            
+                            <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Activation Server</h3>
+                            <div style="display:flex; gap:10px; max-width: 600px;">
+                                <input type="text" id="license-api-url-input" class="form-control" placeholder="http://localhost:8080/api/activate" style="flex:1 1 auto;">
+                                <button onclick="saveLicenseServerUrl()" class="btn btn-primary">Save Server URL</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -7250,6 +7258,7 @@
                 loadSettingsData();
             } else if (view === 'license') {
                 loadLicenseInfo();
+                loadLicenseServerUrl();
             } else if (view === 'portal') {
                 loadPortalConfig();
             } else if (view === 'voucher') {
@@ -12339,6 +12348,42 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     statusEl.textContent = 'Error';
                     statusEl.style.color = 'orange';
                 }
+            }
+        }
+
+        async function loadLicenseServerUrl() {
+            try {
+                const res = await fetch('/api/admin/settings', { credentials: 'include' });
+                if (res.status === 401) return;
+                const data = await res.json();
+                const input = document.getElementById('license-api-url-input');
+                if (input) {
+                    input.value = data.license_api_url || 'http://localhost:8080/api/activate';
+                }
+            } catch (e) {}
+        }
+
+        async function saveLicenseServerUrl() {
+            const input = document.getElementById('license-api-url-input');
+            const url = input ? input.value.trim() : '';
+            if (!url) return alert('Please enter a server URL');
+            try {
+                const btn = document.querySelector('button[onclick="saveLicenseServerUrl()"]');
+                const orig = btn ? btn.textContent : 'Save Server URL';
+                if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+                const res = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ license_api_url: url })
+                });
+                if (!res.ok) throw new Error('Failed to save');
+                alert('Activation server URL saved');
+            } catch (e) {
+                alert('Error saving: ' + e.message);
+            } finally {
+                const btn = document.querySelector('button[onclick="saveLicenseServerUrl()"]');
+                if (btn) { btn.disabled = false; btn.textContent = 'Save Server URL'; }
             }
         }
 
