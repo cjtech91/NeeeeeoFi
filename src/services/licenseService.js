@@ -211,7 +211,96 @@ class LicenseService {
             const jsonBody = JSON.stringify(payload);
             console.log('LicenseService: Body Payload (JSON):', jsonBody);
 
-            this.apiUrl = configService.get('license_api_url') || this.apiUrl;
+            const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
+            const backend = (sanitize(configService.get('license_backend')) || 'api').toLowerCase();
+            const supabaseUrl = sanitize(configService.get('supabase_activation_url'));
+            const supabaseKey = sanitize(configService.get('supabase_anon_key'));
+            this.apiUrl = sanitize(configService.get('license_api_url')) || this.apiUrl;
+            // Supabase Function Backend (preferred when configured)
+            if (backend === 'supabase' && supabaseUrl) {
+                try {
+                    const url = new URL(supabaseUrl);
+                    if (!url.pathname || url.pathname === '/') {
+                        url.pathname = '/activate';
+                    }
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        'Accept': '*/*',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PisoWifi/1.0'
+                    };
+                    if (supabaseKey) {
+                        headers['Authorization'] = `Bearer ${supabaseKey}`;
+                    }
+                    console.log('LicenseService: Supabase URL:', url.toString());
+                    const isHttpsFn = url.protocol === 'https:';
+                    const clientFn = isHttpsFn ? https : http;
+                    const optionsFn = {
+                        hostname: url.hostname,
+                        port: url.port || (isHttpsFn ? 443 : 80),
+                        path: url.pathname + url.search,
+                        method: 'POST',
+                        headers
+                    };
+                    const handleResponse = (res, nextAttempt) => {
+                        console.log('LicenseService: Supabase status:', res.statusCode);
+                        let body = '';
+                        res.on('data', (chunk) => body += chunk);
+                        res.on('end', () => {
+                            if (res.statusCode === 404 || /not found/i.test(body)) {
+                                if (nextAttempt) return nextAttempt();
+                            }
+                            try {
+                                const response = JSON.parse(body);
+                                if (response.success === true || response.status === 'success' || response.token || response.message === 'License Activated') {
+                                    this.saveLicense(response, key);
+                                    return resolve(response);
+                                }
+                                return reject(new Error(response.error || response.message || 'Supabase activation failed'));
+                            } catch (e) {
+                                return reject(new Error('Supabase response: ' + body.substring(0, 100)));
+                            }
+                        });
+                    };
+                    const reqFn = clientFn.request(optionsFn, (res) => handleResponse(res, () => {
+                        try {
+                            const projectBase = sanitize(configService.get('supabase_project_url'));
+                            let altUrl;
+                            if (projectBase) {
+                                altUrl = new URL(projectBase);
+                                altUrl.pathname = (altUrl.pathname && altUrl.pathname !== '/' ? altUrl.pathname : '') + '/functions/v1/activate';
+                            } else {
+                                const altHost = url.hostname.replace('functions.supabase.co', 'supabase.co');
+                                altUrl = new URL(`${url.protocol}//${altHost}`);
+                                altUrl.pathname = '/functions/v1/activate';
+                            }
+                            console.log('LicenseService: Supabase alt URL:', altUrl.toString());
+                            const isHttpsAlt = altUrl.protocol === 'https:';
+                            const clientAlt = isHttpsAlt ? https : http;
+                            const optionsAlt = {
+                                hostname: altUrl.hostname,
+                                port: altUrl.port || (isHttpsAlt ? 443 : 80),
+                                path: altUrl.pathname + altUrl.search,
+                                method: 'POST',
+                                headers
+                            };
+                            const reqAlt = clientAlt.request(optionsAlt, (resAlt) => handleResponse(resAlt, null));
+                            reqAlt.on('error', (err) => reject(err));
+                            reqAlt.write(jsonBody);
+                            reqAlt.end();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    }));
+                    reqFn.on('error', (err) => reject(err));
+                    reqFn.write(jsonBody);
+                    reqFn.end();
+                    return; // Do not continue to API mode
+                } catch (e) {
+                    console.error('Supabase Activation Error:', e.message);
+                    // Fallback to API mode if Supabase fails
+                }
+            }
+
             const urlObj = new URL(this.apiUrl);
             // Ensure endpoint is in URL for routing
             if (!urlObj.searchParams.has('endpoint')) {

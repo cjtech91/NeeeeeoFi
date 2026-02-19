@@ -125,8 +125,8 @@ class SessionService extends EventEmitter {
                 if (totalDelta > 0) {
                      updates.push({ deltaUp, deltaDown, ip });
 
-                     // Reset idle timer if SIGNIFICANT traffic detected (Threshold: 1000 bytes /1KB)
-                     if (totalDelta > 1000) {
+                    // Reset idle timer if SIGNIFICANT traffic detected (Threshold: 500 bytes)
+                    if (totalDelta > 500) {
                          activityUpdates.push(ip);
                      }
                 }

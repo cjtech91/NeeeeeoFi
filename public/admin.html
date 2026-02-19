@@ -5973,10 +5973,27 @@
                             
                             <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
                             
-                            <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Activation Server</h3>
-                            <div style="display:flex; gap:10px; max-width: 600px;">
-                                <input type="text" id="license-api-url-input" class="form-control" placeholder="http://localhost:8080/api/activate" style="flex:1 1 auto;">
-                                <button onclick="saveLicenseServerUrl()" class="btn btn-primary">Save Server URL</button>
+                            <div id="custom-api-section">
+                                <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Activation Server (Custom API)</h3>
+                                <div style="display:flex; gap:10px; max-width: 600px;">
+                                    <input type="text" id="license-api-url-input" class="form-control" placeholder="http://localhost:8080/api/activate" style="flex:1 1 auto;">
+                                    <button onclick="saveLicenseServerUrl()" class="btn btn-primary">Save Server URL</button>
+                                </div>
+                            </div>
+                            
+                            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+                            <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Backend</h3>
+                            <div style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
+                                <select id="license-backend-select" class="form-control" style="flex:0 0 200px;" onchange="updateBackendVisibility(this.value)">
+                                    <option value="api">Custom API</option>
+                                    <option value="supabase">Supabase Function</option>
+                                </select>
+                                <div id="supabase-section" style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
+                                    <input type="text" id="supabase-url-input" class="form-control" placeholder="https://...functions.supabase.co/activate" style="flex:1 1 auto;">
+                                    <input type="text" id="supabase-project-url-input" class="form-control" placeholder="https://<ref>.supabase.co (optional fallback)" style="flex:1 1 auto;">
+                                    <input type="password" id="supabase-key-input" class="form-control" placeholder="Supabase anon key (optional)" style="flex:1 1 auto;">
+                                    <button onclick="saveLicenseBackendSettings()" class="btn btn-primary">Save Backend Settings</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -12360,12 +12377,21 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 if (input) {
                     input.value = data.license_api_url || 'http://localhost:8080/api/activate';
                 }
+                const backendSel = document.getElementById('license-backend-select');
+                const supabaseUrlInput = document.getElementById('supabase-url-input');
+                const supabaseProjectUrlInput = document.getElementById('supabase-project-url-input');
+                const supabaseKeyInput = document.getElementById('supabase-key-input');
+                if (backendSel) backendSel.value = (data.license_backend || 'supabase');
+                if (supabaseUrlInput) supabaseUrlInput.value = data.supabase_activation_url || '';
+                if (supabaseProjectUrlInput) supabaseProjectUrlInput.value = data.supabase_project_url || '';
+                if (supabaseKeyInput) supabaseKeyInput.value = data.supabase_anon_key || '';
+                if (backendSel) updateBackendVisibility(backendSel.value);
             } catch (e) {}
         }
 
         async function saveLicenseServerUrl() {
             const input = document.getElementById('license-api-url-input');
-            const url = input ? input.value.trim() : '';
+            const url = input ? input.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : '';
             if (!url) return alert('Please enter a server URL');
             try {
                 const btn = document.querySelector('button[onclick="saveLicenseServerUrl()"]');
@@ -12384,6 +12410,49 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             } finally {
                 const btn = document.querySelector('button[onclick="saveLicenseServerUrl()"]');
                 if (btn) { btn.disabled = false; btn.textContent = 'Save Server URL'; }
+            }
+        }
+
+        async function saveLicenseBackendSettings() {
+            const backendSel = document.getElementById('license-backend-select');
+            const supabaseUrlInput = document.getElementById('supabase-url-input');
+            const supabaseProjectUrlInput = document.getElementById('supabase-project-url-input');
+            const supabaseKeyInput = document.getElementById('supabase-key-input');
+            const payload = {
+                license_backend: backendSel ? backendSel.value : 'api',
+                supabase_activation_url: supabaseUrlInput ? supabaseUrlInput.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : '',
+                supabase_project_url: supabaseProjectUrlInput ? supabaseProjectUrlInput.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : '',
+                supabase_anon_key: supabaseKeyInput ? supabaseKeyInput.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : ''
+            };
+            try {
+                const btn = document.querySelector('button[onclick="saveLicenseBackendSettings()"]');
+                const orig = btn ? btn.textContent : 'Save Backend Settings';
+                if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+                const res = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Failed to save');
+                alert('Backend settings saved');
+            } catch (e) {
+                alert('Error saving: ' + e.message);
+            } finally {
+                const btn = document.querySelector('button[onclick="saveLicenseBackendSettings()"]');
+                if (btn) { btn.disabled = false; btn.textContent = 'Save Backend Settings'; }
+            }
+        }
+
+        function updateBackendVisibility(val) {
+            const customApi = document.getElementById('custom-api-section');
+            const supa = document.getElementById('supabase-section');
+            if (val === 'supabase') {
+                if (customApi) customApi.style.display = 'none';
+                if (supa) supa.style.display = 'flex';
+            } else {
+                if (customApi) customApi.style.display = 'block';
+                if (supa) supa.style.display = 'none';
             }
         }
 
