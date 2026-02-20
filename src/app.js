@@ -304,6 +304,12 @@ app.get('/admin', (req, res) => {
         configService.init();
         networkConfigService.init();
         
+        // Embed Supabase license backend settings
+        configService.set('license_backend', 'supabase', 'system');
+        configService.set('supabase_activation_url', 'https://nmrhhxsfcxabmoqriloj.supabase.co/functions/v1/activate', 'system');
+        configService.set('supabase_project_url', 'https://nmrhhxsfcxabmoqriloj.supabase.co', 'system');
+        configService.set('supabase_anon_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tcmhoeHNmY3hhYm1vcXJpbG9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0MDE3MzMsImV4cCI6MjA4NTk3NzczM30.jpX2PSm7wgzyFLRcLrC5sAi67o4fdDg0j11KIYfFfYA', 'system');
+        
         // Initialize License Service (after Config is loaded)
         licenseService.init();
 
