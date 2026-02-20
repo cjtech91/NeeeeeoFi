@@ -304,6 +304,9 @@ app.get('/admin', (req, res) => {
         configService.init();
         networkConfigService.init();
         
+        // Initialize License Service (after Config is loaded)
+        licenseService.init();
+
         await coinService.init();
 
         // Ensure Sub Vendo Key exists

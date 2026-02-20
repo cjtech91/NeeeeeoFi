@@ -407,10 +407,15 @@
                 const btnCreateUpdate = document.getElementById('btn-create-update');
                 const btnUpgrade = document.getElementById('btn-upgrade');
                 const btnVerify = document.getElementById('btn-verify');
+                const licenseBackend = document.getElementById('license-backend-wrapper');
+
                 if (!data.is_super_admin) {
                     if (btnCreateUpdate) btnCreateUpdate.style.display = 'none';
                     if (btnUpgrade) btnUpgrade.style.display = 'none';
                     if (btnVerify) btnVerify.style.display = 'none';
+                    if (licenseBackend) licenseBackend.style.display = 'none';
+                } else {
+                    if (licenseBackend) licenseBackend.style.display = 'block';
                 }
             } catch (e) {
                 console.error('Failed to load admin info', e);
@@ -5981,18 +5986,20 @@
                                 </div>
                             </div>
                             
-                            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
-                            <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Backend</h3>
-                            <div style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
-                                <select id="license-backend-select" class="form-control" style="flex:0 0 200px;" onchange="updateBackendVisibility(this.value)">
-                                    <option value="api">Custom API</option>
-                                    <option value="supabase">Supabase Function</option>
-                                </select>
-                                <div id="supabase-section" style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
-                                    <input type="text" id="supabase-url-input" class="form-control" placeholder="https://...functions.supabase.co/activate" style="flex:1 1 auto;">
-                                    <input type="text" id="supabase-project-url-input" class="form-control" placeholder="https://<ref>.supabase.co (optional fallback)" style="flex:1 1 auto;">
-                                    <input type="password" id="supabase-key-input" class="form-control" placeholder="Supabase anon key (optional)" style="flex:1 1 auto;">
-                                    <button onclick="saveLicenseBackendSettings()" class="btn btn-primary">Save Backend Settings</button>
+                            <div id="license-backend-wrapper" style="display:none;">
+                                <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+                                <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Backend</h3>
+                                <div style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
+                                    <select id="license-backend-select" class="form-control" style="flex:0 0 200px;" onchange="updateBackendVisibility(this.value)">
+                                        <option value="api">Custom API</option>
+                                        <option value="supabase">Supabase Function</option>
+                                    </select>
+                                    <div id="supabase-section" style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
+                                        <input type="text" id="supabase-url-input" class="form-control" placeholder="https://...functions.supabase.co/activate" style="flex:1 1 auto;">
+                                        <input type="text" id="supabase-project-url-input" class="form-control" placeholder="https://<ref>.supabase.co (optional fallback)" style="flex:1 1 auto;">
+                                        <input type="password" id="supabase-key-input" class="form-control" placeholder="Supabase anon key (optional)" style="flex:1 1 auto;">
+                                        <button onclick="saveLicenseBackendSettings()" class="btn btn-primary">Save Backend Settings</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

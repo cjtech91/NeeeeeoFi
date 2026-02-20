@@ -559,12 +559,23 @@ class PppoeServerService {
 
         // Get ALL active users (manually disabled users are excluded)
         // JOIN to get profile name for expiry logic
-        const users = db.prepare(`
+        let users = db.prepare(`
             SELECT u.*, p.name as expiry_profile_name 
             FROM pppoe_users u 
             LEFT JOIN pppoe_profiles p ON u.profile_id_on_expiry = p.id 
             WHERE u.is_active = 1
         `).all();
+
+        // --- ENFORCE LICENSE LIMITS ---
+        const limits = licenseService.getLimits();
+        if (limits.max_pppoe_users !== Infinity && users.length > limits.max_pppoe_users) {
+            console.warn(`[PPPoE] License Limit Enforced: Allowing only ${limits.max_pppoe_users} users out of ${users.length}.`);
+            // Sort by ID or creation to be deterministic (keep oldest users?)
+            // Or maybe keep most recently connected?
+            // For now, let's keep the first ones returned by DB (usually ID order)
+            users = users.slice(0, limits.max_pppoe_users);
+        }
+        // ------------------------------
         
         let content = "# Secrets for PPPoE Server\n# client\tserver\tsecret\tIP addresses\n";
         

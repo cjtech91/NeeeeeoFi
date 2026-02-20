@@ -20,7 +20,7 @@ class LicenseService {
         // Default activation server
         this.apiUrl = configService.get('license_api_url') || 'http://localhost:8080/api/activate'; 
 
-        this.init();
+        // this.init(); // Removed automatic init to allow configService to load first
     }
 
     init() {
@@ -437,6 +437,79 @@ class LicenseService {
         }, null, 2));
         
         this.loadLicense();
+
+        // Send confirmation event to Supabase (Best Effort)
+        this.sendActivationEvent(key);
+    }
+
+    async sendActivationEvent(key) {
+        try {
+            const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
+            const supabaseUrl = sanitize(configService.get('supabase_activation_url'));
+            const supabaseKey = sanitize(configService.get('supabase_anon_key'));
+            
+            if (!supabaseUrl || !supabaseKey) return;
+
+            // Attempt to derive Project URL
+            let projectUrl = sanitize(configService.get('supabase_project_url'));
+            if (!projectUrl && supabaseUrl) {
+                // Heuristic: https://<ref>.functions.supabase.co -> https://<ref>.supabase.co
+                const url = new URL(supabaseUrl);
+                const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
+                projectUrl = `${url.protocol}//${host}`;
+            }
+
+            if (!projectUrl) return;
+
+            // Target Table: "activations"
+            const targetUrl = new URL(projectUrl);
+            targetUrl.pathname = '/rest/v1/activations';
+            
+            const payload = JSON.stringify({
+                license_key: key,
+                hwid: this.hwid,
+                device_model: this.deviceModel,
+                status: 'success',
+                activated_at: new Date().toISOString(),
+                metadata: {
+                    version: '1.0',
+                    platform: process.platform
+                }
+            });
+
+            const isHttps = targetUrl.protocol === 'https:';
+            const client = isHttps ? https : http;
+
+            const options = {
+                hostname: targetUrl.hostname,
+                port: targetUrl.port || (isHttps ? 443 : 80),
+                path: targetUrl.pathname + targetUrl.search,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Length': Buffer.byteLength(payload),
+                    'Prefer': 'return=minimal'
+                }
+            };
+
+            const req = client.request(options, (res) => {
+                // Just log status, don't block
+                if (res.statusCode >= 400) {
+                    console.warn(`LicenseService: Activation event failed with status ${res.statusCode}`);
+                } else {
+                    console.log('LicenseService: Activation event sent to Supabase');
+                }
+            });
+            
+            req.on('error', (e) => console.error('LicenseService: Failed to send activation event:', e.message));
+            req.write(payload);
+            req.end();
+
+        } catch (e) {
+            console.error('LicenseService: Error preparing activation event:', e.message);
+        }
     }
 
     getStatus() {
