@@ -109,9 +109,42 @@ app.use('/api', (req, res, next) => {
         if (req.path.startsWith('/session/') || req.path.startsWith('/traffic/')) {
             return next();
         }
-        // Allow safe reads so the UI can still load in expired mode
-        if (req.method === 'GET' || req.method === 'OPTIONS') {
-            return next();
+        // Allow specific safe reads so the UI can still load in expired mode
+        if (req.method === 'OPTIONS') return next();
+        if (req.method === 'GET') {
+            const allowedReadPrefixes = [
+                '/api/license/status',
+                '/api/admin/dashboard',
+                '/api/admin/devices',
+                '/api/admin/vouchers',
+                '/api/admin/voucher-batches',
+                '/api/admin/rates',
+                '/api/admin/point-rates',
+                '/api/admin/expired-sessions',
+                '/api/admin/network-interfaces',
+                '/api/admin/network/status',
+                '/api/admin/network/dhcp',
+                '/api/admin/network/wan',
+                '/api/admin/qos/config',
+                '/api/admin/portal/themes',
+                '/api/admin/settings',
+                '/api/admin/portal-templates',
+                '/api/admin/portal-templates/',
+                '/api/admin/network/vlans',
+                '/api/admin/network/bridges',
+                '/api/admin/wifi/config',
+                '/api/admin/walled-garden',
+                '/api/admin/subvendo/devices',
+                '/api/admin/subvendo/devices/',
+                '/api/admin/subvendo/key',
+                '/api/admin/subvendo/free-time-widget',
+                '/api/admin/network/dhcp/next-slot',
+                '/api/admin/network/stats',
+                '/api/admin/network/zerotier'
+            ];
+            if (allowedReadPrefixes.some(p => req.path.startsWith(p))) {
+                return next();
+            }
         }
         // Block state-changing operations
         return res.status(403).json({ success: false, error: 'System Unlicensed. Please contact administrator.', code: 'LICENSE_REQUIRED' });
