@@ -385,6 +385,7 @@
             } catch(e) { console.error(e); alert('Error saving mode'); }
         }
         let currentAdminInfo = null;
+        let licenseCountdownInterval = null;
 
         async function loadAdminInfo() {
             try {
@@ -5963,6 +5964,9 @@
                                 <div><strong>Key:</strong> <span id="lic-key" style="font-weight:bold; color:var(--primary);">---</span></div>
                                 <div><strong>Activated:</strong> <span id="lic-activated">---</span></div>
                                 <div><strong>Expiration:</strong> <span id="lic-expiration">---</span></div>
+                                <div id="lic-countdown-container" style="display:none; margin-top:8px;">
+                                    <strong>Trial Remaining:</strong> <span id="lic-countdown">0d 0h 0m 0s</span>
+                                </div>
                             </div>
 
                             <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
@@ -12290,6 +12294,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const keyEl = document.getElementById('lic-key');
             const activatedEl = document.getElementById('lic-activated');
             const expirationEl = document.getElementById('lic-expiration');
+            const countdownContainerEl = document.getElementById('lic-countdown-container');
+            const countdownEl = document.getElementById('lic-countdown');
             
             try {
                 if(statusEl) statusEl.textContent = 'Loading...';
@@ -12323,7 +12329,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
                     if(expirationEl) {
                         if (isTrial) {
-                            expirationEl.textContent = license.expires || 'Unknown';
+                            if (data.trial_end_ts) {
+                                expirationEl.textContent = new Date(data.trial_end_ts).toLocaleString();
+                            } else {
+                                expirationEl.textContent = license.expires || 'Unknown';
+                            }
                         } else {
                             expirationEl.textContent = 'No Expiration';
                         }
@@ -12334,19 +12344,54 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     const btn = document.querySelector('#activation-form button');
                     
                     if (!isTrial) {
-                        // Full license - disable input
                         if(input) input.disabled = true;
                         if(btn) {
                             btn.disabled = true;
                             btn.textContent = 'Activated';
                         }
+                        if (licenseCountdownInterval) {
+                            clearInterval(licenseCountdownInterval);
+                            licenseCountdownInterval = null;
+                        }
+                        if (countdownContainerEl) countdownContainerEl.style.display = 'none';
                     } else {
-                        // Trial mode - allow activation
                          if(input) input.disabled = false;
                          if(btn) {
                             btn.disabled = false;
                             btn.textContent = 'Activate';
-                        }
+                         }
+                         const trialEnd = data.trial_end_ts;
+                         const remainingMs = data.trial_remaining_ms;
+                         if (trialEnd && remainingMs && remainingMs > 0 && countdownContainerEl && countdownEl) {
+                             const updateCountdown = () => {
+                                 const ms = Math.max(0, trialEnd - Date.now());
+                                 const d = Math.floor(ms / 86400000);
+                                 const h = Math.floor((ms % 86400000) / 3600000);
+                                 const m = Math.floor((ms % 3600000) / 60000);
+                                 const s = Math.floor((ms % 60000) / 1000);
+                                 countdownEl.textContent = `${d}d ${h}h ${m}m ${s}s`;
+                                 if (ms <= 0) {
+                                     if (licenseCountdownInterval) {
+                                         clearInterval(licenseCountdownInterval);
+                                         licenseCountdownInterval = null;
+                                     }
+                                     countdownContainerEl.style.display = 'none';
+                                     if (expirationEl) expirationEl.textContent = 'Expired';
+                                 }
+                             };
+                             countdownContainerEl.style.display = 'block';
+                             updateCountdown();
+                             if (licenseCountdownInterval) {
+                                 clearInterval(licenseCountdownInterval);
+                             }
+                             licenseCountdownInterval = setInterval(updateCountdown, 1000);
+                         } else {
+                             if (licenseCountdownInterval) {
+                                 clearInterval(licenseCountdownInterval);
+                                 licenseCountdownInterval = null;
+                             }
+                             if (countdownContainerEl) countdownContainerEl.style.display = 'none';
+                         }
                     }
 
                 } else {
@@ -12357,6 +12402,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     if(keyEl) keyEl.textContent = '---';
                     if(activatedEl) activatedEl.textContent = '---';
                     if(expirationEl) expirationEl.textContent = 'Expired';
+                    if (licenseCountdownInterval) {
+                        clearInterval(licenseCountdownInterval);
+                        licenseCountdownInterval = null;
+                    }
+                    if (countdownContainerEl) countdownContainerEl.style.display = 'none';
                     
                     const input = document.getElementById('license-key-input');
                     const btn = document.querySelector('#activation-form button');
@@ -12372,6 +12422,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     statusEl.textContent = 'Error';
                     statusEl.style.color = 'orange';
                 }
+                if (licenseCountdownInterval) {
+                    clearInterval(licenseCountdownInterval);
+                    licenseCountdownInterval = null;
+                }
+                if (countdownContainerEl) countdownContainerEl.style.display = 'none';
             }
         }
 

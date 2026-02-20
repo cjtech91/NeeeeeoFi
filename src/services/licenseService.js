@@ -614,11 +614,22 @@ class LicenseService {
     }
 
     getStatus() {
+        const installDate = configService.get('system_install_date');
+        const trialDays = 10;
+        let trialEnd = null;
+        let trialRemainingMs = null;
+        if (installDate && this.licenseData && this.licenseData.type === 'TRIAL') {
+            trialEnd = Number(installDate) + trialDays * 24 * 60 * 60 * 1000;
+            trialRemainingMs = Math.max(0, trialEnd - Date.now());
+        }
         return {
             isValid: this.isValid,
             hwid: this.hwid,
             license: this.licenseData,
-            device_model: this.deviceModel
+            device_model: this.deviceModel,
+            system_install_date: installDate || null,
+            trial_end_ts: trialEnd,
+            trial_remaining_ms: trialRemainingMs
         };
     }
 }
