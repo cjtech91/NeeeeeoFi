@@ -600,7 +600,9 @@ class NetworkConfigService {
             const configPath = '/etc/dnsmasq.d/pisowifi-dhcp.conf';
             try {
                 fs.writeFileSync(configPath, content);
-                console.log('Restarting dnsmasq...');
+                console.log('Enabling and restarting dnsmasq...');
+                await execAsync('systemctl enable dnsmasq || true');
+                await execAsync('systemctl daemon-reload || true');
                 await execAsync('systemctl restart dnsmasq');
                 console.log("dnsmasq restarted successfully");
             } catch (e) {

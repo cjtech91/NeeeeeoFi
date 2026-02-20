@@ -79,6 +79,8 @@ killall dnsmasq 2>/dev/null || true
 sleep 1
 
 echo "Starting Dnsmasq..."
+systemctl enable dnsmasq || true
+systemctl daemon-reload || true
 systemctl restart dnsmasq || /etc/init.d/dnsmasq restart
 
 echo "DNSmasq initialized on $LAN_IF. All DNS queries redirected to $PORTAL_IP"
