@@ -1424,6 +1424,38 @@
 
 
         // Init
+        function ensureLicenseBanner() {
+            let banner = document.getElementById('portal-license-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'portal-license-banner';
+                banner.style.position = 'fixed';
+                banner.style.top = '0';
+                banner.style.left = '0';
+                banner.style.right = '0';
+                banner.style.zIndex = '3000';
+                banner.style.display = 'none';
+                banner.style.padding = '10px 14px';
+                banner.style.background = '#c0392b';
+                banner.style.color = '#fff';
+                banner.style.fontWeight = '600';
+                banner.style.textAlign = 'center';
+                banner.textContent = 'System expired or restricted. Please contact the administrator.';
+                document.body.appendChild(banner);
+            }
+            return banner;
+        }
+
+        async function checkLicenseState() {
+            try {
+                const res = await fetch('/api/license/status?t=' + Date.now());
+                const data = await res.json();
+                const banner = ensureLicenseBanner();
+                const lic = data.license || {};
+                const invalid = !data.isValid || lic.type === 'RESTRICTED';
+                banner.style.display = invalid ? 'block' : 'none';
+            } catch (e) {}
+        }
         document.addEventListener('DOMContentLoaded', async () => {
             await loadPortalConfig();
             updateStatus().then(() => {
@@ -1432,6 +1464,8 @@
             });
             fetchRates(); // Pre-load rates
             setInterval(updateStatus, 1000);
+            checkLicenseState();
+            setInterval(checkLicenseState, 10000);
             
             // Local timer
             setInterval(() => {
@@ -2266,6 +2300,17 @@
                 chatSocket.on('connect', () => {
                     console.log('Chat Connected');
                     chatSocket.emit('join_chat', { id: chatId });
+                });
+
+                chatSocket.on('license_state', (payload) => {
+                    try {
+                        const banner = ensureLicenseBanner();
+                        if (payload && payload.state === 'restricted') {
+                            banner.style.display = 'block';
+                        } else if (payload && payload.state === 'active') {
+                            banner.style.display = 'none';
+                        }
+                    } catch (e) {}
                 });
 
                 chatSocket.on('chat_status', (data) => {
