@@ -393,24 +393,25 @@
                 if (!res.ok) return;
                 const data = await res.json();
                 currentAdminInfo = data;
+                const isSuper = !!data.is_super_admin || data.role === 'super_admin';
                 const securityItem = document.getElementById('security-settings-item');
                 if (securityItem) {
                     securityItem.style.display = 'flex';
                 }
                 const adminAccountsItem = document.getElementById('admin-accounts-item');
                 if (adminAccountsItem) {
-                    adminAccountsItem.style.display = data.is_super_admin ? 'flex' : 'none';
+                    adminAccountsItem.style.display = isSuper ? 'flex' : 'none';
                 }
                 const superBadge = document.getElementById('super-admin-indicator');
                 if (superBadge) {
-                    superBadge.style.display = data.is_super_admin ? 'inline-flex' : 'none';
+                    superBadge.style.display = isSuper ? 'inline-flex' : 'none';
                 }
                 const btnCreateUpdate = document.getElementById('btn-create-update');
                 const btnUpgrade = document.getElementById('btn-upgrade');
                 const btnVerify = document.getElementById('btn-verify');
                 const licenseBackend = document.getElementById('license-backend-wrapper');
 
-                if (!data.is_super_admin) {
+                if (!isSuper) {
                     if (btnCreateUpdate) btnCreateUpdate.style.display = 'none';
                     if (btnUpgrade) btnUpgrade.style.display = 'none';
                     if (btnVerify) btnVerify.style.display = 'none';
