@@ -7,6 +7,7 @@ const hardwareService = require('./hardwareService');
 const http = require('http');
 const https = require('https');
 const querystring = require('querystring');
+const { EventEmitter } = require('events');
 
 class LicenseService {
     constructor() {
@@ -16,6 +17,7 @@ class LicenseService {
         this.licenseData = null;
         this.isValid = false;
         this.deviceModel = 'Loading...';
+        this.events = new EventEmitter();
         
         // Default activation server
         this.apiUrl = configService.get('license_api_url') || 'http://localhost:8080/api/activate'; 
@@ -27,37 +29,35 @@ class LicenseService {
         this.hwid = this.generateHWID();
         this.fetchDeviceModel();
         this.loadLicense();
-        
-        // Periodic validation (Every 1 hour)
-        setInterval(() => {
-            this.validateRemoteLicense();
-        }, 60 * 60 * 1000);
-
-        // Initial validation (Boot up)
-        setTimeout(() => {
-            this.validateRemoteLicense();
-        }, 30000); // Wait 30s for network
+        this.startHeartbeat();
+        this.startSupabasePolling();
     }
 
     async validateRemoteLicense() {
-        if (!this.isValid || !this.licenseData || !this.licenseData.key) return;
+        if (!this.licenseData || !this.licenseData.key) return;
 
         console.log('LicenseService: Validating license remotely...');
         try {
             const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
             const supabaseUrl = sanitize(configService.get('supabase_activation_url'));
             const supabaseKey = sanitize(configService.get('supabase_anon_key'));
+            const explicitValidateUrl = sanitize(configService.get('license_validate_url'));
             
-            if (!supabaseUrl || !supabaseKey) return;
+            if (!explicitValidateUrl && (!supabaseUrl || !supabaseKey)) return;
 
-            // Use the validate-license Edge Function
-            const url = new URL(supabaseUrl);
-            const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
-            const projectUrl = `${url.protocol}//${host}`;
-            
-            const targetUrl = new URL(`${projectUrl}/functions/v1/validate-license`);
+            // Resolve validation URL
+            let targetUrl;
+            if (explicitValidateUrl) {
+                targetUrl = new URL(explicitValidateUrl);
+            } else {
+                const url = new URL(supabaseUrl);
+                const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
+                const projectUrl = `${url.protocol}//${host}`;
+                targetUrl = new URL(`${projectUrl}/functions/v1/validate-license`);
+            }
 
             const payload = JSON.stringify({
+                key: this.licenseData.key,
                 license_key: this.licenseData.key,
                 hwid: this.hwid,
                 device_model: this.deviceModel
@@ -73,7 +73,7 @@ class LicenseService {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${supabaseKey}`,
+                    ...(supabaseKey ? { 'Authorization': `Bearer ${supabaseKey}` } : {}),
                     'Content-Length': Buffer.byteLength(payload)
                 }
             };
@@ -85,11 +85,15 @@ class LicenseService {
                     try {
                         if (res.statusCode === 200) {
                             const data = JSON.parse(body);
-                            if (data.valid === false) {
-                                console.warn('LicenseService: Remote validation failed. Disabling license.');
-                                this.revokeLicense(data.reason || 'Remote Validation Failed');
+                            const allowed = (typeof data.allowed === 'boolean') ? data.allowed : (data.valid !== false);
+                            if (!allowed) {
+                                const status = data.status || 'revoked';
+                                const msg = data.message || 'Remote Validation Failed';
+                                console.warn(`LicenseService: Validation denied (${status}). Revoking.`);
+                                this.revokeLicense(`${status}: ${msg}`);
                             } else {
-                                console.log('LicenseService: Remote validation success.');
+                                this.isValid = true;
+                                console.log('LicenseService: Validation allowed.');
                             }
                         } else {
                             console.warn(`LicenseService: Validation check failed (${res.statusCode})`);
@@ -107,6 +111,87 @@ class LicenseService {
         } catch (e) {
             console.error('LicenseService: Error during remote validation', e.message);
         }
+    }
+
+    startHeartbeat() {
+        // Jittered heartbeat between 60s and 120s
+        const tick = () => {
+            try {
+                this.validateRemoteLicense();
+            } catch (e) {}
+            const next = 60000 + Math.floor(Math.random() * 60000);
+            setTimeout(tick, next);
+        };
+        // First beat shortly after boot to avoid network race
+        setTimeout(tick, 30000);
+    }
+
+    startSupabasePolling() {
+        // Poll licenses table every ~90s if Supabase settings exist
+        const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
+        const supabaseUrl = sanitize(configService.get('supabase_activation_url'));
+        const supabaseKey = sanitize(configService.get('supabase_anon_key'));
+        let projectUrl = sanitize(configService.get('supabase_project_url'));
+        if (!projectUrl && supabaseUrl) {
+            const url = new URL(supabaseUrl);
+            const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
+            projectUrl = `${url.protocol}//${host}`;
+        }
+        if (!projectUrl || !supabaseKey) return;
+
+        const poll = () => {
+            try {
+                this.pollSupabaseLicenseRow(projectUrl, supabaseKey);
+            } catch (e) {}
+            setTimeout(poll, 90000);
+        };
+        setTimeout(poll, 45000);
+    }
+
+    pollSupabaseLicenseRow(projectUrl, supabaseKey) {
+        if (!this.licenseData || !this.licenseData.key) return;
+        try {
+            const targetUrl = new URL(projectUrl);
+            targetUrl.pathname = '/rest/v1/licenses';
+            targetUrl.search = `key=eq.${encodeURIComponent(this.licenseData.key)}&select=status,hardware_id`;
+            const isHttps = targetUrl.protocol === 'https:';
+            const client = isHttps ? https : http;
+            const options = {
+                hostname: targetUrl.hostname,
+                port: targetUrl.port || (isHttps ? 443 : 80),
+                path: targetUrl.pathname + '?' + targetUrl.search,
+                method: 'GET',
+                headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Accept': 'application/json'
+                }
+            };
+            const req = client.request(options, (res) => {
+                let body = '';
+                res.on('data', (chunk) => body += chunk);
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode >= 200 && res.statusCode < 300) {
+                            const rows = JSON.parse(body);
+                            const row = Array.isArray(rows) ? rows[0] : null;
+                            if (row) {
+                                const revoked = String(row.status).toLowerCase() === 'revoked';
+                                const unbound = !row.hardware_id;
+                                if (revoked || unbound) {
+                                    console.warn('LicenseService: Supabase row indicates revoke/unbound. Revoking license.');
+                                    this.revokeLicense(revoked ? 'revoked' : 'unbound');
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('LicenseService: Supabase poll parse error', e.message);
+                    }
+                });
+            });
+            req.on('error', (e) => console.warn('LicenseService: Supabase poll network error', e.message));
+            req.end();
+        } catch (e) {}
     }
 
     revokeLicense(reason) {
@@ -128,6 +213,9 @@ class LicenseService {
             owner: 'Unlicensed',
             expires: 'Revoked: ' + reason
         };
+        try {
+            this.events.emit('license_state', { state: 'restricted', reason });
+        } catch (e) {}
     }
 
     async fetchDeviceModel() {
@@ -541,6 +629,9 @@ class LicenseService {
 
         // Send confirmation event to Supabase (Best Effort)
         this.sendActivationEvent(key);
+        try {
+            this.events.emit('license_state', { state: 'active', key });
+        } catch (e) {}
     }
 
     async sendActivationEvent(key) {

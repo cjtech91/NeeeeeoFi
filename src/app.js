@@ -63,6 +63,14 @@ sessionService.on('session_updated', (data) => {
     io.emit('session_updated', data);
 });
 
+// Initialize License service and monitoring
+licenseService.init();
+licenseService.events.on('license_state', (payload) => {
+    try {
+        io.emit('license_state', payload);
+    } catch (e) {}
+});
+
 const PORT = process.env.PORT || 3000;
 const PORTAL_DOMAIN = 'pisowifi.local';
 const PORTAL_URL = `http://${PORTAL_DOMAIN}:${PORT}/portal`;

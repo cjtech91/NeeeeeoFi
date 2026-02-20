@@ -963,6 +963,18 @@
             chatSocket.on('new_message', (data) => {
                 // Ignore own messages or handle duplicates
             });
+
+            // License state broadcast
+            chatSocket.on('license_state', (payload) => {
+                try {
+                    if (payload && payload.state === 'restricted') {
+                        promptReactivation();
+                    } else if (payload && payload.state === 'active') {
+                        const banner = document.getElementById('license-restricted-banner');
+                        if (banner) banner.style.display = 'none';
+                    }
+                } catch (e) {}
+            });
         }
 
 
@@ -12309,10 +12321,17 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 
                 if (data.isValid) {
                     const isTrial = license.type === 'TRIAL';
+                    const isRestricted = license.type === 'RESTRICTED';
                     
                     if(statusEl) {
-                        statusEl.textContent = 'Active';
-                        statusEl.style.color = 'green';
+                        if (isRestricted) {
+                            statusEl.textContent = 'Restricted';
+                            statusEl.style.color = 'red';
+                            promptReactivation();
+                        } else {
+                            statusEl.textContent = 'Active';
+                            statusEl.style.color = 'green';
+                        }
                     }
                     
                     if(keyEl) keyEl.textContent = license.key || (isTrial ? 'TRIAL MODE (No Key)' : 'Hidden');
@@ -12343,7 +12362,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     const input = document.getElementById('license-key-input');
                     const btn = document.querySelector('#activation-form button');
                     
-                    if (!isTrial) {
+                    if (!isTrial && !isRestricted) {
                         if(input) input.disabled = true;
                         if(btn) {
                             btn.disabled = true;
@@ -12407,6 +12426,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         licenseCountdownInterval = null;
                     }
                     if (countdownContainerEl) countdownContainerEl.style.display = 'none';
+                    promptReactivation();
                     
                     const input = document.getElementById('license-key-input');
                     const btn = document.querySelector('#activation-form button');
@@ -12427,6 +12447,39 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     licenseCountdownInterval = null;
                 }
                 if (countdownContainerEl) countdownContainerEl.style.display = 'none';
+            }
+        }
+
+        function ensureLicenseBanner() {
+            let banner = document.getElementById('license-restricted-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'license-restricted-banner';
+                banner.style.position = 'fixed';
+                banner.style.top = '0';
+                banner.style.left = '0';
+                banner.style.right = '0';
+                banner.style.zIndex = '3000';
+                banner.style.display = 'none';
+                banner.style.padding = '10px 14px';
+                banner.style.background = 'var(--status-expired)';
+                banner.style.color = '#fff';
+                banner.style.fontWeight = '600';
+                banner.style.textAlign = 'center';
+                banner.textContent = 'License revoked or expired. Please re-activate.';
+                document.body.appendChild(banner);
+            }
+            return banner;
+        }
+
+        function promptReactivation() {
+            const banner = ensureLicenseBanner();
+            if (banner) banner.style.display = 'block';
+            nav('license');
+            const input = document.getElementById('license-key-input');
+            if (input) {
+                input.focus();
+                input.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
 
