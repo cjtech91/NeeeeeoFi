@@ -2816,6 +2816,28 @@ app.get('/api/admin/subvendo/devices', isAuthenticated, (req, res) => {
         today.setHours(0, 0, 0, 0);
         const todayIso = today.toISOString(); // Note: sales timestamp is usually UTC/ISO
 
+        // Helper to find interface for IP
+        const ipToLong = (ip) => ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+        const getInterfaceForIp = (targetIp) => {
+            if (!targetIp) return null;
+            try {
+                const ifaces = os.networkInterfaces();
+                for (const [name, addrs] of Object.entries(ifaces)) {
+                    for (const addr of addrs) {
+                        if ((addr.family === 'IPv4' || addr.family === 4) && !addr.internal) {
+                            const targetLong = ipToLong(targetIp);
+                            const addrLong = ipToLong(addr.address);
+                            const maskLong = ipToLong(addr.netmask);
+                            if ((targetLong & maskLong) === (addrLong & maskLong)) {
+                                return name;
+                            }
+                        }
+                    }
+                }
+            } catch (e) { console.error('Error matching interface:', e); }
+            return null;
+        };
+
         const enrichedDevices = devices.map(d => {
             let online = false;
             if (d.last_active_at) {
@@ -2828,6 +2850,9 @@ app.get('/api/admin/subvendo/devices', isAuthenticated, (req, res) => {
                     if (diffMs < SUB_VENDO_OFFLINE_AFTER_MS) online = true;
                 }
             }
+
+            // Detect Interface
+            const detectedInterface = getInterfaceForIp(d.ip_address);
 
             // Sales Stats
             const source = `subvendo:${d.id}`;
@@ -2849,6 +2874,7 @@ app.get('/api/admin/subvendo/devices', isAuthenticated, (req, res) => {
             return {
                 ...d,
                 online,
+                detected_interface: detectedInterface,
                 total_sales: totalSales,
                 daily_sales: dailySales,
                 uncoins_out_sales: unCoinsOutSales
