@@ -19,7 +19,7 @@ class LicenseService {
         
         // Default activation server
         this.apiUrl = configService.get('license_api_url') || 'http://localhost:8080/api/activate'; 
-
+ 
         // this.init(); // Removed automatic init to allow configService to load first
     }
 
@@ -27,6 +27,107 @@ class LicenseService {
         this.hwid = this.generateHWID();
         this.fetchDeviceModel();
         this.loadLicense();
+        
+        // Periodic validation (Every 1 hour)
+        setInterval(() => {
+            this.validateRemoteLicense();
+        }, 60 * 60 * 1000);
+
+        // Initial validation (Boot up)
+        setTimeout(() => {
+            this.validateRemoteLicense();
+        }, 30000); // Wait 30s for network
+    }
+
+    async validateRemoteLicense() {
+        if (!this.isValid || !this.licenseData || !this.licenseData.key) return;
+
+        console.log('LicenseService: Validating license remotely...');
+        try {
+            const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
+            const supabaseUrl = sanitize(configService.get('supabase_activation_url'));
+            const supabaseKey = sanitize(configService.get('supabase_anon_key'));
+            
+            if (!supabaseUrl || !supabaseKey) return;
+
+            // Use the validate-license Edge Function
+            const url = new URL(supabaseUrl);
+            const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
+            const projectUrl = `${url.protocol}//${host}`;
+            
+            const targetUrl = new URL(`${projectUrl}/functions/v1/validate-license`);
+
+            const payload = JSON.stringify({
+                license_key: this.licenseData.key,
+                hwid: this.hwid,
+                device_model: this.deviceModel
+            });
+
+            const isHttps = targetUrl.protocol === 'https:';
+            const client = isHttps ? https : http;
+
+            const options = {
+                hostname: targetUrl.hostname,
+                port: targetUrl.port || (isHttps ? 443 : 80),
+                path: targetUrl.pathname + targetUrl.search,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Length': Buffer.byteLength(payload)
+                }
+            };
+
+            const req = client.request(options, (res) => {
+                let body = '';
+                res.on('data', (chunk) => body += chunk);
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode === 200) {
+                            const data = JSON.parse(body);
+                            if (data.valid === false) {
+                                console.warn('LicenseService: Remote validation failed. Disabling license.');
+                                this.revokeLicense(data.reason || 'Remote Validation Failed');
+                            } else {
+                                console.log('LicenseService: Remote validation success.');
+                            }
+                        } else {
+                            console.warn(`LicenseService: Validation check failed (${res.statusCode})`);
+                        }
+                    } catch (e) {
+                        console.error('LicenseService: Error parsing validation response', e);
+                    }
+                });
+            });
+
+            req.on('error', (e) => console.error('LicenseService: Validation network error', e.message));
+            req.write(payload);
+            req.end();
+
+        } catch (e) {
+            console.error('LicenseService: Error during remote validation', e.message);
+        }
+    }
+
+    revokeLicense(reason) {
+        console.warn(`LicenseService: Revoking license. Reason: ${reason}`);
+        
+        // Remove file
+        if (fs.existsSync(this.licensePath)) {
+            try {
+                fs.unlinkSync(this.licensePath);
+            } catch (e) {
+                console.error('Failed to delete license file:', e);
+            }
+        }
+
+        // Reset state
+        this.isValid = false;
+        this.licenseData = {
+            type: 'RESTRICTED',
+            owner: 'Unlicensed',
+            expires: 'Revoked: ' + reason
+        };
     }
 
     async fetchDeviceModel() {
