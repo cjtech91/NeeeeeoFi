@@ -109,7 +109,12 @@ app.use('/api', (req, res, next) => {
         if (req.path.startsWith('/session/') || req.path.startsWith('/traffic/')) {
             return next();
         }
-         return res.status(403).json({ success: false, error: 'System Unlicensed. Please contact administrator.', code: 'LICENSE_REQUIRED' });
+        // Allow safe reads so the UI can still load in expired mode
+        if (req.method === 'GET' || req.method === 'OPTIONS') {
+            return next();
+        }
+        // Block state-changing operations
+        return res.status(403).json({ success: false, error: 'System Unlicensed. Please contact administrator.', code: 'LICENSE_REQUIRED' });
     }
     next();
 });
