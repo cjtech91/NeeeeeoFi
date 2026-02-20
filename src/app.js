@@ -3024,15 +3024,27 @@ app.post('/api/admin/subvendo/approve', isAuthenticated, (req, res) => {
         
         // Move to devices
         const now = new Date().toISOString();
+        const trialEnd = Date.now() + (10 * 24 * 60 * 60 * 1000); // 10 Days Trial
+        
         // Check if already exists (edge case)
         const existing = db.prepare('SELECT id FROM sub_vendo_devices WHERE device_id = ?').get(waiting.device_id);
         if (existing) {
-             // Just update
-             db.prepare('UPDATE sub_vendo_devices SET last_active_at = ?, ip_address = ? WHERE id = ?')
-               .run(now, waiting.ip_address, existing.id);
+             // Just update (preserve license if already paid, otherwise reset trial?)
+             // User logic: "once being accepted from waiting list it has 10days trial also for the fresh esp8266"
+             // If existing device re-registers, we probably shouldn't reset trial if it was already used? 
+             // But for simplicity, let's assume re-approval might grant trial or we check existing license.
+             // Let's only set trial if not currently licensed.
+             const current = db.prepare('SELECT license_type FROM sub_vendo_devices WHERE id = ?').get(existing.id);
+             if (current && current.license_type === 'PAID') {
+                 db.prepare('UPDATE sub_vendo_devices SET last_active_at = ?, ip_address = ? WHERE id = ?')
+                   .run(now, waiting.ip_address, existing.id);
+             } else {
+                 db.prepare('UPDATE sub_vendo_devices SET last_active_at = ?, ip_address = ?, license_type = ?, trial_end_ts = ? WHERE id = ?')
+                   .run(now, waiting.ip_address, 'TRIAL', trialEnd, existing.id);
+             }
         } else {
-             db.prepare('INSERT INTO sub_vendo_devices (device_id, name, status, last_active_at, ip_address) VALUES (?, ?, ?, ?, ?)')
-               .run(waiting.device_id, waiting.name, 'active', now, waiting.ip_address);
+             db.prepare('INSERT INTO sub_vendo_devices (device_id, name, status, last_active_at, ip_address, license_type, trial_end_ts) VALUES (?, ?, ?, ?, ?, ?, ?)')
+               .run(waiting.device_id, waiting.name, 'active', now, waiting.ip_address, 'TRIAL', trialEnd);
         }
             
         // Remove from waiting list
@@ -3048,6 +3060,98 @@ app.post('/api/admin/subvendo/decline', isAuthenticated, (req, res) => {
     const { id } = req.body;
     try {
         db.prepare('DELETE FROM sub_vendo_waiting_list WHERE id = ?').run(id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/subvendo/activate', isAuthenticated, async (req, res) => {
+    const { id, key } = req.body;
+    
+    if (!key || key.length !== 10) {
+        return res.status(400).json({ error: 'Invalid license key. Must be 10 characters.' });
+    }
+
+    try {
+        const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
+        if (!device) return res.status(404).json({ error: 'Device not found' });
+
+        // Supabase Check
+        const supabaseUrl = configService.get('supabase_activation_url');
+        const supabaseKey = configService.get('supabase_anon_key');
+        
+        if (supabaseUrl && supabaseKey) {
+            try {
+                // Construct REST URL
+                const url = new URL(supabaseUrl);
+                // Assume standard Supabase URL structure or use project URL if available
+                // If supabase_activation_url is a function URL, try to extract project URL or fallback
+                // Safest is to rely on user providing project URL separately or assume generic rest/v1 structure if feasible.
+                // However, previous code uses supabase_activation_url for main license. 
+                // Let's try to infer project URL.
+                let projectUrl = configService.get('supabase_project_url');
+                if (!projectUrl) {
+                     const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
+                     projectUrl = `${url.protocol}//${host}`;
+                }
+
+                // Query table: sub_vendo_licenses
+                const targetUrl = new URL(`${projectUrl}/rest/v1/sub_vendo_licenses?key=eq.${key}`);
+                
+                const resp = await fetch(targetUrl, {
+                    headers: {
+                        'apikey': supabaseKey,
+                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error(`Server returned ${resp.status}: ${text}`);
+                }
+
+                const rows = await resp.json();
+                
+                if (!Array.isArray(rows) || rows.length === 0) {
+                     return res.status(400).json({ error: 'License key not found in server.' });
+                }
+                
+                const license = rows[0];
+                
+                // Check if already used by another device (hardware_id)
+                if (license.hardware_id && license.hardware_id !== device.device_id) {
+                     return res.status(400).json({ error: 'License key already used by another device.' });
+                }
+                
+                // Bind license to hardware_id
+                const updateUrl = new URL(`${projectUrl}/rest/v1/sub_vendo_licenses?key=eq.${key}`);
+                await fetch(updateUrl, {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': supabaseKey,
+                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=minimal'
+                    },
+                    body: JSON.stringify({
+                        hardware_id: device.device_id,
+                        status: 'active',
+                        activated_at: new Date().toISOString()
+                    })
+                });
+
+            } catch (supaError) {
+                console.error('Supabase SubVendo Activation Error:', supaError);
+                return res.status(500).json({ error: 'License server validation failed: ' + supaError.message });
+            }
+        }
+
+        // Local Update
+        db.prepare('UPDATE sub_vendo_devices SET license_type = ?, license_key = ?, license_activated_at = ? WHERE id = ?')
+          .run('PAID', key, new Date().toISOString(), id);
+          
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });

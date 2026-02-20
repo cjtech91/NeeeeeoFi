@@ -1478,12 +1478,40 @@
                         const hasFree = (Number(device.free_time_seconds || 0) > 0) && !!device.free_time_enabled;
                         const freeBadge = hasFree ? '<span style="margin-left:2px; padding:2px 8px; font-size:0.7rem; border-radius:999px; background: var(--info); color: white; display:inline-flex; align-items:center; justify-content:center; text-align:center;">Free Time</span>' : '';
                         
+                        // License Logic
+                        let licenseBadge = '';
+                        let activateBtn = '';
+                        const isPaid = device.license_type === 'PAID';
+                        
+                        if (isPaid) {
+                            licenseBadge = '<span class="status-badge status-active" style="background:#27ae60;">LICENSED</span>';
+                        } else {
+                            // Trial check
+                            const now = Date.now();
+                            const trialEnd = device.trial_end_ts || 0;
+                            if (trialEnd > now) {
+                                const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+                                licenseBadge = `<span class="status-badge" style="background:#f39c12; color:white;">TRIAL (${daysLeft}d)</span>`;
+                            } else {
+                                licenseBadge = '<span class="status-badge status-expired">EXPIRED</span>';
+                            }
+                            activateBtn = `
+                                <button class="btn-icon" onclick="openActivateSubVendoModal(${device.id}, '${device.name || device.device_id}')" title="Activate License" style="color:#27ae60;">
+                                    <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+                                </button>
+                            `;
+                        }
+
                         tr.innerHTML = `
                             <td style="display:flex; align-items:center;">${statusDot}<span>${device.name || '-'}</span>${freeBadge}</td>
                             <td style="font-family:monospace;">${device.device_id}</td>
-                            <td><span class="status-badge ${device.status === 'active' ? 'status-active' : 'status-inactive'}">${device.status}</span></td>
+                            <td>
+                                <span class="status-badge ${device.status === 'active' ? 'status-active' : 'status-inactive'}">${device.status}</span>
+                                ${licenseBadge}
+                            </td>
                             <td>${isOnline ? '<span style="color: var(--status-active); font-weight:bold;">Online Now</span>' : (device.last_active_at ? new Date(device.last_active_at).toLocaleString() : 'Never')}</td>
                             <td>
+                                ${activateBtn}
                                 <button class="btn-icon" onclick="openSubVendoDeviceSettings(${device.id})" title="Settings">
                                     <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 8a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>
                                 </button>
@@ -1504,6 +1532,12 @@
                             const statusBadgeClass = device.status === 'active' ? 'status-active' : 'status-inactive';
                             const hasFreeCard = (Number(device.free_time_seconds || 0) > 0) && !!device.free_time_enabled;
                             const freeBadgeCard = hasFreeCard ? '<span style="margin-left:2px; padding:2px 8px; font-size:0.7rem; border-radius:999px; background: var(--info); color: white; display:inline-flex; align-items:center; justify-content:center; text-align:center;">Free Time</span>' : '';
+                            
+                            let cardActivateBtn = '';
+                            if (!isPaid) {
+                                cardActivateBtn = `<button class="btn btn-sm" onclick="openActivateSubVendoModal(${device.id}, '${device.name || device.device_id}')" style="background:#27ae60; color:white;">Activate</button>`;
+                            }
+
                             card.innerHTML = `
                                 <div class="device-card-header">
                                     <div class="device-name">${statusDot}<span>${device.name || '-'}</span>${freeBadgeCard}</div>
@@ -1511,9 +1545,11 @@
                                 </div>
                                 <div class="device-meta">
                                     <span class="status-badge ${statusBadgeClass}">${device.status}</span>
+                                    ${licenseBadge}
                                     <span>${lastActive}</span>
                                 </div>
                                 <div class="device-actions">
+                                    ${cardActivateBtn}
                                     <button class="btn btn-sm" onclick="openSubVendoDeviceSettings(${device.id})" style="background:var(--warning); color:white;">Settings</button>
                                     <button class="btn btn-sm" onclick="openSubVendoFreeTimeConfig(${device.id})" style="background: var(--info); color:white;">Free Time</button>
                                     <button class="btn btn-sm btn-danger" onclick="deleteSubVendoDevice(${device.id})">Delete</button>
@@ -13895,5 +13931,76 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         }
     </script>
     <script src="/js/admin-toast.js"></script>
+    <div id="activate-subvendo-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:400px; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size:0.9rem;">
+            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); display:flex; justify-content:space-between; align-items:center;">
+                <span>Activate Sub Vendo</span>
+                <button onclick="document.getElementById('activate-subvendo-modal').style.display='none'" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--text-main);">&times;</button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:15px;">
+                <input type="hidden" id="activate-subvendo-id">
+                <div style="font-weight:600; color:var(--text-muted);">Device: <span id="activate-subvendo-name" style="color:var(--text-main);"></span></div>
+                
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">License Key (10 characters)</label>
+                    <input type="text" id="activate-subvendo-key" class="form-control" placeholder="xxxxxxxxxx" maxlength="10" style="font-family:monospace; text-transform:uppercase; letter-spacing:1px; width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-body); color:var(--text-main);">
+                </div>
+                
+                <div style="font-size:0.8rem; color:var(--text-muted); background:rgba(39, 174, 96, 0.1); padding:10px; border-radius:4px; border:1px solid rgba(39, 174, 96, 0.2);">
+                    <strong style="color:#27ae60;">Note:</strong> Entering a valid license key will permanently activate this device.
+                </div>
+            </div>
+            <div style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('activate-subvendo-modal').style.display='none'">Cancel</button>
+                <button class="btn btn-sm btn-success" id="btn-activate-subvendo" onclick="submitSubVendoActivation()">Activate Device</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openActivateSubVendoModal(id, name) {
+            document.getElementById('activate-subvendo-id').value = id;
+            document.getElementById('activate-subvendo-name').textContent = name;
+            document.getElementById('activate-subvendo-key').value = '';
+            document.getElementById('activate-subvendo-modal').style.display = 'flex';
+            document.getElementById('activate-subvendo-key').focus();
+        }
+
+        async function submitSubVendoActivation() {
+            const id = document.getElementById('activate-subvendo-id').value;
+            const key = document.getElementById('activate-subvendo-key').value.trim();
+            
+            if (!key || key.length !== 10) {
+                return alert('License key must be exactly 10 characters.');
+            }
+            
+            const btn = document.getElementById('btn-activate-subvendo');
+            const originalText = btn.textContent;
+            btn.textContent = 'Activating...';
+            btn.disabled = true;
+            
+            try {
+                const res = await fetch('/api/admin/subvendo/activate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id, key })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    alert('Device activated successfully!');
+                    document.getElementById('activate-subvendo-modal').style.display = 'none';
+                    if (typeof loadSubVendoDevices === 'function') loadSubVendoDevices();
+                } else {
+                    alert('Activation failed: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+    </script>
 </body>
 </html>

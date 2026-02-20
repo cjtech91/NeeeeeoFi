@@ -521,7 +521,11 @@ const initDb = () => {
       free_time_vlan TEXT,
       free_time_enabled INTEGER DEFAULT 0,
       free_time_download_speed INTEGER DEFAULT 0,
-      free_time_upload_speed INTEGER DEFAULT 0
+      free_time_upload_speed INTEGER DEFAULT 0,
+      license_type TEXT, -- TRIAL | ACTIVE | RESTRICTED
+      license_key TEXT,
+      license_activated_at DATETIME,
+      trial_end_ts INTEGER
     )
   `);
 
@@ -544,6 +548,10 @@ const initDb = () => {
     if (!has('free_time_upload_speed')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN free_time_upload_speed INTEGER DEFAULT 0").run();
     if (!has('ip_address')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN ip_address TEXT").run();
     if (!has('relay_pin_active_state')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN relay_pin_active_state TEXT DEFAULT 'LOW'").run();
+    if (!has('license_type')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN license_type TEXT").run();
+    if (!has('license_key')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN license_key TEXT").run();
+    if (!has('license_activated_at')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN license_activated_at DATETIME").run();
+    if (!has('trial_end_ts')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN trial_end_ts INTEGER").run();
   } catch (e) {
     console.error('Migration error (sub_vendo_devices):', e);
   }
