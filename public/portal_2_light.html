@@ -1719,7 +1719,8 @@
                     name: v.name,
                     status: (v.is_online !== false) ? 'online' : 'offline',
                     hasFreeTime: !!v.has_free_time,
-                    isLocal: !!v.is_local
+                    isLocal: !!v.is_local,
+                    isLicenseExpired: !!v.is_license_expired
                 }));
 
                 // Auto-select local vendo
@@ -1740,6 +1741,26 @@
                              console.log('No active local vendo, defaulting to Main Vendo');
                              selectDevice('hardware', 'Main Vendo');
                          }
+                    }
+                }
+                
+                // Update Insert Button State based on Selected Vendo License
+                const currentVendo = mappedDevices.find(d => d.id === selectedVendoId);
+                const insertBtnOverride = document.getElementById('btn-insert');
+                if (insertBtnOverride) {
+                    if (currentVendo && currentVendo.isLicenseExpired) {
+                        insertBtnOverride.textContent = 'License Expired';
+                        insertBtnOverride.disabled = true;
+                        insertBtnOverride.style.background = '#e74c3c'; // Red
+                        insertBtnOverride.style.opacity = '0.6';
+                        insertBtnOverride.onclick = null; // Remove handler
+                    } else {
+                        // Restore (but check time remaining again)
+                        insertBtnOverride.textContent = (Number(data.time_remaining) > 0) ? 'Extend Time' : 'Insert Coins';
+                        insertBtnOverride.disabled = false;
+                        insertBtnOverride.style.background = ''; // Reset to CSS default
+                        insertBtnOverride.style.opacity = '1';
+                        insertBtnOverride.onclick = startCoinMode;
                     }
                 }
                 

@@ -3806,7 +3806,7 @@ app.get('/api/status', async (req, res) => {
         if (mainEnabled && Number.isFinite(mainSeconds) && mainSeconds > 0) {
             availableVendos[0].has_free_time = true;
         }
-        const subs = db.prepare('SELECT device_id, name, status, last_active_at, free_time_enabled, free_time_seconds, ip_address FROM sub_vendo_devices ORDER BY created_at DESC').all();
+        const subs = db.prepare('SELECT device_id, name, status, last_active_at, free_time_enabled, free_time_seconds, ip_address, license_type, trial_end_ts FROM sub_vendo_devices ORDER BY created_at DESC').all();
         const now = new Date();
 
         // Helper to check subnet
@@ -3863,6 +3863,15 @@ app.get('/api/status', async (req, res) => {
                       isLocal = true;
                  }
             }
+            
+            // License Check
+            let isLicenseExpired = false;
+            if (s.license_type !== 'PAID') {
+                const trialEnd = Number(s.trial_end_ts || 0);
+                if (Date.now() > trialEnd) {
+                    isLicenseExpired = true;
+                }
+            }
 
             return {
                 id: `subvendo:${s.device_id}`,
@@ -3871,7 +3880,8 @@ app.get('/api/status', async (req, res) => {
                 is_online: isOnline,
                 last_seen: s.last_active_at,
                 has_free_time: hasFreeTime,
-                is_local: isLocal
+                is_local: isLocal,
+                is_license_expired: isLicenseExpired
             };
         }));
     } catch (e) {
@@ -4158,15 +4168,26 @@ app.post('/api/coin/start', async (req, res) => {
     } else if (sessionKey.startsWith('subvendo:')) {
         try {
             const deviceIdStr = sessionKey.slice('subvendo:'.length);
-            const svDevice = db.prepare('SELECT id, ip_address, relay_pin_active_state FROM sub_vendo_devices WHERE device_id = ?').get(deviceIdStr);
+            const svDevice = db.prepare('SELECT id, ip_address, relay_pin_active_state, license_type, trial_end_ts FROM sub_vendo_devices WHERE device_id = ?').get(deviceIdStr);
             if (svDevice) {
+                // License Check
+                if (svDevice.license_type !== 'PAID') {
+                    const trialEnd = Number(svDevice.trial_end_ts || 0);
+                    if (Date.now() > trialEnd) {
+                        return res.json({ success: false, error: 'Device License Expired' });
+                    }
+                }
+
                 session.clientId = svDevice.id; // Override clientId with DB ID for rates
                 if (svDevice.ip_address) {
                     await controlSubVendoRelay(svDevice.ip_address, 'on', svDevice.relay_pin_active_state);
                 }
+            } else {
+                 return res.json({ success: false, error: 'Device not found' });
             }
         } catch (e) {
             console.error('[Coin] Error turning on sub-vendo relay:', e);
+            return res.json({ success: false, error: 'Device Error' });
         }
     }
 
