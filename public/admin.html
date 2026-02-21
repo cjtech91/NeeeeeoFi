@@ -6017,6 +6017,7 @@
                                     <span id="lic-hwid" style="display:block; word-break:break-all; overflow-wrap:anywhere;">Loading...</span>
                                 </div>
                                 <div><strong>Device Model:</strong> <span id="lic-model">Loading...</span></div>
+                                <div><strong>System Serial:</strong> <span id="lic-serial">Loading...</span></div>
                                 <div><strong>Key:</strong> <span id="lic-key" style="font-weight:bold; color:var(--primary);">---</span></div>
                                 <div><strong>Activated:</strong> <span id="lic-activated">---</span></div>
                                 <div><strong>Expiration:</strong> <span id="lic-expiration">---</span></div>
@@ -12355,6 +12356,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const statusEl = document.getElementById('lic-status');
             const hwidEl = document.getElementById('lic-hwid');
             const modelEl = document.getElementById('lic-model');
+            const serialEl = document.getElementById('lic-serial');
             const keyEl = document.getElementById('lic-key');
             const activatedEl = document.getElementById('lic-activated');
             const expirationEl = document.getElementById('lic-expiration');
@@ -12368,6 +12370,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 
                 if(hwidEl) hwidEl.textContent = data.hwid || 'Unknown';
                 if(modelEl) modelEl.textContent = data.device_model || 'Unknown';
+                if(serialEl) serialEl.textContent = data.system_serial || 'Unknown';
                 
                 const license = data.license || {};
                 

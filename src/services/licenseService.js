@@ -17,6 +17,7 @@ class LicenseService {
         this.licenseData = null;
         this.isValid = false;
         this.deviceModel = 'Loading...';
+        this.systemSerial = 'Loading...';
         this.events = new EventEmitter();
         
         // Default activation server
@@ -28,6 +29,7 @@ class LicenseService {
     init() {
         this.hwid = this.generateHWID();
         this.fetchDeviceModel();
+        this.fetchSystemSerial();
         this.loadLicense();
         this.startHeartbeat();
         this.startSupabasePolling();
@@ -220,6 +222,34 @@ class LicenseService {
 
     async fetchDeviceModel() {
         this.deviceModel = await hardwareService.getDeviceModel();
+    }
+
+    fetchSystemSerial() {
+        try {
+            // 1. Try Device Tree (Preferred for embedded)
+            const dtPath = '/sys/firmware/devicetree/base/serial-number';
+            if (fs.existsSync(dtPath)) {
+                // Remove null bytes if any
+                const serial = fs.readFileSync(dtPath, 'utf8').replace(/\0/g, '').trim();
+                if (serial) {
+                    this.systemSerial = serial;
+                    return;
+                }
+            }
+            
+            // 2. Try /proc/cpuinfo
+            if (fs.existsSync('/proc/cpuinfo')) {
+                const cpuInfo = fs.readFileSync('/proc/cpuinfo', 'utf8');
+                const match = cpuInfo.match(/Serial\s*:\s*([0-9a-f]+)/i);
+                if (match && match[1]) {
+                    this.systemSerial = match[1];
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error('LicenseService: Failed to fetch system serial', e.message);
+        }
+        this.systemSerial = 'Unknown';
     }
 
     generateHWID() {
@@ -716,6 +746,7 @@ class LicenseService {
         return {
             isValid: this.isValid,
             hwid: this.hwid,
+            system_serial: this.systemSerial,
             license: this.licenseData,
             device_model: this.deviceModel,
             system_install_date: installDate || null,
