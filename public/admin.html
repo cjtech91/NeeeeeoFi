@@ -6012,10 +6012,6 @@
                         <div style="padding: 20px;">
                             <div style="font-family: monospace; line-height: 1.8; color: var(--text-main); font-size: 1rem;">
                                 <div><strong>Status:</strong> <span id="lic-status" style="font-weight:bold;">Loading...</span></div>
-                                <div>
-                                    <strong>HWID:</strong><br>
-                                    <span id="lic-hwid" style="display:block; word-break:break-all; overflow-wrap:anywhere;">Loading...</span>
-                                </div>
                                 <div><strong>Device Model:</strong> <span id="lic-model">Loading...</span></div>
                                 <div><strong>System Serial:</strong> <span id="lic-serial">Loading...</span></div>
                                 <div><strong>Key:</strong> <span id="lic-key" style="font-weight:bold; color:var(--primary);">---</span></div>
@@ -12354,7 +12350,6 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
         async function loadLicenseInfo() {
             const statusEl = document.getElementById('lic-status');
-            const hwidEl = document.getElementById('lic-hwid');
             const modelEl = document.getElementById('lic-model');
             const serialEl = document.getElementById('lic-serial');
             const keyEl = document.getElementById('lic-key');
@@ -12368,7 +12363,6 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 const res = await fetch('/api/license/status');
                 const data = await res.json();
                 
-                if(hwidEl) hwidEl.textContent = data.hwid || 'Unknown';
                 if(modelEl) modelEl.textContent = data.device_model || 'Unknown';
                 if(serialEl) serialEl.textContent = data.system_serial || 'Unknown';
                 
