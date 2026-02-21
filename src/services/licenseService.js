@@ -67,6 +67,7 @@ class LicenseService {
                 key: this.licenseData.key,
                 license_key: this.licenseData.key,
                 system_serial: this.systemSerial,
+                System_Serial: this.systemSerial,
                 device_model: this.deviceModel
             });
 
@@ -166,7 +167,7 @@ class LicenseService {
             const targetUrl = new URL(projectUrl);
             targetUrl.pathname = '/rest/v1/licenses';
             // Also fetch system_serial if column exists (optional) but primarily we check status
-            targetUrl.search = `key=eq.${encodeURIComponent(this.licenseData.key)}&select=status,hardware_id`;
+            targetUrl.search = `key=eq.${encodeURIComponent(this.licenseData.key)}&select=status,system_serial,System_serial_bound,hardware_id`;
             const isHttps = targetUrl.protocol === 'https:';
             const client = isHttps ? https : http;
             const options = {
@@ -190,9 +191,9 @@ class LicenseService {
                             const row = Array.isArray(rows) ? rows[0] : null;
                             if (row) {
                                 const revoked = String(row.status).toLowerCase() === 'revoked';
-                                const unbound = !row.hardware_id;
-                                const rowId = this.normalizeId(row.hardware_id);
-                                const localId = this.normalizeId(this.hwid);
+                                const unbound = !row.system_serial && !row.System_serial_bound && !row.hardware_id;
+                                const rowId = this.normalizeId(row.system_serial || row.System_serial_bound || row.hardware_id);
+                                const localId = this.normalizeId(this.systemSerial || this.hwid);
                                 const mismatch = rowId && localId && rowId !== localId;
                                 
                                 if (revoked || unbound || mismatch) {
@@ -288,7 +289,9 @@ class LicenseService {
                 const rawData = fs.readFileSync(this.licensePath, 'utf8');
                 const license = JSON.parse(rawData);
 
-                if (this.verifySignature(license) && license.token.hwid === this.hwid) {
+                const localId = this.normalizeId(this.systemSerial || this.hwid);
+                const tokenId = this.normalizeId(license.token.system_serial || license.token.System_Serial || license.token.hardware_id || license.token.hwid);
+                if (this.verifySignature(license) && tokenId && localId && tokenId === localId) {
                     this.isValid = true;
                     this.licenseData = license.token;
                     // Add metadata
@@ -298,7 +301,7 @@ class LicenseService {
                     console.log('LicenseService: License Validated Successfully');
                     return;
                 } else {
-                    console.warn('LicenseService: Invalid License or HWID Mismatch');
+                    console.warn('LicenseService: Invalid License or Identity Mismatch');
                 }
             }
 
