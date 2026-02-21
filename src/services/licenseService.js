@@ -32,7 +32,7 @@ class LicenseService {
         // Strictly use System Serial as HWID
         // If unknown, we still use 'Unknown' which will fail validation if not intended,
         // but user explicitly asked to remove previous HWID logic.
-        this.hwid = (this.systemSerial && this.systemSerial !== 'Unknown') ? this.systemSerial : 'UNKNOWN_SERIAL';
+        this.hwid = (this.systemSerial && this.systemSerial !== 'Unknown') ? this.systemSerial : 'Unknown';
         
         console.log(`LicenseService: Using HWID: ${this.hwid}`);
         this.loadLicense();
