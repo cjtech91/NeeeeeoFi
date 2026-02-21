@@ -67,6 +67,7 @@ class LicenseService {
                 key: this.licenseData.key,
                 license_key: this.licenseData.key,
                 hwid: this.hwid,
+                hardware_id: this.hwid,
                 system_serial: this.systemSerial,
                 device_model: this.deviceModel
             });
@@ -156,6 +157,11 @@ class LicenseService {
         setTimeout(poll, 45000);
     }
 
+    normalizeId(s) {
+        if (typeof s !== 'string') return s;
+        return s.trim();
+    }
+
     pollSupabaseLicenseRow(projectUrl, supabaseKey) {
         if (!this.licenseData || !this.licenseData.key) return;
         try {
@@ -186,10 +192,10 @@ class LicenseService {
                             const row = Array.isArray(rows) ? rows[0] : null;
                             if (row) {
                                 const revoked = String(row.status).toLowerCase() === 'revoked';
-                                // Check hardware_id (which should now be our System Serial)
-                                // If the row has a hardware_id, it must match our current HWID (System Serial)
                                 const unbound = !row.hardware_id;
-                                const mismatch = row.hardware_id && row.hardware_id !== this.hwid;
+                                const rowId = this.normalizeId(row.hardware_id);
+                                const localId = this.normalizeId(this.hwid);
+                                const mismatch = rowId && localId && rowId !== localId;
                                 
                                 if (revoked || unbound || mismatch) {
                                     console.warn(`LicenseService: Supabase row indicates revoke/unbound/mismatch. Revoking license.`);
@@ -404,6 +410,7 @@ class LicenseService {
                 license_key: key, 
                 machine_id: this.hwid,
                 hwid: this.hwid,
+                hardware_id: this.hwid,
                 system_serial: this.systemSerial,
                 device_model: this.deviceModel
             };
@@ -671,6 +678,7 @@ class LicenseService {
             const payload = JSON.stringify({
                 license_key: key,
                 hwid: this.hwid,
+                hardware_id: this.hwid,
                 system_serial: this.systemSerial,
                 device_model: this.deviceModel,
                 status: 'success',
