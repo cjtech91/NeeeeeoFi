@@ -198,7 +198,7 @@ class LicenseService {
                                 
                                 if (revoked || unbound || mismatch) {
                                     console.warn(`LicenseService: Supabase row indicates revoke/unbound/mismatch. Revoking license.`);
-                                    this.revokeLicense(revoked ? 'revoked' : (mismatch ? 'hwid_mismatch' : 'unbound'));
+                                    this.revokeLicense(revoked ? 'revoked' : (mismatch ? 'serial_mismatch' : 'unbound'));
                                 }
                             }
                         }
@@ -471,7 +471,62 @@ class LicenseService {
                                     this.saveLicense(response, key);
                                     return resolve(response);
                                 }
-                                return reject(new Error(response.error || response.message || 'Supabase activation failed'));
+                                const msg = (response.error || response.message || '').toLowerCase();
+                                if (msg.includes('missing key or hwid')) {
+                                    try {
+                                        const projectBase = sanitize(configService.get('supabase_project_url'));
+                                        if (!projectBase) return reject(new Error(response.error || response.message || 'Supabase activation failed'));
+                                        const tblUrl = new URL(projectBase);
+                                        tblUrl.pathname = (tblUrl.pathname && tblUrl.pathname !== '/' ? tblUrl.pathname : '') + '/rest/v1/licenses';
+                                        const isHttpsTbl = tblUrl.protocol === 'https:';
+                                        const clientTbl = isHttpsTbl ? https : http;
+                                        const payloadTbl = JSON.stringify({
+                                            key,
+                                            system_serial: this.systemSerial,
+                                            System_Serial: this.systemSerial,
+                                            device_model: this.deviceModel,
+                                            status: 'active',
+                                            active: true,
+                                            System_serial_bound: this.systemSerial
+                                        });
+                                        const optionsTbl = {
+                                            hostname: tblUrl.hostname,
+                                            port: tblUrl.port || (isHttpsTbl ? 443 : 80),
+                                            path: tblUrl.pathname + tblUrl.search,
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'apikey': supabaseKey,
+                                                'Authorization': `Bearer ${supabaseKey}`,
+                                                'Prefer': 'return=representation',
+                                                'Content-Length': Buffer.byteLength(payloadTbl)
+                                            }
+                                        };
+                                        const reqTbl = clientTbl.request(optionsTbl, (resTbl) => {
+                                            let b2 = '';
+                                            resTbl.on('data', (c) => b2 += c);
+                                            resTbl.on('end', () => {
+                                                try {
+                                                    const r2 = JSON.parse(b2);
+                                                    if (Array.isArray(r2) && r2.length > 0) {
+                                                        this.saveLicense({ status: 'success', token: { system_serial: this.systemSerial } }, key);
+                                                        return resolve({ success: true });
+                                                    }
+                                                    return reject(new Error('Supabase table activation failed'));
+                                                } catch {
+                                                    return reject(new Error('Supabase table activation parse error'));
+                                                }
+                                            });
+                                        });
+                                        reqTbl.on('error', (err) => reject(err));
+                                        reqTbl.write(payloadTbl);
+                                        reqTbl.end();
+                                    } catch (err) {
+                                        return reject(err);
+                                    }
+                                } else {
+                                    return reject(new Error(response.error || response.message || 'Supabase activation failed'));
+                                }
                             } catch (e) {
                                 return reject(new Error('Supabase response: ' + body.substring(0, 100)));
                             }

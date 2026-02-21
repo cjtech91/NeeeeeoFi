@@ -12645,7 +12645,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     alert("License Activated Successfully!");
                     loadLicenseInfo();
                 } else {
-                    alert("Activation Failed: " + (data.error || data.message || 'Unknown error'));
+                    const rawMsg = (data.error || data.message || 'Unknown error');
+                    const friendly = String(rawMsg).replace(/hwid/ig, 'serial').replace(/hardware id/ig, 'serial');
+                    alert("Activation Failed: " + friendly);
                     if(btn) {
                         btn.disabled = false;
                         btn.textContent = originalText;
