@@ -103,6 +103,17 @@ app.post('/api/license/activate', async (req, res) => {
     }
 });
 
+// Backward-compatible alias (plural) used by some clients/screenshots
+app.post('/api/licenses/activate', async (req, res) => {
+    try {
+        const { key } = req.body;
+        const result = await licenseService.activateLicense(key);
+        res.json(result);
+    } catch (e) {
+        res.status(400).json({ success: false, error: e.message });
+    }
+});
+
 // License Enforcement Middleware
 app.use('/api', (req, res, next) => {
     // Allow license APIs and Auth
