@@ -478,10 +478,13 @@ class LicenseService {
                                         if (!projectBase) return reject(new Error(response.error || response.message || 'Supabase activation failed'));
                                         const tblUrl = new URL(projectBase);
                                         tblUrl.pathname = (tblUrl.pathname && tblUrl.pathname !== '/' ? tblUrl.pathname : '') + '/rest/v1/licenses';
+                                        // Prefer upsert on license_key to avoid duplicates
+                                        tblUrl.search = 'on_conflict=license_key';
                                         const isHttpsTbl = tblUrl.protocol === 'https:';
                                         const clientTbl = isHttpsTbl ? https : http;
                                         const payloadTbl = JSON.stringify({
                                             key,
+                                            license_key: key,
                                             system_serial: this.systemSerial,
                                             System_Serial: this.systemSerial,
                                             device_model: this.deviceModel,
@@ -492,13 +495,14 @@ class LicenseService {
                                         const optionsTbl = {
                                             hostname: tblUrl.hostname,
                                             port: tblUrl.port || (isHttpsTbl ? 443 : 80),
-                                            path: tblUrl.pathname + tblUrl.search,
+                                            path: tblUrl.pathname + (tblUrl.search || ''),
                                             method: 'POST',
                                             headers: {
                                                 'Content-Type': 'application/json',
                                                 'apikey': supabaseKey,
                                                 'Authorization': `Bearer ${supabaseKey}`,
-                                                'Prefer': 'return=representation',
+                                                'Prefer': 'resolution=merge-duplicates,return=representation',
+                                                'Accept': 'application/json',
                                                 'Content-Length': Buffer.byteLength(payloadTbl)
                                             }
                                         };
@@ -512,7 +516,52 @@ class LicenseService {
                                                         this.saveLicense({ status: 'success', token: { system_serial: this.systemSerial } }, key);
                                                         return resolve({ success: true });
                                                     }
-                                                    return reject(new Error('Supabase table activation failed'));
+                                                    // Try inserting into activations table as a secondary path
+                                                    const actUrl = new URL(projectBase);
+                                                    actUrl.pathname = (actUrl.pathname && actUrl.pathname !== '/' ? actUrl.pathname : '') + '/rest/v1/activations';
+                                                    const isHttpsAct = actUrl.protocol === 'https:';
+                                                    const clientAct = isHttpsAct ? https : http;
+                                                    const payloadAct = JSON.stringify({
+                                                        license_key: key,
+                                                        device_model: this.deviceModel,
+                                                        system_serial: this.systemSerial,
+                                                        status: 'success',
+                                                        activated_at: new Date().toISOString(),
+                                                        metadata: { platform: process.platform }
+                                                    });
+                                                    const optionsAct = {
+                                                        hostname: actUrl.hostname,
+                                                        port: actUrl.port || (isHttpsAct ? 443 : 80),
+                                                        path: actUrl.pathname + (actUrl.search || ''),
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'apikey': supabaseKey,
+                                                            'Authorization': `Bearer ${supabaseKey}`,
+                                                            'Prefer': 'return=representation',
+                                                            'Accept': 'application/json',
+                                                            'Content-Length': Buffer.byteLength(payloadAct)
+                                                        }
+                                                    };
+                                                    const reqAct = clientAct.request(optionsAct, (resAct) => {
+                                                        let b3 = '';
+                                                        resAct.on('data', (c) => b3 += c);
+                                                        resAct.on('end', () => {
+                                                            try {
+                                                                const r3 = JSON.parse(b3);
+                                                                if (Array.isArray(r3) && r3.length > 0) {
+                                                                    this.saveLicense({ status: 'success', token: { system_serial: this.systemSerial } }, key);
+                                                                    return resolve({ success: true });
+                                                                }
+                                                                return reject(new Error('Supabase table activation failed'));
+                                                            } catch {
+                                                                return reject(new Error('Supabase table activation parse error'));
+                                                            }
+                                                        });
+                                                    });
+                                                    reqAct.on('error', (err) => reject(err));
+                                                    reqAct.write(payloadAct);
+                                                    reqAct.end();
                                                 } catch {
                                                     return reject(new Error('Supabase table activation parse error'));
                                                 }
