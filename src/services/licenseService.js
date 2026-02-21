@@ -390,6 +390,16 @@ class LicenseService {
                 return reject(new Error('Missing local key or HWID initialization'));
             }
 
+            const ensureFieldsReady = async () => {
+                if (!this.deviceModel || this.deviceModel === 'Loading...') {
+                    this.deviceModel = await hardwareService.getDeviceModel();
+                }
+                if (!this.systemSerial || this.systemSerial === 'Loading...') {
+                    this.fetchSystemSerial();
+                }
+            };
+
+            ensureFieldsReady().then(() => {
             // Comprehensive payload to catch any naming convention
             const initialPayload = {
                 // Core expected params
@@ -632,6 +642,7 @@ class LicenseService {
                     console.error('LicenseService: All activation attempts failed.');
                     reject(finalErr);
                 });
+            });
         });
     }
 
