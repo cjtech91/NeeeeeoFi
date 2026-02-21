@@ -29,8 +29,11 @@ class LicenseService {
     init() {
         this.fetchDeviceModel();
         this.fetchSystemSerial();
-        // Use System Serial as HWID if available, otherwise fallback to generated ID
-        this.hwid = (this.systemSerial && this.systemSerial !== 'Unknown') ? this.systemSerial : this.generateHWID();
+        // Strictly use System Serial as HWID
+        // If unknown, we still use 'Unknown' which will fail validation if not intended,
+        // but user explicitly asked to remove previous HWID logic.
+        this.hwid = (this.systemSerial && this.systemSerial !== 'Unknown') ? this.systemSerial : 'UNKNOWN_SERIAL';
+        
         console.log(`LicenseService: Using HWID: ${this.hwid}`);
         this.loadLicense();
         this.startHeartbeat();
@@ -260,41 +263,10 @@ class LicenseService {
         this.systemSerial = 'Unknown';
     }
 
+    // Old HWID generation logic removed as per user request.
+    // This method is deprecated and should not be used.
     generateHWID() {
-        try {
-            if (process.platform === 'win32') {
-                // Windows Dev Mode: Use a fixed ID or MachineGUID
-                return 'WIN-DEV-MACHINE-ID-12345';
-            }
-
-            // Linux: Try to get MAC address of eth0
-            let mac = '';
-            try {
-                mac = fs.readFileSync('/sys/class/net/eth0/address', 'utf8').trim();
-            } catch (e) {
-                // Fallback to wlan0 or similar if eth0 missing
-                try {
-                     mac = execSync('cat /sys/class/net/*/address | head -n 1').toString().trim();
-                } catch (e2) {}
-            }
-
-            // Linux: Try to get CPU Serial (Raspberry Pi specific)
-            let cpuSerial = '';
-            try {
-                const cpuInfo = fs.readFileSync('/proc/cpuinfo', 'utf8');
-                const match = cpuInfo.match(/Serial\s*:\s*([0-9a-f]+)/);
-                if (match && match[1]) {
-                    cpuSerial = match[1];
-                }
-            } catch (e) {}
-
-            const rawId = `${mac}-${cpuSerial}`;
-            return crypto.createHash('sha256').update(rawId).digest('hex');
-
-        } catch (error) {
-            console.error('LicenseService: Failed to generate HWID', error);
-            return 'UNKNOWN-HWID';
-        }
+        return 'DEPRECATED_USE_SYSTEM_SERIAL';
     }
 
     loadLicense() {
