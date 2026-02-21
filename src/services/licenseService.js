@@ -66,8 +66,6 @@ class LicenseService {
             const payload = JSON.stringify({
                 key: this.licenseData.key,
                 license_key: this.licenseData.key,
-                hwid: this.hwid,
-                hardware_id: this.hwid,
                 system_serial: this.systemSerial,
                 device_model: this.deviceModel
             });
@@ -400,39 +398,37 @@ class LicenseService {
             };
 
             ensureFieldsReady().then(() => {
-            // Comprehensive payload to catch any naming convention
             const initialPayload = {
-                // Core expected params
                 endpoint: 'activate', 
                 action: 'activate',
                 key: key,
                 machine_id: this.hwid,
                 device_model: this.deviceModel
             };
-
-            // 1. Prepare JSON Payload
-            // The remote server (PHP) might be expecting JSON input or specific naming.
-            // We include aliases to be safe: machine_id vs hwid vs system_serial.
-            const payload = {
+            const apiPayload = {
                 endpoint: 'activate', 
                 action: 'activate',
                 key: key,
                 license_key: key, 
                 machine_id: this.hwid,
-                hwid: this.hwid,
-                hardware_id: this.hwid,
                 system_serial: this.systemSerial,
                 device_model: this.deviceModel
             };
-
-            const jsonBody = JSON.stringify(payload);
-            console.log('LicenseService: Body Payload (JSON):', jsonBody);
-
             const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
             const backend = (sanitize(configService.get('license_backend')) || 'api').toLowerCase();
             const supabaseUrl = sanitize(configService.get('supabase_activation_url'));
             const supabaseKey = sanitize(configService.get('supabase_anon_key'));
             this.apiUrl = sanitize(configService.get('license_api_url')) || this.apiUrl;
+            const supaBody = JSON.stringify({
+                endpoint: 'activate',
+                action: 'activate',
+                key: key,
+                license_key: key,
+                system_serial: this.systemSerial,
+                device_model: this.deviceModel
+            });
+            const jsonBody = JSON.stringify(apiPayload);
+            console.log('LicenseService: Body Payload (JSON):', jsonBody);
             // Supabase Function Backend (preferred when configured)
             if (backend === 'supabase' && supabaseUrl) {
                 try {
@@ -502,14 +498,14 @@ class LicenseService {
                             };
                             const reqAlt = clientAlt.request(optionsAlt, (resAlt) => handleResponse(resAlt, null));
                             reqAlt.on('error', (err) => reject(err));
-                            reqAlt.write(jsonBody);
+                            reqAlt.write(supaBody);
                             reqAlt.end();
                         } catch (err) {
                             reject(err);
                         }
                     }));
                     reqFn.on('error', (err) => reject(err));
-                    reqFn.write(jsonBody);
+                    reqFn.write(supaBody);
                     reqFn.end();
                     return; // Do not continue to API mode
                 } catch (e) {
@@ -688,8 +684,6 @@ class LicenseService {
             
             const payload = JSON.stringify({
                 license_key: key,
-                hwid: this.hwid,
-                hardware_id: this.hwid,
                 system_serial: this.systemSerial,
                 device_model: this.deviceModel,
                 status: 'success',
