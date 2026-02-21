@@ -478,19 +478,16 @@ class LicenseService {
                                         if (!projectBase) return reject(new Error(response.error || response.message || 'Supabase activation failed'));
                                         const tblUrl = new URL(projectBase);
                                         tblUrl.pathname = (tblUrl.pathname && tblUrl.pathname !== '/' ? tblUrl.pathname : '') + '/rest/v1/licenses';
-                                        // Prefer upsert on license_key to avoid duplicates
-                                        tblUrl.search = 'on_conflict=license_key';
+                                        // Insert minimal fields that exist in licenses table
                                         const isHttpsTbl = tblUrl.protocol === 'https:';
                                         const clientTbl = isHttpsTbl ? https : http;
                                         const payloadTbl = JSON.stringify({
-                                            key,
-                                            license_key: key,
                                             system_serial: this.systemSerial,
                                             System_Serial: this.systemSerial,
+                                            System_serial_bound: this.systemSerial,
                                             device_model: this.deviceModel,
                                             status: 'active',
-                                            active: true,
-                                            System_serial_bound: this.systemSerial
+                                            active: true
                                         });
                                         const optionsTbl = {
                                             hostname: tblUrl.hostname,
@@ -501,7 +498,7 @@ class LicenseService {
                                                 'Content-Type': 'application/json',
                                                 'apikey': supabaseKey,
                                                 'Authorization': `Bearer ${supabaseKey}`,
-                                                'Prefer': 'resolution=merge-duplicates,return=representation',
+                                                'Prefer': 'return=representation',
                                                 'Accept': 'application/json',
                                                 'Content-Length': Buffer.byteLength(payloadTbl)
                                             }
