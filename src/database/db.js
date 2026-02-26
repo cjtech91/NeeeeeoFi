@@ -809,6 +809,27 @@ const initDb = () => {
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value, category) VALUES (?, ?, ?)');
   defaultSettings.forEach(s => insertSetting.run(s.key, s.value, s.category));
 
+  // Local log of license activations for resilience/audit
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS license_activations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        license_key_hash TEXT,
+        system_serial TEXT,
+        device_model TEXT,
+        token_json TEXT,
+        signature TEXT,
+        status TEXT DEFAULT 'success',
+        message TEXT,
+        activated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_license_activations_time ON license_activations(activated_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_license_activations_key ON license_activations(license_key_hash)`);
+  } catch (e) {
+    console.error('Migration error (license_activations):', e.message);
+  }
+
   console.log('Database initialized successfully.');
 };
 

@@ -126,7 +126,7 @@ If you don't have a USB drive or it's not detected, you can stream the backup di
 2.  **Run these commands**:
     ```cmd
     cd %USERPROFILE%\Desktop
-ssh root@20.0.0.226 "dd if=/dev/mmcblk0 bs=1M status=progress | gzip -" > NeoFi_one_Fixed.img.gz 
+ssh root@20.0.0.224 "dd if=/dev/mmcblk0 bs=1M status=progress | gzip -" > NeoFi_Zero3_Fixed.img.gz 
     ```
 3.  **Enter your SSH password**.
 

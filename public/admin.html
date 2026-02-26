@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NeoFi</title>
+    <link rel="icon" type="image/png" href="/neologo.png">
+    <link rel="apple-touch-icon" href="/neologo.png">
     <!-- Try Local Chart.js only - Removed CDN fallback to prevent offline blocking -->
     <script src="/js/chart.js"></script>
     <script src="/socket.io/socket.io.js"></script>
@@ -5067,10 +5069,15 @@
                                 </div>
                             </div>
 
-                            <div style="margin-top:5px; padding-top:5px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                                <div id="wan-status" class="status-indicator">
-                                    <div class="status-dot"></div>
-                                    <span id="wan-status-text">Checking...</span>
+                            <div style="margin-top:5px; padding-top:5px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; text-align:center;">
+                                    <div id="wan-status" class="status-indicator" style="min-width:120px;">
+                                        <div class="status-dot"></div>
+                                        <span id="wan-status-text">Checking...</span>
+                                    </div>
+                                    <div id="wan-detail" style="font-size:0.8rem; color:var(--text-muted);">
+                                        <span id="wan-detail-text"></span>
+                                    </div>
                                 </div>
                                 <button class="btn btn-primary" onclick="saveNetworkConfig()">Save Changes</button>
                             </div>
@@ -6016,6 +6023,8 @@
                                 <div><strong>System Serial:</strong> <span id="lic-serial">Loading...</span></div>
                                 <div><strong>Key:</strong> <span id="lic-key" style="font-weight:bold; color:var(--primary);">---</span></div>
                                 <div><strong>Activated:</strong> <span id="lic-activated">---</span></div>
+                                <div><strong>Last Auth:</strong> <span id="lic-last-verified">---</span></div>
+                                <div id="lic-auto-error" style="display:none;"><strong>Auto-Activation:</strong> <span id="lic-auto-error-msg" style="color:var(--warning);">---</span></div>
                                 <div><strong>Expiration:</strong> <span id="lic-expiration">---</span></div>
                                 <div id="lic-countdown-container" style="display:none; margin-top:8px;">
                                     <strong>Trial Remaining:</strong> <span id="lic-countdown">0d 0h 0m 0s</span>
@@ -11210,13 +11219,14 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         async function updateWanStatus() {
             const statusEl = document.getElementById('wan-status');
             const textEl = document.getElementById('wan-status-text');
+            const detailEl = document.getElementById('wan-detail-text');
             if (!statusEl || !textEl) return;
             
             try {
                 textEl.textContent = 'Checking...';
                 statusEl.classList.remove('status-online', 'status-offline');
                 
-                const response = await fetch('/api/admin/network/status');
+                const response = await fetch('/api/admin/network/wan/status');
                 const data = await response.json();
                 
                 if (data.online) {
@@ -11226,10 +11236,27 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     statusEl.classList.add('status-offline');
                     textEl.textContent = 'Offline';
                 }
+                
+                if (detailEl) {
+                    const iface = data.interface || '--';
+                    const ip = data.ip || '--';
+                    const gw = data.gateway || '--';
+                    const link = (data.operstate || '').toUpperCase();
+                    const spd = data.speed || '';
+                    const gwOk = data.gatewayReachable === true ? 'reachable' : (data.gatewayReachable === false ? 'unreachable' : 'unknown');
+                    // Example: end0 • 192.168.1.10 → 192.168.1.1 (reachable) • UP 1000Mb/s
+                    let parts = [];
+                    parts.push(iface);
+                    parts.push(ip);
+                    if (data.gateway) parts.push(`→ ${gw} (${gwOk})`);
+                    if (link) parts.push(`${link}${spd? ' ' + spd : ''}`);
+                    detailEl.textContent = parts.join(' • ');
+                }
             } catch (e) {
                 console.error('Failed to check WAN status:', e);
                 statusEl.classList.add('status-offline');
                 textEl.textContent = 'Offline';
+                if (detailEl) detailEl.textContent = '';
             }
         }
 
@@ -12357,6 +12384,10 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const expirationEl = document.getElementById('lic-expiration');
             const countdownContainerEl = document.getElementById('lic-countdown-container');
             const countdownEl = document.getElementById('lic-countdown');
+            const infoBannerEl = ensureLicenseInfoBanner();
+            const lastVerifiedEl = document.getElementById('lic-last-verified');
+            const autoErrWrap = document.getElementById('lic-auto-error');
+            const autoErrMsg = document.getElementById('lic-auto-error-msg');
             
             try {
                 if(statusEl) statusEl.textContent = 'Loading...';
@@ -12369,6 +12400,19 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 const license = data.license || {};
                 
                 if (data.isValid) {
+                    if (infoBannerEl) infoBannerEl.style.display = 'none';
+                    if (autoErrWrap) autoErrWrap.style.display = 'none';
+                    if (lastVerifiedEl) {
+                        if (data.last_verified_ts) {
+                            lastVerifiedEl.textContent = new Date(Number(data.last_verified_ts)).toLocaleString();
+                        } else if (data.auto_reactivating) {
+                            lastVerifiedEl.textContent = 'Verifying...';
+                        } else {
+                            lastVerifiedEl.textContent = '—';
+                        }
+                    }
+                    const spin = document.getElementById('lic-status-spinner');
+                    if (spin) spin.style.display = 'none';
                     const isTrial = license.type === 'TRIAL';
                     const isRestricted = license.type === 'RESTRICTED';
                     
@@ -12376,7 +12420,17 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         if (isRestricted) {
                             statusEl.textContent = 'Restricted';
                             statusEl.style.color = 'red';
-                            promptReactivation();
+                            // If system reports it is attempting auto activation, show info/spinner instead of red prompt
+                            if (data.auto_reactivating && data.saved_key_present) {
+                                if (infoBannerEl) {
+                                    infoBannerEl.textContent = 'Attempting automatic activation...';
+                                    infoBannerEl.style.display = 'block';
+                                }
+                                const s = ensureStatusSpinner(statusEl);
+                                if (s) s.style.display = 'inline-block';
+                            } else {
+                                promptReactivation();
+                            }
                         } else {
                             statusEl.textContent = 'Active';
                             statusEl.style.color = 'green';
@@ -12463,6 +12517,35 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     }
 
                 } else {
+                    if (data.auto_reactivating && data.saved_key_present) {
+                        if (infoBannerEl) {
+                            infoBannerEl.textContent = 'Attempting automatic activation...';
+                            infoBannerEl.style.display = 'block';
+                        }
+                        const s = ensureStatusSpinner(statusEl);
+                        if (s) s.style.display = 'inline-block';
+                        if (lastVerifiedEl) lastVerifiedEl.textContent = 'Verifying...';
+                        if (autoErrWrap) autoErrWrap.style.display = 'none';
+                    } else {
+                        if (infoBannerEl) infoBannerEl.style.display = 'none';
+                        const spin = document.getElementById('lic-status-spinner');
+                        if (spin) spin.style.display = 'none';
+                        if (lastVerifiedEl) {
+                            if (data.last_verified_ts) {
+                                lastVerifiedEl.textContent = new Date(Number(data.last_verified_ts)).toLocaleString();
+                            } else {
+                                lastVerifiedEl.textContent = '—';
+                            }
+                        }
+                        if (autoErrWrap) {
+                            if (data.auto_reactivation_error) {
+                                autoErrWrap.style.display = 'block';
+                                autoErrMsg.textContent = data.auto_reactivation_error;
+                            } else {
+                                autoErrWrap.style.display = 'none';
+                            }
+                        }
+                    }
                     if(statusEl) {
                         statusEl.textContent = 'Inactive / Expired';
                         statusEl.style.color = 'red';
@@ -12475,7 +12558,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         licenseCountdownInterval = null;
                     }
                     if (countdownContainerEl) countdownContainerEl.style.display = 'none';
-                    promptReactivation();
+                    if (!(data.auto_reactivating && data.saved_key_present)) {
+                        promptReactivation();
+                    }
                     
                     const input = document.getElementById('license-key-input');
                     const btn = document.querySelector('#activation-form button');
@@ -12483,6 +12568,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     if(btn) {
                         btn.disabled = false;
                         btn.textContent = 'Activate';
+                    }
+                    
+                    // Auto-refresh while auto activation is running
+                    if (data.auto_reactivating) {
+                        setTimeout(loadLicenseInfo, 5000);
                     }
                 }
             } catch (e) {
@@ -12519,6 +12609,53 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 document.body.appendChild(banner);
             }
             return banner;
+        }
+
+        function ensureLicenseInfoBanner() {
+            let info = document.getElementById('license-info-banner');
+            if (!info) {
+                info = document.createElement('div');
+                info.id = 'license-info-banner';
+                info.style.position = 'fixed';
+                info.style.top = '0';
+                info.style.left = '0';
+                info.style.right = '0';
+                info.style.zIndex = '3001';
+                info.style.display = 'none';
+                info.style.padding = '10px 14px';
+                info.style.background = '#2f80ed';
+                info.style.color = '#fff';
+                info.style.fontWeight = '600';
+                info.style.textAlign = 'center';
+                info.textContent = 'Attempting automatic activation...';
+                document.body.appendChild(info);
+            }
+            return info;
+        }
+
+        function ensureStatusSpinner(anchor) {
+            let spinner = document.getElementById('lic-status-spinner');
+            if (!spinner) {
+                spinner = document.createElement('span');
+                spinner.id = 'lic-status-spinner';
+                spinner.style.display = 'inline-block';
+                spinner.style.width = '12px';
+                spinner.style.height = '12px';
+                spinner.style.marginLeft = '8px';
+                spinner.style.border = '2px solid rgba(47,128,237,0.3)';
+                spinner.style.borderTopColor = '#2f80ed';
+                spinner.style.borderRadius = '50%';
+                spinner.style.animation = 'spin900ms linear infinite';
+                const style = document.createElement('style');
+                style.textContent = '@keyframes spin900ms{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
+                document.head.appendChild(style);
+                if (anchor && anchor.parentElement) {
+                    anchor.parentElement.insertBefore(spinner, anchor.nextSibling);
+                } else {
+                    document.body.appendChild(spinner);
+                }
+            }
+            return spinner;
         }
 
         function promptReactivation() {

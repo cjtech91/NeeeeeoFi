@@ -64,7 +64,6 @@ sessionService.on('session_updated', (data) => {
 });
 
 // Initialize License service and monitoring
-licenseService.init();
 licenseService.events.on('license_state', (payload) => {
     try {
         io.emit('license_state', payload);
@@ -3398,6 +3397,18 @@ app.get('/api/admin/network/status', isAuthenticated, async (req, res) => {
     }
 });
 
+// WAN detailed status (IP, gateway, link, speed)
+app.get('/api/admin/network/wan/status', isAuthenticated, async (req, res) => {
+    try {
+        const detailed = await networkService.getWanStatusDetailed();
+        // Also include overall online flag
+        let online = false;
+        try { online = await networkService.checkInternetConnection(); } catch (_) {}
+        res.json({ online, ...detailed });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 app.get('/api/admin/network/wan', isAuthenticated, (req, res) => {
     res.json(networkConfigService.getWanConfig());
 });
