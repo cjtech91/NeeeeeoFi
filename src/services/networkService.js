@@ -686,6 +686,26 @@ class NetworkService {
         return result;
     }
 
+    async applyAntiIspDetect(cfg = null) {
+        try {
+            const wanIf = await this.detectWanInterface();
+            const lanBr = 'br0';
+            const enabled = cfg && cfg.enabled ? '1' : '0';
+            const ttlMode = (cfg && cfg.ttl_mode) ? String(cfg.ttl_mode) : 'inc1';
+            const mssClamp = (cfg && cfg.mss_clamp !== false) ? '1' : '0';
+            const hideMgmt = (cfg && cfg.hide_mgmt !== false) ? '1' : '0';
+            const script = path.join(__dirname, '../scripts/apply_anti_isp.sh');
+            try { await this.runCommand(`chmod +x ${script}`, true); } catch (e) {}
+            const cmd = `${script} ${enabled} ${ttlMode} ${mssClamp} ${hideMgmt} ${wanIf || 'eth0'} ${lanBr}`;
+            console.log('[Network] Applying Anti-ISP Detect:', cmd);
+            await this.runCommand(cmd);
+            return true;
+        } catch (e) {
+            console.error('Failed to apply Anti-ISP Detect:', e.message);
+            return false;
+        }
+    }
+
     /**
      * Get MAC Address from IP
      */

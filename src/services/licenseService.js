@@ -738,14 +738,14 @@ class LicenseService {
     // --- Feature Restrictions ---
 
     getLimits() {
-        if (this.licenseData && (this.licenseData.type === 'full' || this.licenseData.type === 'TRIAL' || this.licenseData.type === 'DEVELOPER')) {
+        const type = this.licenseData && this.licenseData.type ? String(this.licenseData.type).toUpperCase() : null;
+        if (this.isValid && type !== 'RESTRICTED') {
             return {
                 max_hotspot_users: Infinity,
                 max_pppoe_users: Infinity,
                 insert_coin_enabled: true
             };
         }
-        // Restricted Mode
         return {
             max_hotspot_users: 1,
             max_pppoe_users: 1,
@@ -942,7 +942,7 @@ class LicenseService {
                 status: 'success',
                 activated_at: new Date().toISOString(),
                 metadata: {
-                    version: '1.0',
+                    version: '1.1',
                     platform: process.platform
                 }
             });

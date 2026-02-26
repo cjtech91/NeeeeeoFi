@@ -187,6 +187,23 @@ class NetworkConfigService {
         return true;
     }
 
+    getAntiIspConfig() {
+        const row = db.prepare("SELECT value FROM settings WHERE key = 'anti_isp_config'").get();
+        return row ? JSON.parse(row.value) : { enabled: false, ttl_mode: 'inc1', mss_clamp: true, hide_mgmt: true };
+    }
+
+    saveAntiIspConfig(cfg) {
+        const config = {
+            enabled: !!cfg.enabled,
+            ttl_mode: cfg.ttl_mode || 'inc1',
+            mss_clamp: cfg.mss_clamp !== false,
+            hide_mgmt: cfg.hide_mgmt !== false
+        };
+        db.prepare("INSERT INTO settings (key, value, type, category, updated_at) VALUES ('anti_isp_config', ?, 'json', 'network', CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP")
+          .run(JSON.stringify(config));
+        return config;
+    }
+
 
 
     // --- VLAN Management ---

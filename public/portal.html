@@ -1507,9 +1507,16 @@
         }
 
         socket.on('coin_pending_update', (data) => {
-            if (!isInserting || !currentUser || !currentUser.mac) return;
+            if (!currentUser || !currentUser.mac) return;
             if ((currentUser.mac || '').toLowerCase() !== (data.mac || '').toLowerCase()) return;
 
+            if (!isInserting) {
+                // Auto-open coin modal when hardware auto-session starts
+                isInserting = true;
+                initCoinBeep();
+                document.getElementById('coin-display').textContent = `₱0.00`;
+                openModal('coin-modal');
+            }
             coinAmount = Number(data.amount) || 0;
             document.getElementById('modal-coin-amount').textContent = `₱${coinAmount.toFixed(2)}`;
             document.getElementById('coin-display').textContent = `₱${coinAmount.toFixed(2)}`;

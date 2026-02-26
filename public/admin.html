@@ -2933,7 +2933,7 @@
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <img id="sidebar-logo" src="/neofi_logo.png" data-logo-full="/neofi_logo.png" data-logo-compact="/neologo.png" alt="NeoFi" style="height: 40px; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="nav('dashboard')">
-                <div style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">V1.0</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">V1.1</div>
             </div>
             <div class="menu">
                 <div class="menu-item active" onclick="nav('dashboard')">
@@ -5084,6 +5084,52 @@
                         </div>
                     </div>
 
+                    <!-- Anti-ISP Detect -->
+                    <div class="card" style="margin-top: 5px;">
+                        <div class="card-header">
+                            <div class="card-title">Anti-ISP Detect</div>
+                            <div class="status-badge" id="anti-isp-badge" style="background:var(--text-muted); color:var(--card-bg); font-size:0.7rem;">Disabled</div>
+                        </div>
+                        <div class="card-body">
+                            <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+                                <div>
+                                    <label style="display:block; font-weight:600; margin-bottom:0px; font-size:0.8rem;">Enabled</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="anti-isp-enabled">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-weight:600; margin-bottom:0px; font-size:0.8rem;">TTL Mode</label>
+                                    <select id="anti-isp-ttl" class="login-input">
+                                        <option value="inc1">Inc +1 (LAN → WAN)</option>
+                                        <option value="set64">Force 64 (WAN egress)</option>
+                                        <option value="set65">Force 65 (WAN egress)</option>
+                                        <option value="none">None</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-weight:600; margin-bottom:0px; font-size:0.8rem;">TCP MSS Clamp</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="anti-isp-mss" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label style="display:block; font-weight:600; margin-bottom:0px; font-size:0.8rem;">Hide Management on WAN</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="anti-isp-hide" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <button class="btn btn-primary" onclick="saveAntiIspConfig()">Apply Anti-ISP</button>
+                            </div>
+                            <div style="margin-top:6px; font-size:0.8rem; color:var(--text-muted);">
+                                Normalizes TTL and TCP MSS; optionally blocks management ports from WAN (22/80/443/8291). Use with caution.
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- ZeroTier Configuration -->
                     <div class="card" style="margin-top: 5px;">
                         <div class="card-header">
@@ -6247,7 +6293,10 @@
     <div id="vendo-settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
         <div style="background:var(--card-bg); width:95%; max-width:600px; max-height:95vh; overflow-y:auto; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size: 0.9rem;">
             <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center;">
-                <span>Vendo Settings</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span>Vendo Settings</span>
+                    <span id="vendo-save-badge" style="display:none; font-size:0.75rem; padding:2px 6px; border-radius:10px; background:var(--success); color:var(--card-bg);">Saved</span>
+                </div>
                 <button onclick="document.getElementById('vendo-settings-modal').style.display='none'" style="background:none; border:none; font-size:1.2rem; cursor:pointer;">&times;</button>
             </div>
             <div style="padding:15px;">
@@ -9144,49 +9193,59 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             // 0. System Hostname
             container.appendChild(createGroup('Hostname', createInput('system_hostname', hostname, 'text', 'NeoFI')));
 
-            // 1. Vendo Selection Mode
-            container.appendChild(createGroup('Vendo Selection Mode', createSelect('vendo_selection_mode', settings.vendo_selection_mode || 'auto', ['auto', 'manual'])));
+            const elSelMode = createSelect('vendo_selection_mode', settings.vendo_selection_mode || 'auto', ['auto', 'manual']);
+            container.appendChild(createGroup('Vendo Selection Mode', elSelMode));
+            attachAutoSave(elSelMode, 'vendo_selection_mode');
 
-            // 2. Coin Pin (Default 12)
-            container.appendChild(createGroup('Coin Pin', createInput('coin_pin', settings.coin_pin || '12', 'number')));
+            const elCoinPin = createInput('coin_pin', settings.coin_pin || '12', 'number');
+            container.appendChild(createGroup('Coin Pin', elCoinPin));
+            attachAutoSave(elCoinPin, 'coin_pin');
 
-            // 3. Coin Pin Edge (FALLING/RISING)
-            container.appendChild(createGroup('Coin Pin Edge', createSelect('coin_pin_edge', settings.coin_pin_edge || 'RISING', ['FALLING', 'RISING'])));
+            const elCoinEdge = createSelect('coin_pin_edge', settings.coin_pin_edge || 'RISING', ['FALLING', 'RISING']);
+            container.appendChild(createGroup('Coin Pin Edge', elCoinEdge));
+            attachAutoSave(elCoinEdge, 'coin_pin_edge');
 
-            // 4. Bill Pin (Optional)
-            container.appendChild(createGroup('Bill Pin (Optional)', createInput('bill_pin', settings.bill_pin || '19', 'number', 'GPIO Pin (Default 19)')));
+            const elBillPin = createInput('bill_pin', settings.bill_pin || '19', 'number', 'GPIO Pin (Default 19)');
+            container.appendChild(createGroup('Bill Pin (Optional)', elBillPin));
+            attachAutoSave(elBillPin, 'bill_pin');
 
-            // 5. Bill Pin Edge (FALLING/RISING)
-            container.appendChild(createGroup('Bill Pin Edge', createSelect('bill_pin_edge', settings.bill_pin_edge || 'FALLING', ['FALLING', 'RISING'])));
+            const elBillEdge = createSelect('bill_pin_edge', settings.bill_pin_edge || 'FALLING', ['FALLING', 'RISING']);
+            container.appendChild(createGroup('Bill Pin Edge', elBillEdge));
+            attachAutoSave(elBillEdge, 'bill_pin_edge');
 
-            // 6. Bill Multiplier (x 1)
-            container.appendChild(createGroup('Bill Multiplier (x)', createInput('bill_multiplier', settings.bill_multiplier || '1', 'number')));
+            const elBillMult = createInput('bill_multiplier', settings.bill_multiplier || '1', 'number');
+            container.appendChild(createGroup('Bill Multiplier (x)', elBillMult));
+            attachAutoSave(elBillMult, 'bill_multiplier');
 
-            // 7. Relay Pin (Default 11)
-            container.appendChild(createGroup('Relay Pin', createInput('relay_pin', settings.relay_pin || '11', 'number')));
+            const elRelayPin = createInput('relay_pin', settings.relay_pin || '11', 'number');
+            container.appendChild(createGroup('Relay Pin', elRelayPin));
+            attachAutoSave(elRelayPin, 'relay_pin');
 
-            // 8. Relay Pin Active (LOW/HIGH)
-            container.appendChild(createGroup('Relay Pin Active', createSelect('relay_pin_active', settings.relay_pin_active || 'HIGH', ['LOW', 'HIGH'])));
+            const elRelayActive = createSelect('relay_pin_active', settings.relay_pin_active || 'HIGH', ['LOW', 'HIGH']);
+            container.appendChild(createGroup('Relay Pin Active', elRelayActive));
+            attachAutoSave(elRelayActive, 'relay_pin_active');
 
-            // 9. Ban Counter (10 SEC)
             const banCounterInput = createInput('ban_limit_counter', settings.ban_limit_counter || '10', 'number');
             const banCounterGroup = createGroup('Insert Attempts Ban', banCounterInput);
             container.appendChild(banCounterGroup);
+            attachAutoSave(banCounterInput, 'ban_limit_counter');
 
-            // 10. Ban Duration (1 MINUTE)
             const banDurationInput = createInput('ban_duration', settings.ban_duration || '1', 'number');
             const banDurationGroup = createGroup('Ban Duration (minutes)', banDurationInput);
             container.appendChild(banDurationGroup);
+            attachAutoSave(banDurationInput, 'ban_duration');
 
-            // 11. Session Timeout (Minutes)
             const sessionTimeoutInput = createInput('session_timeout_minutes', (settings.session_timeout_minutes || '30'), 'number', 'Default 30');
             container.appendChild(createGroup('Timeout (minutes)', sessionTimeoutInput));
+            attachAutoSave(sessionTimeoutInput, 'session_timeout_minutes');
 
             const idleTimeoutInput = createInput('idle_timeout_seconds', (settings.idle_timeout_seconds || '120'), 'number', 'Default 120');
             container.appendChild(createGroup('Idle Timeout (seconds)', idleTimeoutInput));
+            attachAutoSave(idleTimeoutInput, 'idle_timeout_seconds');
 
             const keepaliveTimeoutInput = createInput('keepalive_timeout_seconds', (settings.keepalive_timeout_seconds || '300'), 'number', 'Default 300');
             container.appendChild(createGroup('Keepalive Timeout (seconds)', keepaliveTimeoutInput));
+            attachAutoSave(keepaliveTimeoutInput, 'keepalive_timeout_seconds');
         }
 
         async function saveSettings(e) {
@@ -9257,6 +9316,48 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             } catch (err) {
                 console.error("Save error:", err);
                 alert('Error saving configuration');
+            }
+        }
+
+        async function saveSingleSetting(key, value) {
+            const badge = document.getElementById('vendo-save-badge');
+            try {
+                if (badge) {
+                    badge.style.display = 'inline-block';
+                    badge.textContent = 'Saving...';
+                    badge.style.background = 'var(--warning)';
+                    badge.style.color = 'var(--card-bg)';
+                }
+                const res = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ [key]: value })
+                });
+                if (badge) {
+                    badge.textContent = res.ok ? 'Saved' : 'Failed';
+                    badge.style.background = res.ok ? 'var(--success)' : 'var(--danger)';
+                }
+            } catch (_) {
+                if (badge) {
+                    badge.textContent = 'Failed';
+                    badge.style.background = 'var(--danger)';
+                }
+            } finally {
+                if (badge) {
+                    setTimeout(() => { badge.style.display = 'none'; }, 1200);
+                }
+            }
+        }
+
+        function attachAutoSave(el, key) {
+            if (!el) return;
+            const handler = () => {
+                const val = el.type === 'checkbox' ? el.checked : el.value;
+                saveSingleSetting(key, val);
+            };
+            el.addEventListener('change', handler);
+            if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')) {
+                el.addEventListener('blur', handler);
             }
         }
 
@@ -10703,6 +10804,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         async function loadNetworkConfig() {
             updateWanStatus(); // Check status on load
             loadZeroTierStatus(); // Check ZeroTier status
+            loadAntiIspConfig(); // Load Anti-ISP Detect settings
             try {
                 // Load Interfaces for Dropdown
                 const resIfaces = await fetch('/api/admin/network-interfaces');
@@ -11257,6 +11359,60 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 statusEl.classList.add('status-offline');
                 textEl.textContent = 'Offline';
                 if (detailEl) detailEl.textContent = '';
+            }
+        }
+
+        async function loadAntiIspConfig() {
+            try {
+                const res = await fetch('/api/admin/network/anti-isp');
+                if (!res.ok) return;
+                const cfg = await res.json();
+                const en = document.getElementById('anti-isp-enabled');
+                const ttl = document.getElementById('anti-isp-ttl');
+                const mss = document.getElementById('anti-isp-mss');
+                const hide = document.getElementById('anti-isp-hide');
+                const badge = document.getElementById('anti-isp-badge');
+                if (en) en.checked = !!cfg.enabled;
+                if (ttl) ttl.value = cfg.ttl_mode || 'inc1';
+                if (mss) mss.checked = cfg.mss_clamp !== false;
+                if (hide) hide.checked = cfg.hide_mgmt !== false;
+                if (badge) {
+                    if (cfg.enabled) {
+                        badge.textContent = 'Enabled';
+                        badge.style.background = 'var(--success)';
+                        badge.style.color = 'var(--card-bg)';
+                    } else {
+                        badge.textContent = 'Disabled';
+                        badge.style.background = 'var(--text-muted)';
+                        badge.style.color = 'var(--card-bg)';
+                    }
+                }
+            } catch (e) {}
+        }
+
+        async function saveAntiIspConfig() {
+            try {
+                const en = document.getElementById('anti-isp-enabled').checked;
+                const ttl = document.getElementById('anti-isp-ttl').value;
+                const mss = document.getElementById('anti-isp-mss').checked;
+                const hide = document.getElementById('anti-isp-hide').checked;
+                const btns = document.querySelectorAll('button');
+                btns.forEach(b => b.disabled = true);
+                const res = await fetch('/api/admin/network/anti-isp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: en, ttl_mode: ttl, mss_clamp: mss, hide_mgmt: hide })
+                });
+                btns.forEach(b => b.disabled = false);
+                if (res.ok) {
+                    showToast('Anti-ISP settings applied', 'success');
+                    loadAntiIspConfig();
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    showToast('Failed to apply: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                showToast('Failed to apply Anti-ISP settings', 'error');
             }
         }
 

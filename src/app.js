@@ -158,6 +158,7 @@ app.use('/api', (req, res, next) => {
                 '/api/admin/subvendo/free-time-widget',
                 '/api/admin/network/dhcp/next-slot',
                 '/api/admin/network/stats',
+                '/api/admin/network/anti-isp',
                 '/api/admin/network/zerotier'
             ];
             if (allowedReadPrefixes.some(p => req.path.startsWith(p))) {
@@ -365,6 +366,8 @@ app.get('/admin', (req, res) => {
         configService.set('supabase_activation_url', 'https://nmrhhxsfcxabmoqriloj.supabase.co/functions/v1/activate', 'system');
         configService.set('supabase_project_url', 'https://nmrhhxsfcxabmoqriloj.supabase.co', 'system');
         configService.set('supabase_anon_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tcmhoeHNmY3hhYm1vcXJpbG9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0MDE3MzMsImV4cCI6MjA4NTk3NzczM30.jpX2PSm7wgzyFLRcLrC5sAi67o4fdDg0j11KIYfFfYA', 'system');
+        // App version metadata
+        configService.set('app_version', '1.1', 'system');
         
         // Initialize License Service (after Config is loaded)
         licenseService.init();
@@ -1106,7 +1109,68 @@ async function handleCoinPulseEvent(pulseCount, source) {
             finalizeCoinSession(sessionKey, 'timeout').catch(e => console.error('[Coin] Finalize error:', e));
         }, 30000);
     } else {
-        console.log(`[Coin] ${source || 'unknown'} pulse ignored: No user in Insert Coin mode`);
+        // Fallback: Auto-create a coin session for the most recent active user (optional)
+        const autoEnabledRaw = configService.get('auto_coin_session_enabled');
+        const autoEnabled = (autoEnabledRaw === undefined) ? true : (autoEnabledRaw === true || autoEnabledRaw === 'true' || autoEnabledRaw === 1 || autoEnabledRaw === '1');
+        if (!autoEnabled) {
+            console.log(`[Coin] ${source || 'unknown'} pulse ignored: No user in Insert Coin mode`);
+            return;
+        }
+
+        try {
+            // Pick the most recently active user in the last 15 seconds
+            const candidate = db.prepare(`
+                SELECT * FROM users 
+                WHERE last_active_at >= DATETIME('now', '-15 seconds')
+                ORDER BY last_active_at DESC 
+                LIMIT 1
+            `).get();
+
+            if (!candidate) {
+                console.log(`[Coin] ${source || 'unknown'} pulse ignored: No recent active user found for auto-session`);
+                return;
+            }
+
+            const sessionKeyAuto = source || 'hardware';
+            const mac = formatMac(candidate.mac_address);
+
+            const autoSession = {
+                ip: candidate.ip_address || null,
+                mac,
+                clientId: candidate.client_id || null,
+                start: Date.now(),
+                pendingAmount: pulses,
+                sourceAmounts: { [source || 'hardware']: pulses },
+                targetDeviceId: null,
+                selectionMode: configService.get('vendo_selection_mode') || 'auto',
+                lastSource: source || 'hardware',
+                timeout: null
+            };
+
+            // Turn on relay for hardware slot
+            if (sessionKeyAuto === 'hardware') {
+                try { hardwareService.setRelay(true); } catch (e) {}
+            }
+
+            if (autoSession.timeout) clearTimeout(autoSession.timeout);
+            autoSession.timeout = setTimeout(() => {
+                finalizeCoinSession(sessionKeyAuto, 'timeout').catch(e => console.error('[Coin] Finalize error:', e));
+            }, 60000);
+
+            coinSessions.set(sessionKeyAuto, autoSession);
+
+            const bestAuto = calculateTimeFromRates(pulses, autoSession.clientId);
+            const minutesAuto = bestAuto.minutes || 0;
+            console.log(`[Coin][Auto] ${source || 'unknown'} | User ${mac} | Total: P${pulses} | Time: ${minutesAuto} mins`);
+
+            io.emit('coin_pending_update', {
+                mac,
+                amount: pulses,
+                minutes: minutesAuto
+            });
+        } catch (e) {
+            console.error('[Coin][Auto] Failed to create auto coin session:', e.message);
+        }
     }
 }
 
@@ -3419,6 +3483,25 @@ app.post('/api/admin/network/wan', isAuthenticated, async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "Failed to save WAN configuration" });
+    }
+});
+
+// Anti-ISP Detect Config
+app.get('/api/admin/network/anti-isp', isAuthenticated, (req, res) => {
+    try {
+        res.json(networkConfigService.getAntiIspConfig());
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/network/anti-isp', isAuthenticated, async (req, res) => {
+    try {
+        const cfg = networkConfigService.saveAntiIspConfig(req.body || {});
+        await networkService.applyAntiIspDetect(cfg);
+        res.json({ success: true, config: cfg });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
