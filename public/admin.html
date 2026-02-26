@@ -2933,7 +2933,7 @@
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <img id="sidebar-logo" src="/neofi_logo.png" data-logo-full="/neofi_logo.png" data-logo-compact="/neologo.png" alt="NeoFi" style="height: 40px; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="nav('dashboard')">
-                <div style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">V1.1</div>
+                <div id="app-version" style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">V—</div>
             </div>
             <div class="menu">
                 <div class="menu-item active" onclick="nav('dashboard')">
@@ -7310,6 +7310,7 @@
             initIdleTimer();
             initSystemClock(); // Start the clock
             loadAdminInfo();
+            loadAppVersion();
             
             // Init Chat (Authenticated)
             initChatSocket();
@@ -7323,6 +7324,21 @@
 
             const view = forceDashboard ? 'dashboard' : (localStorage.getItem('admin_last_view') || 'dashboard');
             showView(view);
+        }
+
+        async function loadAppVersion() {
+            try {
+                const el = document.getElementById('app-version');
+                if (!el) return;
+                const res = await fetch('/api/admin/settings');
+                if (!res.ok) throw new Error('settings fetch failed');
+                const settings = await res.json();
+                const v = settings.app_version || '1.1';
+                el.textContent = `V${String(v).trim()}`;
+            } catch (e) {
+                const el = document.getElementById('app-version');
+                if (el) el.textContent = 'V1.1';
+            }
         }
 
         function nav(view) {
