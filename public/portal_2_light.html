@@ -1637,6 +1637,9 @@
             }
         }
 
+        let autoResumeAttempts = 0;
+        let lastAutoResumeTs = 0;
+
         async function updateStatus() {
             try {
                 const res = await fetch('/api/status?t=' + Date.now());
@@ -1794,12 +1797,20 @@
                         pauseBtn.textContent = 'Resume Time';
                         pauseBtn.style.background = '#f39c12';
                         hasRedirected = false; // Reset so we redirect again on resume
+                        const pauseLock = localStorage.getItem('pause_lock') === '1';
+                        const now = Date.now();
+                        if (!pauseLock && now - lastAutoResumeTs > 3000 && autoResumeAttempts < 3) {
+                            lastAutoResumeTs = now;
+                            autoResumeAttempts++;
+                            try { await fetch('/api/session/resume?t=' + now, { method: 'POST' }); } catch (e) {}
+                        }
                     } else if (data.is_connected) {
                         statusText.textContent = 'Connected';
                         statusText.className = 'status-text connected';
                         setPortalStatus('connected');
                         pauseBtn.textContent = 'Pause Time';
                         pauseBtn.style.background = 'var(--danger)';
+                        autoResumeAttempts = 0;
                         
                         // Auto-Redirect Logic
                         // If we have time, are not paused, and haven't redirected yet (or just finished inserting coins)
@@ -1813,6 +1824,13 @@
                         pauseBtn.textContent = 'Pause Time';
                         pauseBtn.style.background = 'var(--danger)';
                         hasRedirected = false;
+                        const pauseLock = localStorage.getItem('pause_lock') === '1';
+                        const now = Date.now();
+                        if (!pauseLock && now - lastAutoResumeTs > 3000 && autoResumeAttempts < 3) {
+                            lastAutoResumeTs = now;
+                            autoResumeAttempts++;
+                            try { await fetch('/api/session/resume?t=' + now, { method: 'POST' }); } catch (e) {}
+                        }
                     }
                     pauseBtn.style.display = 'block';
                 } else {
@@ -2046,6 +2064,11 @@
                 if (curMac) localStorage.setItem('last_mac', curMac);
             } catch (e) {}
             try {
+                if (action === 'pause') {
+                    localStorage.setItem('pause_lock', '1');
+                } else {
+                    localStorage.removeItem('pause_lock');
+                }
                 await fetch(`/api/session/${action}`, { method: 'POST' });
                 updateStatus();
             } catch(e) {}
