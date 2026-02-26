@@ -7311,7 +7311,7 @@
             } else {
                 if (currentView && currentView === 'dashboard') {
                     updateBandwidthChart();
-                    IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
+                    IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
                 }
             }
         });
@@ -7424,7 +7424,7 @@
                 
                 // Bandwidth Chart (5s update)
                 updateBandwidthChart();
-                IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
+                IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
             } else if (view === 'sales') {
                 loadSalesData('daily');
             } else if (view === 'pppoe-sales') {
@@ -7664,7 +7664,7 @@
 // Bandwidth Chart (5s update)
 updateBandwidthChart();
 IntervalManager.stop('bandwidth_chart');
-IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
+IntervalManager.start('bandwidth_chart', updateBandwidthChart, 1000);
 
                 
                 // If on Network tab, refresh specific network data
