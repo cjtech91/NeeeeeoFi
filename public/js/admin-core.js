@@ -1926,7 +1926,7 @@
 
             setInterval(() => {
                 if(currentView === 'dashboard') loadDashboardData();
-            }, 5000); 
+            }, 2000); 
         }
 
         function nav(view) {
@@ -6165,4 +6165,3 @@
     
 
 // --- END BLOCK ---
-
