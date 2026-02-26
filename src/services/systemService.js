@@ -69,10 +69,12 @@ class SystemService {
 
     async createUpdatePackage() {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `update-${timestamp}.tar.gz`;
+        // Produce a gzip-compressed tar but use .bin extension for distribution
+        const filename = `update-${timestamp}.bin`;
         const outputPath = path.join(__dirname, '../../', filename);
         
         // Exclude: node_modules, data, .git, .trae, backups, firmware, *.img, *.iso, and DATABASE files
+        // Note: extension does not affect tar; we still produce a gzip stream
         const cmd = `tar -czf "${filename}" --exclude=node_modules --exclude=data --exclude=.git --exclude=.trae --exclude=firmware --exclude=*.iso --exclude=*.img --exclude=src/database/*.sqlite --exclude=src/database/*.db --exclude=src/database/*.sqlite-journal src public package.json ecosystem.config.js`;
         
         return new Promise((resolve, reject) => {
@@ -85,11 +87,12 @@ class SystemService {
 
     async applyUpdatePackage(base64Data) {
         const buffer = Buffer.from(base64Data, 'base64');
-        const tempPath = path.join(__dirname, '../../temp_update.tar.gz');
+        // Accept .bin or .tar.gz payloads (we store as .bin; tar ignores extension)
+        const tempPath = path.join(__dirname, '../../temp_update.bin');
         fs.writeFileSync(tempPath, buffer);
         
         // Extract
-        const cmd = `tar -xzf "temp_update.tar.gz" -C .`;
+        const cmd = `tar -xzf "temp_update.bin" -C .`;
         
         return new Promise((resolve, reject) => {
             exec(cmd, { cwd: path.join(__dirname, '../../') }, async (error) => {

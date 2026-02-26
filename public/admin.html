@@ -6015,15 +6015,15 @@
                                     <span>Reboot</span>
                                 </button>
 
-                                <input type="file" id="update-file-input" accept=".tar.gz" style="display:none;" onchange="uploadUpdatePackage()">
+                                <input type="file" id="update-file-input" accept=".bin,.tar.gz" style="display:none;" onchange="uploadUpdatePackage()">
                                 <button onclick="document.getElementById('update-file-input').click()" class="btn sys-maint-btn" style="background: var(--info);">
                                     <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
-                                    <span>Upload Update</span>
+                                    <span>Upload Update (.bin/.tar.gz)</span>
                                 </button>
                                 
                                 <button id="btn-create-update" onclick="createUpdatePackage()" class="btn sys-maint-btn" style="background:var(--gauge-6);">
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-                                    <span>Create Update</span>
+                                    <span>Create Update (.bin)</span>
                                 </button>
 
                                 <button id="btn-upgrade" onclick="upgradeSystem('online')" class="btn sys-maint-btn" style="background:var(--gauge-3);">
@@ -6659,6 +6659,18 @@
                      <select id="dhcp-interface-select" class="login-input" style="width:100%; margin:0;">
                          <!-- Populate -->
                      </select>
+                     <div id="dhcp-iface-multi" style="margin-top:8px; background:var(--bg-body); padding:10px; border:1px solid var(--border); border-radius:4px;">
+                         <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                             <input type="checkbox" id="dhcp-iface-selectall" style="transform:scale(1.1);">
+                             <label for="dhcp-iface-selectall" style="font-weight:600;">Select All Available Interfaces</label>
+                         </div>
+                         <div id="dhcp-iface-list" style="display:flex; flex-wrap:wrap; gap:8px;">
+                             <!-- Populated via JS -->
+                         </div>
+                         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">
+                             Multiple selection will create one DHCP server per interface. Slot preview shows for the first selected only.
+                         </div>
+                     </div>
                  </div>
                  <div style="display:flex; gap:10px;">
                      <div style="flex-grow:1;">
@@ -12430,44 +12442,116 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         }
 
         async function openDhcpModal() {
-            // Load interfaces for selection
             try {
-                const res = await fetch('/api/admin/network-interfaces', { credentials: 'include' });
-                const interfaces = await res.json();
-                const select = document.getElementById('dhcp-interface-select');
-                select.innerHTML = '';
-                
-                select.onchange = calculateNextDhcpSlot;
+                const [resIf, resDhcp, resPppoe] = await Promise.all([
+                    fetch('/api/admin/network-interfaces', { credentials: 'include' }),
+                    fetch('/api/admin/network/dhcp', { credentials: 'include' }),
+                    fetch('/api/admin/pppoe/config', { credentials: 'include' })
+                ]);
+                const interfaces = await resIf.json();
+                const dhcp = await resDhcp.json().catch(() => ({ servers: [] }));
+                const pppoe = await resPppoe.json().catch(() => ({}));
 
+                const select = document.getElementById('dhcp-interface-select');
+                const list = document.getElementById('dhcp-iface-list');
+                const allBox = document.getElementById('dhcp-iface-selectall');
+                select.innerHTML = '';
+                list.innerHTML = '';
+
+                const norm = (n) => String(n || '').toLowerCase().trim().split('@')[0];
+                const dhcpUsed = new Set(
+                    Array.isArray(dhcp.servers) ? dhcp.servers.map(s => norm(s.interface)) : []
+                );
+                // Exclude PPPoE interface even if server is currently disabled but configured
+                const pppoeRaw = (pppoe && pppoe.interface) ? String(pppoe.interface) : '';
+                // Build a set of possible PPPoE interface name variants to match UI aliases like "VLAN.900(end0.900)"
+                const pppoeNames = new Set();
+                const vlanSuffixes = new Set();
+                if (pppoeRaw) {
+                    const tokenRe = /[A-Za-z0-9_.:@-]+/g;
+                    const tokens = (pppoeRaw.match(tokenRe) || []).map(t => norm(t));
+                    tokens.forEach(t => {
+                        if (!t) return;
+                        pppoeNames.add(t);
+                        // Variants: end.900 -> end0.900, eth.900 -> eth0.900
+                        pppoeNames.add(t.replace(/^end\./, 'end0.'));
+                        pppoeNames.add(t.replace(/^eth\./, 'eth0.'));
+                        const m1 = t.match(/\.([0-9]{1,4})$/);
+                        if (m1 && m1[1]) vlanSuffixes.add('.' + m1[1]);
+                        const m2 = t.match(/vlan\.([0-9]{1,4})$/);
+                        if (m2 && m2[1]) vlanSuffixes.add('.' + m2[1]);
+                    });
+                }
+
+                // Build available interface list
                 const added = new Set();
+                const available = [];
                 interfaces.forEach(iface => {
-                    const name = iface.name;
-                    // Filter unusable interfaces
+                    const rawName = iface.name;
+                    const name = norm(rawName);
+                    if (!name) return;
+                    // Skip unusable types
                     if (name === 'lo') return;
-                    if (name.startsWith('zt')) return; // ZeroTier
-                    if (name.startsWith('tun')) return; // VPN Tunnels
-                    if (name.startsWith('tap')) return; // VPN Taps
-                    if (name.startsWith('docker')) return; // Docker
-                    if (name.startsWith('veth')) return; // Docker/Container virtual eth
-                    if (name.includes('ifb')) return; // Intermediate Functional Block
-                    
+                    if (/^(zt|tun|tap|docker|veth)/.test(name)) return;
+                    if (name.includes('ifb')) return;
+                    // Skip if already has DHCP server
+                    if (dhcpUsed.has(name)) return;
+                    // Skip if PPPoE server is enabled on this interface (match against variants set)
+                    if (pppoeNames.has(name)) return;
+                    // Also skip any interface sharing the same VLAN id (e.g., *.900)
+                    for (const suf of vlanSuffixes) {
+                        if (name.endsWith(suf)) return;
+                    }
                     if (added.has(name)) return;
                     added.add(name);
+                    available.push(name);
+                });
 
+                // Populate dropdown (for slot preview) and checkboxes for multi-add
+                available.forEach(name => {
                     const opt = document.createElement('option');
                     opt.value = name;
                     opt.textContent = name;
                     select.appendChild(opt);
+                    const label = document.createElement('label');
+                    label.style.display = 'flex';
+                    label.style.alignItems = 'center';
+                    label.style.gap = '6px';
+                    label.innerHTML = `<input type="checkbox" class="dhcp-iface-check" value="${name}" style="transform:scale(1.1);"> <span>${name}</span>`;
+                    list.appendChild(label);
                 });
-                
-                // Trigger calculation for first interface
+
+                // Select All handler
+                allBox.checked = false;
+                allBox.onchange = () => {
+                    const boxes = document.querySelectorAll('.dhcp-iface-check');
+                    boxes.forEach(b => b.checked = allBox.checked);
+                    calculateNextDhcpSlot();
+                };
+
+                // When any box changes, update preview
+                list.querySelectorAll('.dhcp-iface-check').forEach(cb => {
+                    cb.addEventListener('change', () => {
+                        // Use first selected for preview, fallback to first option
+                        const sel = Array.from(list.querySelectorAll('.dhcp-iface-check:checked')).map(x => x.value);
+                        if (sel.length > 0) {
+                            select.value = sel[0];
+                        } else if (select.options.length > 0) {
+                            select.value = select.options[0].value;
+                        }
+                        calculateNextDhcpSlot();
+                    });
+                });
+
+                select.onchange = calculateNextDhcpSlot;
                 if (select.options.length > 0) {
-                   calculateNextDhcpSlot();
+                    select.value = select.options[0].value;
+                    calculateNextDhcpSlot();
                 }
-                
+
                 document.getElementById('dhcp-modal').style.display = 'flex';
             } catch (e) {
-                console.error("Error loading interfaces:", e);
+                console.error("Error loading DHCP dialog deps:", e);
                 alert("Could not load interfaces");
             }
         }
@@ -12487,12 +12571,14 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                      return;
                  }
                  
+                 const multi = document.querySelectorAll('.dhcp-iface-check:checked').length > 1;
                  document.getElementById('dhcp-calc-info').innerHTML = `
                     <div style="color: var(--status-active); font-weight:bold;">Auto-Calculated Subnet:</div>
                     <div>Subnet: ${data.subnet}</div>
                     <div>Netmask: ${data.netmask}</div>
                     <div>Range: ${data.pool_start} - ${data.pool_end}</div>
                     <div>Gateway: ${data.gateway}</div>
+                    ${multi ? '<div style="margin-top:6px; color:var(--text-muted); font-size:0.85rem;">Preview shown for first selected interface only.</div>' : ''}
                  `;
              } catch (e) {
                  document.getElementById('dhcp-calc-info').textContent = "Error calculating slot";
@@ -12500,32 +12586,26 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         }
 
         async function addDhcpServer() {
-            const iface = document.getElementById('dhcp-interface-select').value;
             const dns1 = document.getElementById('dhcp-dns1').value;
             const dns2 = document.getElementById('dhcp-dns2').value;
-            
-            if (!iface) return;
-            
-            try {
-                const res = await fetch('/api/admin/network/dhcp/servers', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ interface: iface, dns1, dns2 }),
-                    credentials: 'include'
-                });
-                
-                if (res.ok) {
-                    document.getElementById('dhcp-modal').style.display = 'none';
-                    loadDhcp();
-                    alert("DHCP Server added successfully");
-                } else {
-                    const err = await res.json();
-                    alert("Error: " + (err.error || err.message));
-                }
-            } catch (e) {
-                console.error(e);
-                alert("Failed to add DHCP server");
+            const boxes = Array.from(document.querySelectorAll('.dhcp-iface-check:checked')).map(b => b.value);
+            const targets = boxes.length > 0 ? boxes : [document.getElementById('dhcp-interface-select').value];
+            if (!targets || targets.length === 0 || !targets[0]) return;
+            let okCount = 0, failCount = 0;
+            for (const iface of targets) {
+                try {
+                    const res = await fetch('/api/admin/network/dhcp/servers', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ interface: iface, dns1, dns2 }),
+                        credentials: 'include'
+                    });
+                    if (res.ok) okCount++; else failCount++;
+                } catch (_) { failCount++; }
             }
+            document.getElementById('dhcp-modal').style.display = 'none';
+            loadDhcp();
+            alert(`DHCP Server creation done. Success: ${okCount}${failCount ? `, Failed: ${failCount}` : ''}`);
         }
 
         async function removeDhcpServer(iface) {

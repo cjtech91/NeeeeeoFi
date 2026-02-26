@@ -1271,7 +1271,7 @@ app.use(async (req, res, next) => {
                 db.prepare('UPDATE users SET session_expiry = ? WHERE id = ?').run(expiryStr, user.id);
             }
 
-            const isNewAuth = await networkService.allowUser(user.mac_address);
+            const isNewAuth = await networkService.allowUser(user.mac_address, clientIp);
             
             // Apply bandwidth limit if newly authorized or IP changed
             if (isNewAuth || user.ip_address !== clientIp) {
@@ -1293,6 +1293,9 @@ app.use(async (req, res, next) => {
                 const now = new Date();
                 const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
                 db.prepare('UPDATE users SET ip_address = ?, interface = ?, updated_at = ? WHERE id = ?').run(clientIp, newIface, timestamp, user.id);
+                
+                // Ensure traffic accounting rules follow the new IP immediately
+                await networkService.allowUser(user.mac_address, clientIp);
             }
             
             // Mark user connected in DB to reflect live status
