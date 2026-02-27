@@ -2057,6 +2057,16 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
     res.json(stats);
 });
 
+app.get('/api/admin/system/cpu', isAuthenticated, async (req, res) => {
+    try {
+        const cpu = await monitoringService.getCpuUsage();
+        res.set('Cache-Control', 'no-store');
+        res.json({ cpu_usage: cpu });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // PPPoE Profiles API
 app.get('/api/admin/pppoe/profiles', isAuthenticated, (req, res) => {
     try {

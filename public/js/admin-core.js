@@ -1571,6 +1571,7 @@
         let voucherInterval = null;
         let devicesInterval = null;
         let subVendoDevicesInterval = null;
+        let cpuInterval = null;
         let visualInterfaceMap = {}; // Map real interface names to visual names (e.g. end0 -> eth0)
         let chartsEnabled = false;
         let topVendoPeriod = 'monthly';
@@ -1926,7 +1927,7 @@
 
             setInterval(() => {
                 if(currentView === 'dashboard') loadDashboardData();
-            }, 2000); 
+            }, 5000); 
         }
 
         function nav(view) {
@@ -1950,6 +1951,10 @@
             if (subVendoDevicesInterval) {
                 clearInterval(subVendoDevicesInterval);
                 subVendoDevicesInterval = null;
+            }
+            if (cpuInterval) {
+                clearInterval(cpuInterval);
+                cpuInterval = null;
             }
 
             currentView = view;
@@ -2002,6 +2007,14 @@
             // Load Data
                 if (view === 'dashboard') {
                 loadDashboardData();
+                if (cpuInterval) {
+                    clearInterval(cpuInterval);
+                    cpuInterval = null;
+                }
+                loadCpuUsage();
+                cpuInterval = setInterval(() => {
+                    if (currentView === 'dashboard') loadCpuUsage();
+                }, 2000);
             } else if (view === 'sales') {
                 loadSalesData('daily');
             } else if (view === 'settings') {
@@ -3205,6 +3218,40 @@
                     });
                 }
             }
+        }
+
+        async function loadCpuUsage() {
+            try {
+                const res = await fetch('/api/admin/system/cpu', { credentials: 'include', cache: 'no-store' });
+                if (res.status === 401) return;
+                const data = await res.json();
+                let avgCpu = 0;
+                let cores = [];
+                if (data && data.cpu_usage) {
+                    if (typeof data.cpu_usage === 'object' && data.cpu_usage.cores) {
+                        if (data.cpu_usage.cores.length > 0) {
+                            const totalLoad = data.cpu_usage.cores.reduce((a, b) => a + b, 0);
+                            avgCpu = totalLoad / data.cpu_usage.cores.length;
+                        } else {
+                            avgCpu = data.cpu_usage.avg;
+                        }
+                        cores = data.cpu_usage.cores;
+                    } else {
+                        avgCpu = data.cpu_usage;
+                        cores = [avgCpu];
+                    }
+                }
+                avgCpu = Number(avgCpu) || 0;
+                const cpuTextEl = document.getElementById('cpu-text');
+                if (cpuTextEl) cpuTextEl.textContent = Math.min(100, avgCpu).toFixed(1) + '%';
+                const cpuLoadEl = document.getElementById('cpu-load');
+                if (cpuLoadEl) cpuLoadEl.textContent = Math.min(100, avgCpu).toFixed(1) + '%';
+                if (chartsEnabled && cpuDoughnut) {
+                    try {
+                        updateCpuChart(cores);
+                    } catch (e) {}
+                }
+            } catch (e) {}
         }
 
         function toggleTimeInputs() {
