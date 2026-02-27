@@ -5091,7 +5091,15 @@
                 });
                 
                 if (res.ok) {
-                    alert("Network configuration saved successfully.");
+                    const applyRes = await fetch('/api/admin/network/apply', {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                    if (applyRes.ok) {
+                        alert("Network configuration saved and applied successfully.");
+                    } else {
+                        alert("Configuration saved, but failed to apply changes. Please check logs.");
+                    }
                 } else {
                     alert("Failed to save configuration.");
                 }

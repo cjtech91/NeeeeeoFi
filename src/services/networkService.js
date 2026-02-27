@@ -686,6 +686,73 @@ class NetworkService {
         return result;
     }
 
+    /**
+     * Get status for a specific interface (used for Dual/Multi-WAN views)
+     */
+    async getInterfaceStatus(iface) {
+        const result = {
+            interface: iface || null,
+            ip: null,
+            gateway: null,
+            operstate: null,
+            speed: null,
+            duplex: null,
+            gatewayReachable: null,
+        };
+        if (!iface) return result;
+
+        try {
+            if (process.platform === 'linux') {
+                try {
+                    const oper = fs.readFileSync(`/sys/class/net/${iface}/operstate`, 'utf8').trim();
+                    result.operstate = oper;
+                } catch (_) {}
+            }
+            try {
+                const ipOut = await this.runCommand(`ip -4 addr show ${iface}`, true);
+                const m = ipOut && ipOut.match(/inet\s+(\d+(?:\.\d+){3})/);
+                if (m) result.ip = m[1];
+            } catch (_) {}
+            try {
+                let gwOut = await this.runCommand(`ip route show dev ${iface} | grep default | head -n 1`, true);
+                if (!gwOut || !/default/.test(gwOut)) {
+                    gwOut = await this.runCommand(`ip route show default | head -n 1`, true);
+                }
+                const gm = gwOut && gwOut.match(/default via\s+(\d+(?:\.\d+){3})/);
+                if (gm) result.gateway = gm[1];
+            } catch (_) {}
+            try {
+                const et = await this.runCommand(`ethtool ${iface}`, true);
+                if (et) {
+                    const sm = et.match(/Speed:\s*([0-9]+(?:Mb|Gb)\/s)/i);
+                    const dm = et.match(/Duplex:\s*(\w+)/i);
+                    if (sm) result.speed = sm[1];
+                    if (dm) result.duplex = dm[1];
+                }
+            } catch (_) {
+                try {
+                    const iw = await this.runCommand(`iw dev ${iface} link`, true);
+                    if (iw) {
+                        const bm = iw.match(/tx bitrate:\s*([0-9.]+\s*\w+\/s)/i);
+                        if (bm) {
+                            result.speed = bm[1];
+                            result.duplex = 'wifi';
+                        }
+                    }
+                } catch (_) {}
+            }
+            if (result.gateway) {
+                try {
+                    const ping = await this.runCommand(`ping -c 1 -W 1 ${result.gateway}`, true);
+                    result.gatewayReachable = !!(ping && /1 received/.test(ping));
+                } catch (_) {
+                    result.gatewayReachable = false;
+                }
+            }
+        } catch (_) {}
+        return result;
+    }
+
     async applyAntiIspDetect(cfg = null) {
         try {
             const wanIf = await this.detectWanInterface();

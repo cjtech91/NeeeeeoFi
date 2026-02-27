@@ -3486,6 +3486,35 @@ app.get('/api/admin/network/wan/status', isAuthenticated, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+// All WAN statuses (Single, Dual, Multi)
+app.get('/api/admin/network/wan/status/all', isAuthenticated, async (req, res) => {
+    try {
+        const wan = networkConfigService.getWanConfig();
+        const items = [];
+        if (wan.mode === 'dual_wan' && wan.dual_wan) {
+            if (wan.dual_wan.wan1 && wan.dual_wan.wan1.interface) {
+                items.push({ interface: wan.dual_wan.wan1.interface, mode: wan.dual_wan.wan1.type || 'dynamic' });
+            }
+            if (wan.dual_wan.wan2 && wan.dual_wan.wan2.interface) {
+                items.push({ interface: wan.dual_wan.wan2.interface, mode: wan.dual_wan.wan2.type || 'dynamic' });
+            }
+        } else if (wan.mode === 'multi_wan' && Array.isArray(wan.multi_wan)) {
+            wan.multi_wan.forEach(w => {
+                if (w.interface) items.push({ interface: w.interface, mode: w.type || 'dynamic' });
+            });
+        } else if (wan.interface) {
+            items.push({ interface: wan.interface, mode: wan.mode || 'dynamic' });
+        }
+        const statuses = [];
+        for (const it of items) {
+            const st = await networkService.getInterfaceStatus(it.interface);
+            statuses.push({ ...it, status: st });
+        }
+        res.json({ items: statuses });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 app.get('/api/admin/network/wan', isAuthenticated, (req, res) => {
     res.json(networkConfigService.getWanConfig());
 });
@@ -3496,6 +3525,16 @@ app.post('/api/admin/network/wan', isAuthenticated, async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "Failed to save WAN configuration" });
+    }
+});
+
+// Apply full network changes (Netplan, Routing, VLANs, DHCP)
+app.post('/api/admin/network/apply', isAuthenticated, async (req, res) => {
+    try {
+        await networkConfigService.applyNetworkChanges();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Failed to apply network changes' });
     }
 });
 
