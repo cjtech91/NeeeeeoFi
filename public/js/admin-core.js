@@ -1571,14 +1571,10 @@
         let voucherInterval = null;
         let devicesInterval = null;
         let subVendoDevicesInterval = null;
-        let cpuInterval = null;
         let visualInterfaceMap = {}; // Map real interface names to visual names (e.g. end0 -> eth0)
         let chartsEnabled = false;
         let topVendoPeriod = 'monthly';
         let topClientsPeriod = 'monthly';
-        let netWatcherInterval = null;
-        let netWatcherEnabled = false;
-        let netWatcherPrevOnline = null;
 
         // Cyan Theme matching the design (Default fallback)
         const cpuColor = '#00cec9'; 
@@ -1955,15 +1951,6 @@
                 clearInterval(subVendoDevicesInterval);
                 subVendoDevicesInterval = null;
             }
-            if (cpuInterval) {
-                clearInterval(cpuInterval);
-                cpuInterval = null;
-            }
-            if (netWatcherInterval) {
-                clearInterval(netWatcherInterval);
-                netWatcherInterval = null;
-            }
-            
 
             currentView = view;
             localStorage.setItem('admin_last_view', view); // Persist view
@@ -2015,14 +2002,6 @@
             // Load Data
                 if (view === 'dashboard') {
                 loadDashboardData();
-                if (cpuInterval) {
-                    clearInterval(cpuInterval);
-                    cpuInterval = null;
-                }
-                loadCpuUsage();
-                cpuInterval = setInterval(() => {
-                    if (currentView === 'dashboard') loadCpuUsage();
-                }, 2000);
             } else if (view === 'sales') {
                 loadSalesData('daily');
             } else if (view === 'settings') {
@@ -2058,11 +2037,6 @@
                 loadWalledGarden();
                 loadVlans();
                 loadDhcp();
-                try { await loadNetWatcher(); } catch (e) {}
-                try { await checkNetWatcherStatus(true); } catch (e) {}
-                netWatcherInterval = setInterval(() => {
-                    if (currentView === 'network') checkNetWatcherStatus(false);
-                }, 5000);
             } else if (view === 'devices') {
                 loadDevicesData();
                 devicesInterval = setInterval(() => {
@@ -2082,135 +2056,6 @@
                 }, 3000);
             }
         }
-
-        async function loadNetWatcher() {
-            try {
-                const res = await fetch('/api/admin/network/netwatcher', { credentials: 'include', cache: 'no-store' });
-                if (!res.ok) return;
-                const cfg = await res.json();
-                const enabledEl = document.getElementById('netwatcher-enabled');
-                const targetEl = document.getElementById('netwatcher-target');
-                if (enabledEl) enabledEl.checked = !!cfg.enabled;
-                if (targetEl) targetEl.value = cfg.target_ip || '';
-                netWatcherEnabled = !!cfg.enabled;
-                netWatcherPrevOnline = null;
-            } catch (e) {
-                console.error('Failed to load NetWatcher', e);
-            }
-        }
-
-        async function saveNetWatcher() {
-            try {
-                const enabled = !!document.getElementById('netwatcher-enabled')?.checked;
-                const target_ip = document.getElementById('netwatcher-target')?.value?.trim() || '';
-                if (enabled) {
-                    // Basic validation: require a valid IPv4 when enabled
-                    const ipOk = /^\d{1,3}(\.\d{1,3}){3}$/.test(target_ip) && target_ip !== '0.0.0.0';
-                    if (!ipOk) {
-                        showToast('Please set a valid target IP to ping (e.g., 8.8.8.8)', 'warning');
-                        return;
-                    }
-                }
-                const res = await fetch('/api/admin/network/netwatcher', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ enabled, target_ip })
-                });
-                if (res.ok) {
-                    netWatcherEnabled = enabled;
-                    showToast('NetWatcher settings saved', enabled ? 'success' : 'info');
-                    // Reload to reflect persisted values
-                    await loadNetWatcher();
-                } else {
-                    const data = await res.json().catch(() => ({}));
-                    showToast('Failed to save NetWatcher: ' + (data.error || res.statusText), 'error');
-                }
-            } catch (e) {
-                showToast('Error saving NetWatcher: ' + e.message, 'error');
-            }
-        }
-
-        async function checkNetWatcherStatus(initial) {
-            try {
-                if (!netWatcherEnabled) {
-                    netWatcherPrevOnline = null;
-                    return;
-                }
-                const res = await fetch('/api/admin/network/status', { credentials: 'include', cache: 'no-store' });
-                if (!res.ok) return;
-                const data = await res.json();
-                const online = !!data.online;
-                if (netWatcherPrevOnline === null) {
-                    netWatcherPrevOnline = online;
-                    return;
-                }
-                if (online !== netWatcherPrevOnline) {
-                    if (!online) {
-                        showToast('Internet down: NetWatcher paused timers', 'warning');
-                    } else {
-                        showToast('Internet restored: NetWatcher resumed timers', 'success');
-                    }
-                    netWatcherPrevOnline = online;
-                }
-            } catch (e) {}
-        }
-
-        function ensureToastContainer() {
-            let c = document.getElementById('toast-container');
-            if (!c) {
-                c = document.createElement('div');
-                c.id = 'toast-container';
-                c.style.position = 'fixed';
-                c.style.right = '16px';
-                c.style.bottom = '16px';
-                c.style.zIndex = '9999';
-                c.style.display = 'flex';
-                c.style.flexDirection = 'column';
-                c.style.gap = '8px';
-                document.body.appendChild(c);
-            }
-            return c;
-        }
-
-        function showToast(message, type = 'info') {
-            const c = ensureToastContainer();
-            const t = document.createElement('div');
-            t.style.minWidth = '240px';
-            t.style.maxWidth = '360px';
-            t.style.padding = '10px 12px';
-            t.style.borderRadius = '6px';
-            t.style.boxShadow = '0 2px 12px rgba(0,0,0,0.15)';
-            t.style.color = 'white';
-            t.style.fontSize = '0.9rem';
-            t.style.opacity = '0';
-            t.style.transform = 'translateY(10px)';
-            t.style.transition = 'opacity 150ms ease, transform 150ms ease';
-            const colors = {
-                info: '#3498db',
-                success: '#2ecc71',
-                warning: '#f1c40f',
-                error: '#e74c3c'
-            };
-            t.style.background = colors[type] || colors.info;
-            t.textContent = message;
-            c.appendChild(t);
-            requestAnimationFrame(() => {
-                t.style.opacity = '1';
-                t.style.transform = 'translateY(0)';
-            });
-            setTimeout(() => {
-                t.style.opacity = '0';
-                t.style.transform = 'translateY(10px)';
-                setTimeout(() => t.remove(), 300);
-            }, 3000);
-        }
-
-        // Expose NetWatcher functions globally for inline onclick handlers
-        window.loadNetWatcher = loadNetWatcher;
-        window.saveNetWatcher = saveNetWatcher;
-
-        
 
         function setSidebarOpen(open) {
             const sidebar = document.getElementById('sidebar');
@@ -3360,40 +3205,6 @@
                     });
                 }
             }
-        }
-
-        async function loadCpuUsage() {
-            try {
-                const res = await fetch('/api/admin/system/cpu', { credentials: 'include', cache: 'no-store' });
-                if (res.status === 401) return;
-                const data = await res.json();
-                let avgCpu = 0;
-                let cores = [];
-                if (data && data.cpu_usage) {
-                    if (typeof data.cpu_usage === 'object' && data.cpu_usage.cores) {
-                        if (data.cpu_usage.cores.length > 0) {
-                            const totalLoad = data.cpu_usage.cores.reduce((a, b) => a + b, 0);
-                            avgCpu = totalLoad / data.cpu_usage.cores.length;
-                        } else {
-                            avgCpu = data.cpu_usage.avg;
-                        }
-                        cores = data.cpu_usage.cores;
-                    } else {
-                        avgCpu = data.cpu_usage;
-                        cores = [avgCpu];
-                    }
-                }
-                avgCpu = Number(avgCpu) || 0;
-                const cpuTextEl = document.getElementById('cpu-text');
-                if (cpuTextEl) cpuTextEl.textContent = Math.min(100, avgCpu).toFixed(1) + '%';
-                const cpuLoadEl = document.getElementById('cpu-load');
-                if (cpuLoadEl) cpuLoadEl.textContent = Math.min(100, avgCpu).toFixed(1) + '%';
-                if (chartsEnabled && cpuDoughnut) {
-                    try {
-                        updateCpuChart(cores);
-                    } catch (e) {}
-                }
-            } catch (e) {}
         }
 
         function toggleTimeInputs() {
@@ -4787,9 +4598,6 @@
                         bridgeInterfacesDiv.appendChild(wrapper);
                     });
                 }
-                
-                // Load NetWatcher config
-                try { await loadNetWatcher(); } catch (e) {}
             } catch (e) {
                 console.error("Network config load error", e);
             }
@@ -5236,58 +5044,13 @@
                 });
                 
                 if (res.ok) {
-                    alert("Network configuration saved. Applying in background...");
-                    // Apply asynchronously and do not block UI (network may bounce)
-                    setTimeout(() => {
-                        fetch('/api/admin/network/apply', {
-                            method: 'POST',
-                            credentials: 'include'
-                        }).catch(() => {});
-                    }, 500);
+                    alert("Network configuration saved successfully.");
                 } else {
-                    // Fallback: save only WAN interface if full config fails
-                    try {
-                        const res2 = await fetch('/api/admin/settings/wan', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ interface: config.interface }),
-                            credentials: 'include'
-                        });
-                        if (res2.ok) {
-                            alert("WAN interface saved. Applying in background...");
-                            setTimeout(() => {
-                                fetch('/api/admin/network/apply', { method: 'POST', credentials: 'include' }).catch(() => {});
-                            }, 500);
-                        } else {
-                            let errText = 'Failed to save configuration.';
-                            try { const t = await res.text(); if (t) errText = errText + ' ' + t; } catch(e){}
-                            alert(errText);
-                        }
-                    } catch (err2) {
-                        alert("Error saving configuration (fallback).");
-                    }
+                    alert("Failed to save configuration.");
                 }
             } catch (e) {
                 console.error("Save error", e);
-                // Fallback on network error
-                try {
-                    const res2 = await fetch('/api/admin/settings/wan', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ interface: config.interface }),
-                        credentials: 'include'
-                    });
-                    if (res2.ok) {
-                        alert("WAN interface saved. Applying in background...");
-                        setTimeout(() => {
-                            fetch('/api/admin/network/apply', { method: 'POST', credentials: 'include' }).catch(() => {});
-                        }, 500);
-                    } else {
-                        alert("Error saving configuration.");
-                    }
-                } catch (_) {
-                    alert("Error saving configuration.");
-                }
+                alert("Error saving configuration.");
             }
         }
 
@@ -6402,3 +6165,4 @@
     
 
 // --- END BLOCK ---
+

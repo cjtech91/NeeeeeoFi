@@ -127,10 +127,6 @@ app.use('/api', (req, res, next) => {
         if (req.path.startsWith('/session/') || req.path.startsWith('/traffic/')) {
             return next();
         }
-        // Allow NetWatcher config so admins can stabilize connectivity even in expired mode
-        if (req.path.startsWith('/api/admin/network/netwatcher')) {
-            return next();
-        }
         // Allow specific safe reads so the UI can still load in expired mode
         if (req.method === 'OPTIONS') return next();
         if (req.method === 'GET') {
@@ -147,7 +143,6 @@ app.use('/api', (req, res, next) => {
                 '/api/admin/network/status',
                 '/api/admin/network/dhcp',
                 '/api/admin/network/wan',
-                '/api/admin/network/netwatcher',
                 '/api/admin/qos/config',
                 '/api/admin/portal/themes',
                 '/api/admin/settings',
@@ -495,50 +490,6 @@ const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, me
 // Counter for interface sync (run every 10s - faster for roaming)
 let interfaceSyncCounter = 0;
 
-// --- NetWatcher (Freeze timers when Internet is down) ---
-let netWatcherCache = {
-    enabled: false,
-    target: '',
-    lastCheck: 0,
-    lastOnline: true
-};
-
-async function isInternetOnlineForWatcher() {
-    try {
-        const now = Date.now();
-        // Refresh settings every 5s
-        if (now - netWatcherCache.lastCheck > 5000) {
-            const enabledRaw = configService.get('netwatcher_enabled');
-            netWatcherCache.enabled = (enabledRaw === '1' || enabledRaw === 1 || enabledRaw === true || enabledRaw === 'true');
-            netWatcherCache.target = (configService.get('netwatcher_target_ip') || '').trim();
-            netWatcherCache.lastCheck = now;
-        }
-        if (!netWatcherCache.enabled) return true;
-
-        // Use custom target if provided; else fallback to generic check
-        let online = true;
-        if (netWatcherCache.target && /^\d{1,3}(\.\d{1,3}){3}$/.test(netWatcherCache.target)) {
-            try {
-                const cmd = `ping -c 1 -W 1 ${netWatcherCache.target}`;
-                const out = await networkService.runCommand(cmd, true);
-                online = !!(out && /1 received/.test(out));
-            } catch (_) {
-                online = false;
-            }
-        } else {
-            try {
-                online = await networkService.checkInternetConnection();
-            } catch (_) {
-                online = false;
-            }
-        }
-        netWatcherCache.lastOnline = online;
-        return online;
-    } catch (_) {
-        return true; // Fail-open
-    }
-}
-
 // --- Batch Update Transaction (CPU Optimization) ---
 const batchProcessUpdates = db.transaction((timeUpdates, expiredIds, roamingUpdates) => {
     for (const u of timeUpdates) updateTime.run(u.time, u.id);
@@ -555,10 +506,6 @@ const countdownLoop = async () => {
             // 1. Get all active, unpaused users
             const users = selectActiveUsers.all();
             
-            // NetWatcher: decide whether to freeze timers this tick
-            const netOnline = await isInternetOnlineForWatcher();
-            const freezeTimers = netWatcherCache.enabled && !netOnline;
-            
             // 2. Interface Sync (every 10s)
             interfaceSyncCounter += deltaSeconds;
             let currentClients = null;
@@ -573,37 +520,33 @@ const countdownLoop = async () => {
             const roamingActions = []; // Async actions for roaming
 
             for (const user of users) {
-                // If frozen, keep current time; do not expire
-                const newTime = freezeTimers ? user.time_remaining : (user.time_remaining - deltaSeconds);
+                const newTime = user.time_remaining - deltaSeconds;
                 
-                if (!freezeTimers) {
-                    if (newTime <= 0) {
-                        expiredUsers.push(user);
-                    } else {
-                        timeUpdates.push({ id: user.id, time: newTime });
-                    }
-                }
-                
-                // Still track roaming/ip changes even when frozen
-                if (currentClients && user.mac_address) {
-                    const normalizedMac = user.mac_address.toLowerCase();
-                    const clientInfo = currentClients[normalizedMac];
+                if (newTime <= 0) {
+                    expiredUsers.push(user);
+                } else {
+                    timeUpdates.push({ id: user.id, time: newTime });
                     
-                    if (clientInfo) {
-                        const hasIpChanged = clientInfo.ip !== user.ip_address;
-                        const hasIfaceChanged = clientInfo.interface !== user.interface;
+                    if (currentClients && user.mac_address) {
+                        const normalizedMac = user.mac_address.toLowerCase();
+                        const clientInfo = currentClients[normalizedMac];
+                        
+                        if (clientInfo) {
+                            const hasIpChanged = clientInfo.ip !== user.ip_address;
+                            const hasIfaceChanged = clientInfo.interface !== user.interface;
 
-                        if (hasIpChanged || hasIfaceChanged) {
-                            roamingUpdates.push({ 
-                                id: user.id, 
-                                interface: clientInfo.interface, 
-                                ip: clientInfo.ip 
-                            });
-                            roamingActions.push({
-                                user,
-                                clientInfo,
-                                hasIpChanged
-                            });
+                            if (hasIpChanged || hasIfaceChanged) {
+                                roamingUpdates.push({ 
+                                    id: user.id, 
+                                    interface: clientInfo.interface, 
+                                    ip: clientInfo.ip 
+                                });
+                                roamingActions.push({
+                                    user,
+                                    clientInfo,
+                                    hasIpChanged
+                                });
+                            }
                         }
                     }
                 }
@@ -2114,16 +2057,6 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
     res.json(stats);
 });
 
-app.get('/api/admin/system/cpu', isAuthenticated, async (req, res) => {
-    try {
-        const cpu = await monitoringService.getCpuUsage();
-        res.set('Cache-Control', 'no-store');
-        res.json({ cpu_usage: cpu });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 // PPPoE Profiles API
 app.get('/api/admin/pppoe/profiles', isAuthenticated, (req, res) => {
     try {
@@ -3547,33 +3480,6 @@ app.get('/api/admin/network/wan', isAuthenticated, (req, res) => {
     res.json(networkConfigService.getWanConfig());
 });
 
-// NetWatcher Config
-app.get('/api/admin/network/netwatcher', isAuthenticated, (req, res) => {
-    try {
-        const enabledRaw = configService.get('netwatcher_enabled');
-        const enabled = (enabledRaw === '1' || enabledRaw === 1 || enabledRaw === true || enabledRaw === 'true');
-        const target = configService.get('netwatcher_target_ip') || '';
-        res.json({ enabled, target_ip: target });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-app.post('/api/admin/network/netwatcher', isAuthenticated, (req, res) => {
-    try {
-        const body = req.body || {};
-        const enabled = !!body.enabled;
-        const ip = (body.target_ip || '').trim();
-        configService.set('netwatcher_enabled', enabled ? '1' : '');
-        configService.set('netwatcher_target_ip', ip);
-        // Bust cache
-        netWatcherCache.lastCheck = 0;
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 app.post('/api/admin/network/wan', isAuthenticated, async (req, res) => {
     try {
         await networkConfigService.setWanConfig(req.body);
@@ -3583,16 +3489,6 @@ app.post('/api/admin/network/wan', isAuthenticated, async (req, res) => {
     }
 });
 
-// Apply Network Changes (Netplan, routes, DHCP)
-app.post('/api/admin/network/apply', isAuthenticated, async (req, res) => {
-    try {
-        const ok = await networkConfigService.applyNetworkChanges();
-        if (ok) res.json({ success: true });
-        else res.status(500).json({ error: 'Failed to apply network changes' });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
 // Anti-ISP Detect Config
 app.get('/api/admin/network/anti-isp', isAuthenticated, (req, res) => {
     try {
@@ -4615,23 +4511,6 @@ app.post('/api/claim-free-time', async (req, res) => {
             await bandwidthService.setLimit(ip, downloadSpeed, uploadSpeed);
         }
 
-        try {
-            const now = new Date();
-            const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
-            const source = (targetId && targetId.startsWith('subvendo:')) ? targetId : 'main';
-            const logData = {
-                type: 'free_time_claimed',
-                details: {
-                    message: `User ${userCode} claimed free time.`,
-                    added_time: sessionService.formatLogTime(secondsToAdd),
-                    user_code: userCode,
-                    mac_address: mac,
-                    source: source
-                }
-            };
-            db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, ?)').run('Hotspot', 'info', JSON.stringify(logData), timestamp);
-        } catch (e) {}
-
         return res.json({ success: true, secondsAdded: secondsToAdd });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
@@ -4665,17 +4544,9 @@ app.post('/api/voucher/redeem', async (req, res) => {
         await networkService.allowUser(mac);
         // Apply bandwidth limit (use request IP or stored IP)
         // If the user is redeeming from the device itself, req.ip is correct.
-        try {
-            let ipToLimit = null;
-            try {
-                const row = db.prepare('SELECT ip_address FROM users WHERE mac_address = ?').get(mac);
-                if (row && row.ip_address) ipToLimit = row.ip_address;
-            } catch (_) {}
-            if (!ipToLimit && req.ip) ipToLimit = req.ip;
-            if (ipToLimit) {
-                await bandwidthService.setLimit(ipToLimit, result.download_speed, result.upload_speed);
-            }
-        } catch (e) {}
+        if (req.ip) {
+            await bandwidthService.setLimit(req.ip, result.download_speed, result.upload_speed);
+        }
 
         // Emit points earned event if any
         if (result.pointsEarned > 0) {

@@ -125,7 +125,8 @@ If you don't have a USB drive or it's not detected, you can stream the backup di
     *   **⚠️ IMPORTANT:** Do NOT use PowerShell. PowerShell corrupts binary files when using `>`. You MUST use standard Command Prompt.
 2.  **Run these commands**:
     ```cmd
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@20.0.0.224 "dd if=/dev/mmcblk0 bs=1M status=progress | gzip -" > NeoFi_Zero3_Fixed.img.gz 
+    cd %USERPROFILE%\Desktop
+ssh root@20.0.0.224 "dd if=/dev/mmcblk0 bs=1M status=progress | gzip -" > NeoFi_Zero3_Fixed.img.gz 
     ```
 3.  **Enter your SSH password**.
 

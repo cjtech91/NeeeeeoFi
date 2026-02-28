@@ -213,7 +213,7 @@ class BoardDetectionService {
             'Orange Pi Zero 3': {
                 coin_pin: 229,      // usually physical ~3 (check your exact pinout!)
                 relay_pin: 228,     // usually physical ~5
-                bill_pin: 72,       // usually physical ~7 (PC9)
+                bill_pin: 73,       // usually physical ~7 (PC9)
                 coin_pin_edge: 'rising',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
@@ -222,7 +222,7 @@ class BoardDetectionService {
                 /* same as above */
                 coin_pin: 229,
                 relay_pin: 228,
-                bill_pin: 72,
+                bill_pin: 73,
                 coin_pin_edge: 'rising',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
