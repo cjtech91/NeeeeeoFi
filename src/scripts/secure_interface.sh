@@ -28,6 +28,18 @@ ensure_rule() {
 
 echo "Securing Interface: $IFACE"
 
+# Ensure required chains exist (idempotent)
+iptables -t mangle -L internet_users >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    iptables -t mangle -N internet_users 2>/dev/null || true
+fi
+iptables -L traffic_acct >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    iptables -N traffic_acct 2>/dev/null || true
+    # Ensure it is hooked to FORWARD
+    iptables -C FORWARD -j traffic_acct 2>/dev/null || iptables -I FORWARD -j traffic_acct
+fi
+
 # 1. Mangle - Capture traffic for accounting & authorization
 ensure_rule mangle PREROUTING -i $IFACE -j internet_users
 

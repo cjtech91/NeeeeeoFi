@@ -12,6 +12,7 @@ class NetworkService {
         this.interface = 'br0'; 
         this.wanInterface = 'eth0'; // Default fallback
         this.bridgeIp = '10.0.0.1'; // Default
+        this._ifacePrev = new Map();
     }
 
     async runCommand(command, silent = false) {
@@ -437,7 +438,7 @@ class NetworkService {
                 if (iface.includes('tun') || iface.includes('ppp') || iface.includes('docker')) continue;
                 
                 const isVlan = iface.includes('vlan') || iface.includes('.');
-                const isLan = iface.startsWith('eth') || iface.startsWith('end') || iface.startsWith('enx') || iface.startsWith('wlx') || iface.startsWith('usb');
+                const isLan = iface.startsWith('eth') || iface.startsWith('end') || iface.startsWith('enx') || iface.startsWith('wlx') || iface.startsWith('wlan') || iface.startsWith('usb');
                 
                 // 1. Bridging Logic (Only for physical LAN interfaces, NOT VLANs)
                 if (isLan && !isVlan && !currentBridged.includes(iface)) {
@@ -619,6 +620,7 @@ class NetworkService {
         const iface = await this.detectWanInterface();
         const result = {
             interface: iface || null,
+            mac: null,
             ip: null,
             gateway: null,
             operstate: null,
@@ -629,6 +631,14 @@ class NetworkService {
         if (!iface) return result;
 
         try {
+            try {
+                if (process.platform === 'linux') {
+                    const macPath = `/sys/class/net/${iface}/address`;
+                    if (fs.existsSync(macPath)) {
+                        result.mac = fs.readFileSync(macPath, 'utf8').trim();
+                    }
+                }
+            } catch (_) {}
             // operstate
             if (process.platform === 'linux') {
                 try {
@@ -641,6 +651,11 @@ class NetworkService {
                 const ipOut = await this.runCommand(`ip -4 addr show ${iface}`, true);
                 const m = ipOut && ipOut.match(/inet\s+(\d+(?:\.\d+){3})/);
                 if (m) result.ip = m[1];
+                if (!result.ip) {
+                    const pppOut = await this.runCommand(`ip -4 addr show ppp0`, true);
+                    const pm = pppOut && pppOut.match(/inet\s+(\d+(?:\.\d+){3})/);
+                    if (pm) result.ip = pm[1];
+                }
             } catch (_) {}
             // Gateway for this iface (prefer per-dev default route)
             try {
@@ -686,71 +701,127 @@ class NetworkService {
         return result;
     }
 
-    /**
-     * Get status for a specific interface (used for Dual/Multi-WAN views)
-     */
-    async getInterfaceStatus(iface) {
-        const result = {
-            interface: iface || null,
-            ip: null,
-            gateway: null,
-            operstate: null,
-            speed: null,
-            duplex: null,
-            gatewayReachable: null,
-        };
-        if (!iface) return result;
+    _readIfaceCounters(iface) {
+        if (process.platform !== 'linux') return null;
+        try {
+            const rxPath = `/sys/class/net/${iface}/statistics/rx_bytes`;
+            const txPath = `/sys/class/net/${iface}/statistics/tx_bytes`;
+            if (!fs.existsSync(rxPath) || !fs.existsSync(txPath)) return null;
+            const rx = parseInt(fs.readFileSync(rxPath, 'utf8').trim(), 10);
+            const tx = parseInt(fs.readFileSync(txPath, 'utf8').trim(), 10);
+            if (Number.isNaN(rx) || Number.isNaN(tx)) return null;
+            return { rx, tx, ts: Date.now() };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    _computeRates(iface) {
+        const nowStats = this._readIfaceCounters(iface);
+        if (!nowStats) return { rx_bps: 0, tx_bps: 0 };
+        const prev = this._ifacePrev.get(iface);
+        this._ifacePrev.set(iface, nowStats);
+        if (!prev) return { rx_bps: 0, tx_bps: 0 };
+        const dt = (nowStats.ts - prev.ts) / 1000;
+        if (dt <= 0) return { rx_bps: 0, tx_bps: 0 };
+        const rx_bps = Math.max(0, (nowStats.rx - prev.rx)) / dt;
+        const tx_bps = Math.max(0, (nowStats.tx - prev.tx)) / dt;
+        return { rx_bps, tx_bps };
+    }
+
+    async getWanLinksStatus() {
+        const wan = networkConfigService.getWanConfig();
+        const items = [];
 
         try {
-            if (process.platform === 'linux') {
-                try {
-                    const oper = fs.readFileSync(`/sys/class/net/${iface}/operstate`, 'utf8').trim();
-                    result.operstate = oper;
-                } catch (_) {}
-            }
-            try {
-                const ipOut = await this.runCommand(`ip -4 addr show ${iface}`, true);
-                const m = ipOut && ipOut.match(/inet\s+(\d+(?:\.\d+){3})/);
-                if (m) result.ip = m[1];
-            } catch (_) {}
-            try {
-                let gwOut = await this.runCommand(`ip route show dev ${iface} | grep default | head -n 1`, true);
-                if (!gwOut || !/default/.test(gwOut)) {
-                    gwOut = await this.runCommand(`ip route show default | head -n 1`, true);
-                }
-                const gm = gwOut && gwOut.match(/default via\s+(\d+(?:\.\d+){3})/);
-                if (gm) result.gateway = gm[1];
-            } catch (_) {}
-            try {
-                const et = await this.runCommand(`ethtool ${iface}`, true);
-                if (et) {
-                    const sm = et.match(/Speed:\s*([0-9]+(?:Mb|Gb)\/s)/i);
-                    const dm = et.match(/Duplex:\s*(\w+)/i);
-                    if (sm) result.speed = sm[1];
-                    if (dm) result.duplex = dm[1];
-                }
-            } catch (_) {
-                try {
-                    const iw = await this.runCommand(`iw dev ${iface} link`, true);
-                    if (iw) {
-                        const bm = iw.match(/tx bitrate:\s*([0-9.]+\s*\w+\/s)/i);
-                        if (bm) {
-                            result.speed = bm[1];
-                            result.duplex = 'wifi';
-                        }
-                    }
-                } catch (_) {}
-            }
-            if (result.gateway) {
-                try {
-                    const ping = await this.runCommand(`ping -c 1 -W 1 ${result.gateway}`, true);
-                    result.gatewayReachable = !!(ping && /1 received/.test(ping));
-                } catch (_) {
-                    result.gatewayReachable = false;
+            if (wan && wan.mode === 'dual_wan' && wan.dual_wan) {
+                if (wan.dual_wan.wan1 && wan.dual_wan.wan1.interface) items.push({ interface: wan.dual_wan.wan1.interface, type: wan.dual_wan.wan1.type || 'dynamic', cfg: wan.dual_wan.wan1 });
+                if (wan.dual_wan.wan2 && wan.dual_wan.wan2.interface) items.push({ interface: wan.dual_wan.wan2.interface, type: wan.dual_wan.wan2.type || 'dynamic', cfg: wan.dual_wan.wan2 });
+            } else if (wan && wan.mode === 'multi_wan' && Array.isArray(wan.multi_wan)) {
+                wan.multi_wan.forEach(w => {
+                    if (w.interface) items.push({ interface: w.interface, type: w.type || 'dynamic', cfg: w });
+                });
+            } else if (wan && wan.interface) {
+                items.push({ interface: wan.interface, type: wan.mode || 'dynamic', cfg: wan });
+                // If PPPoE mode, also include logical ppp0 for visibility
+                if ((wan.mode || wan.type) === 'pppoe') {
+                    items.push({ interface: 'ppp0', type: 'pppoe', cfg: wan });
                 }
             }
         } catch (_) {}
-        return result;
+
+        // Fallback: if nothing from config, include auto-detected active WAN
+        if (items.length === 0) {
+            try {
+                const detected = await this.detectWanInterface();
+                if (detected) {
+                    items.push({ interface: detected, type: 'auto', cfg: {} });
+                }
+            } catch (_) {}
+        }
+
+        const results = [];
+        for (const it of items) {
+            const iface = it.interface;
+            const entry = {
+                interface: iface,
+                type: it.type || 'dynamic',
+                ip: null,
+                mac: null,
+                gateway: null,
+                link: null,
+                rx_bps: 0,
+                tx_bps: 0,
+                reach: 'DOWN'
+            };
+            try {
+                try {
+                    if (process.platform === 'linux') {
+                        const macPath = `/sys/class/net/${iface}/address`;
+                        if (fs.existsSync(macPath)) entry.mac = fs.readFileSync(macPath, 'utf8').trim();
+                    }
+                } catch (_) {}
+                try {
+                    if (process.platform === 'linux') {
+                        const operPath = `/sys/class/net/${iface}/operstate`;
+                        if (fs.existsSync(operPath)) entry.link = fs.readFileSync(operPath, 'utf8').trim().toUpperCase();
+                    }
+                } catch (_) {}
+                try {
+                    const ipOut = await this.runCommand(`ip -4 addr show ${iface}`, true);
+                    const m = ipOut && ipOut.match(/inet\s+(\d+(?:\.\d+){3})/);
+                    if (m) entry.ip = m[1];
+                    if (!entry.ip && it.type === 'pppoe') {
+                        const pppOut = await this.runCommand(`ip -4 addr show ppp0`, true);
+                        const pm = pppOut && pppOut.match(/inet\s+(\d+(?:\.\d+){3})/);
+                        if (pm) entry.ip = pm[1];
+                    }
+                } catch (_) {}
+                try {
+                    let gwOut = await this.runCommand(`ip route show dev ${iface} | grep default | head -n 1`, true);
+                    if (!gwOut || !/default/.test(gwOut)) {
+                        gwOut = await this.runCommand(`ip route show default | head -n 1`, true);
+                    }
+                    const gm = gwOut && gwOut.match(/default via\s+(\d+(?:\.\d+){3})/);
+                    if (gm) entry.gateway = gm[1];
+                } catch (_) {}
+                const rates = this._computeRates(iface);
+                entry.rx_bps = Math.round(rates.rx_bps);
+                entry.tx_bps = Math.round(rates.tx_bps);
+                if (entry.gateway) {
+                    try {
+                        const ping = await this.runCommand(`ping -c 1 -W 1 ${entry.gateway}`, true);
+                        entry.reach = (ping && /1 received/.test(ping)) ? 'OK' : 'DOWN';
+                    } catch (_) {
+                        entry.reach = 'DOWN';
+                    }
+                } else {
+                    entry.reach = 'DOWN';
+                }
+            } catch (e) {}
+            results.push(entry);
+        }
+        return results;
     }
 
     async applyAntiIspDetect(cfg = null) {
