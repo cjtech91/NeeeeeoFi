@@ -13987,8 +13987,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 ? '<span class="badge bg-danger">Expired</span>' 
                                 : (isOnline ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Offline</span>');
 
-                            const upLimit = u.rate_limit_up ? Math.round(u.rate_limit_up / 1024) + ' M' : 'Unlim';
-                            const downLimit = u.rate_limit_down ? Math.round(u.rate_limit_down / 1024) + ' M' : 'Unlim';
+                            const upLimit = u.rate_limit_up ? Math.round(u.rate_limit_up / 1024) + 'M' : 'Unlim';
+                            const downLimit = u.rate_limit_down ? Math.round(u.rate_limit_down / 1024) + 'M' : 'Unlim';
                             
                             // Live stats
                             const uptime = u.uptime || 'N/A';
@@ -14031,7 +14031,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 <td style="padding: 12px 15px;">${statusBadge}</td>
                                 <td style="padding: 12px 15px;">${currentIp}</td>
                                 <td style="padding: 12px 15px;">${uptime}</td>
-                                <td style="padding: 12px 15px;">${upLimit} / ${downLimit}</td>
+                                <td style="padding: 12px 15px;">${upLimit}/${downLimit}</td>
                                 <td style="padding: 12px 15px;" title="Total: ${rxTotal}">${rxSpeed}</td>
                                 <td style="padding: 12px 15px;" title="Total: ${txTotal}">${txSpeed}</td>
                                 <td style="padding: 12px 15px; text-align: center;">
