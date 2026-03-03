@@ -33,11 +33,19 @@ class PppoeServerService {
         logService.info('SYSTEM', 'Initializing PPPoE Server Service');
         this.wanInterface = wanInterface;
         this.applyConfig();
+        // Ensure expired pool redirection rules are present (Linux only)
+        this.ensureExpiredRules();
+        this.ensureExpiredGatewayIp();
 
-        // Start Expiration Checker (Every 1 minute)
+        // Start Expiration Checker (Every 3 seconds for near-immediate reaction)
+        if (this.expirationInterval) clearInterval(this.expirationInterval);
         this.expirationInterval = setInterval(() => {
             this.checkExpirations();
-        }, 60 * 1000);
+            this.ensureExpiredRules();
+            this.ensureExpiredGatewayIp();
+        }, 3 * 1000);
+        // Run once immediately
+        setTimeout(() => this.triggerExpirationCheck(), 0);
     }
 
     checkExpirations() {
@@ -107,6 +115,137 @@ class PppoeServerService {
         } catch (e) {
             console.error("Error in checkExpirations:", e);
         }
+    }
+
+    // Expose a manual trigger for immediate checks (used by admin or other flows)
+    triggerExpirationCheck() {
+        try { 
+            this.checkExpirations(); 
+            this.ensureExpiredRules();
+            this.ensureExpiredGatewayIp();
+        } catch (e) { console.error('triggerExpirationCheck error:', e); }
+    }
+
+    // Ensure iptables rules exist to redirect expired pool HTTP to local portal
+    ensureExpiredRules() {
+        try {
+            if (process.platform !== 'linux') return;
+            const config = this.getConfig();
+            const expiredPool = (config && config.expired_pool) ? config.expired_pool : '172.15.10.0/24';
+            const serverIp = (config && config.local_ip) ? config.local_ip : '10.10.10.1';
+            const wanIface = this.wanInterface || 'eth0';
+            // Compute gateway (prefix + .1) when CIDR /24 provided; if range, fall back to first IP's .1
+            let expiredGw = '172.15.10.1';
+            try {
+                let netPrefix = null;
+                if (expiredPool.includes('/')) {
+                    const net = expiredPool.split('/')[0].trim();
+                    netPrefix = net.substring(0, net.lastIndexOf('.') + 1);
+                } else if (expiredPool.includes('-')) {
+                    const start = expiredPool.split('-')[0].trim();
+                    netPrefix = start.substring(0, start.lastIndexOf('.') + 1);
+                }
+                if (netPrefix) expiredGw = `${netPrefix}1`;
+            } catch (e) {}
+
+            const portalPort = process.env.PORT || 3000;
+            // Build proper source match for CIDR vs range
+            const srcMatch = expiredPool.includes('-')
+                ? `-m iprange --src-range ${expiredPool}`
+                : `-s ${expiredPool}`;
+            const cmds = [
+                // Ensure MASQUERADE for expired pool so DNS replies work
+                `iptables -t nat -C POSTROUTING ${srcMatch} -o ${wanIface} -j MASQUERADE`,
+                `iptables -t nat -I POSTROUTING 1 ${srcMatch} -o ${wanIface} -j MASQUERADE`,
+                // Allow DNS for expired pool
+                `iptables -C FORWARD ${srcMatch} -p udp --dport 53 -j ACCEPT`,
+                `iptables -I FORWARD 1 ${srcMatch} -p udp --dport 53 -j ACCEPT`,
+                `iptables -C FORWARD ${srcMatch} -p tcp --dport 53 -j ACCEPT`,
+                `iptables -I FORWARD 1 ${srcMatch} -p tcp --dport 53 -j ACCEPT`,
+                // DNAT HTTP to portal (gateway .1)
+                `iptables -t nat -C PREROUTING ${srcMatch} -p tcp --dport 80 -j DNAT --to-destination ${expiredGw}:${portalPort}`,
+                `iptables -t nat -I PREROUTING 1 ${srcMatch} -p tcp --dport 80 -j DNAT --to-destination ${expiredGw}:${portalPort}`,
+                // REDIRECT HTTP to local portal port as fallback (captures locally)
+                `iptables -t nat -C PREROUTING -i ppp+ ${srcMatch} -p tcp --dport 80 -j REDIRECT --to-ports ${portalPort}`,
+                `iptables -t nat -I PREROUTING 1 -i ppp+ ${srcMatch} -p tcp --dport 80 -j REDIRECT --to-ports ${portalPort}`,
+                // Accept portal port from expired pool
+                `iptables -C INPUT ${srcMatch} -p tcp --dport ${portalPort} -j ACCEPT`,
+                `iptables -I INPUT 1 ${srcMatch} -p tcp --dport ${portalPort} -j ACCEPT`,
+                // Reject all other forwarding from expired pool (pushes browsers to HTTP probe)
+                `iptables -C FORWARD ${srcMatch} -j REJECT`,
+                `iptables -I FORWARD 1 ${srcMatch} -j REJECT`
+            ];
+            // Execute check then insert pairs
+            for (let i = 0; i < cmds.length; i += 2) {
+                const checkCmd = cmds[i];
+                const addCmd = cmds[i+1];
+                exec(checkCmd, (err) => {
+                    if (err) {
+                        exec(addCmd, () => {});
+                    }
+                });
+            }
+
+            // Additionally, enforce DNAT per-expired-client IP even if not in expired pool yet
+            const expiredUsers = db.prepare(`
+                SELECT current_ip FROM pppoe_users 
+                WHERE current_ip IS NOT NULL AND current_ip != '' 
+                  AND datetime(expiration_date) < datetime('now')
+            `).all();
+            if (Array.isArray(expiredUsers)) {
+                expiredUsers.forEach(u => {
+                    const ip = u.current_ip;
+                    if (!ip) return;
+                    const perCmds = [
+                        // DNAT HTTP for this specific IP to local portal
+                        `iptables -t nat -C PREROUTING -s ${ip} -p tcp --dport 80 -j DNAT --to-destination ${serverIp}:${portalPort}`,
+                        `iptables -t nat -I PREROUTING 1 -s ${ip} -p tcp --dport 80 -j DNAT --to-destination ${serverIp}:${portalPort}`,
+                        // REDIRECT fallback for local capture
+                        `iptables -t nat -C PREROUTING -i ppp+ -s ${ip} -p tcp --dport 80 -j REDIRECT --to-ports ${portalPort}`,
+                        `iptables -t nat -I PREROUTING 1 -i ppp+ -s ${ip} -p tcp --dport 80 -j REDIRECT --to-ports ${portalPort}`,
+                        // Block all other forwarding to force probe
+                        `iptables -C FORWARD -s ${ip} -j REJECT`,
+                        `iptables -I FORWARD 1 -s ${ip} -j REJECT`
+                    ];
+                    for (let i = 0; i < perCmds.length; i += 2) {
+                        const c1 = perCmds[i], c2 = perCmds[i+1];
+                        exec(c1, (err) => { if (err) exec(c2, () => {}); });
+                    }
+                });
+            }
+        } catch (e) {
+            // Silent fail; rules may not be applicable on non-linux dev
+        }
+    }
+
+    // Ensure the expired gateway IP (x.y.z.1/24) is assigned to the server interface
+    ensureExpiredGatewayIp() {
+        try {
+            if (process.platform !== 'linux') return;
+            const config = this.getConfig();
+            const iface = (config && config.interface) ? config.interface : 'br0';
+            let expiredPool = (config && config.expired_pool) ? config.expired_pool : '172.15.10.0/24';
+            let base = null;
+            if (expiredPool.includes('/')) {
+                base = expiredPool.split('/')[0].trim();
+            } else if (expiredPool.includes('-')) {
+                base = expiredPool.split('-')[0].trim();
+            }
+            if (!base) return;
+            const prefix = base.substring(0, base.lastIndexOf('.') + 1);
+            const gw = `${prefix}1`;
+            // Remove this GW IP from all interfaces except the target
+            try {
+                const ifNames = fs.readdirSync('/sys/class/net').filter(n => n && n !== iface);
+                ifNames.forEach(n => {
+                    exec(`ip addr del ${gw}/24 dev ${n}`, () => {});
+                });
+            } catch (e) {}
+            // Ensure present on the selected interface
+            exec(`ip -4 addr show dev ${iface} | grep -q '${gw}/'`, (err) => {
+                if (err) exec(`ip addr add ${gw}/24 dev ${iface}`, () => {});
+            });
+        } catch (e) {}
     }
 
     initializeConfig() {
@@ -259,15 +398,16 @@ class PppoeServerService {
                             }
                         }
 
-                        // Calculate Uptime
+                        // Calculate Uptime (treat DB timestamps as UTC to avoid TZ offset)
                         let uptimeStr = "0m";
                         if (user.connected_at) {
-                            const connectedAt = new Date(user.connected_at);
-                            const diffMs = now - connectedAt;
+                            const raw = String(user.connected_at);
+                            const parsed = new Date(raw.includes('T') ? raw : (raw.replace(' ', 'T') + 'Z'));
+                            const base = isNaN(parsed.getTime()) ? new Date(user.connected_at) : parsed;
+                            const diffMs = Math.max(0, now - base);
                             const diffMins = Math.floor(diffMs / 60000);
                             const diffHrs = Math.floor(diffMins / 60);
                             const diffDays = Math.floor(diffHrs / 24);
-                            
                             if (diffDays > 0) uptimeStr = `${diffDays}d ${diffHrs % 24}h`;
                             else if (diffHrs > 0) uptimeStr = `${diffHrs}h ${diffMins % 60}m`;
                             else uptimeStr = `${diffMins}m`;

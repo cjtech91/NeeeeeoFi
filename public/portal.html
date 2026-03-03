@@ -1094,6 +1094,14 @@
             
             // Apply Styles
             const root = document.documentElement;
+            // Set coin beep to selected audio if provided
+            try {
+                const beep = document.getElementById('coin-beep');
+                if (beep && config.insert_coin_bg_audio) {
+                    beep.src = config.insert_coin_bg_audio;
+                    beep.load();
+                }
+            } catch (e) {}
 
             // Ticker Settings
             const tickerContainer = document.getElementById('ticker-container');
@@ -1170,11 +1178,26 @@
                             slideshowIntervalId = null;
                         }
                         mediaEl.innerHTML = '';
-                        const el = document.createElement('img');
-                        el.src = config._preview_banner_url;
-                        el.alt = 'Preview Banner';
-                        el.classList.add('active');
-                        mediaEl.appendChild(el);
+                        const isVideo = /\.(mp4|webm|ogv|avi)$/i.test(config._preview_banner_url);
+                        if (isVideo) {
+                            const v = document.createElement('video');
+                            v.src = config._preview_banner_url;
+                            v.autoplay = true;
+                            v.loop = true;
+                            v.muted = true;
+                            v.playsInline = true;
+                            v.style.width = '100%';
+                            v.style.height = '100%';
+                            v.classList.add('active');
+                            mediaEl.appendChild(v);
+                            createBannerUnmuteOverlay(mediaEl);
+                        } else {
+                            const el = document.createElement('img');
+                            el.src = config._preview_banner_url;
+                            el.alt = 'Preview Banner';
+                            el.classList.add('active');
+                            mediaEl.appendChild(el);
+                        }
                      }
                 } else {
                     const bannerFile = config.use_default_banner ? (config.default_banner_file || 'op-banner.png') : config.banner_filename;
@@ -1266,11 +1289,26 @@
             // Clear existing
             mediaEl.innerHTML = '';
 
-            const el = document.createElement('img');
-            el.src = `${file}?v=${stamp}`;
-            el.alt = 'Portal banner';
-            el.classList.add('active');
-            mediaEl.appendChild(el);
+            const isVideo = /\.(mp4|webm|ogv|avi)$/i.test(file);
+            if (isVideo) {
+                const v = document.createElement('video');
+                v.src = `${file}?v=${stamp}`;
+                v.autoplay = true;
+                v.loop = true;
+                v.muted = true;
+                v.playsInline = true;
+                v.style.width = '100%';
+                v.style.height = '100%';
+                v.classList.add('active');
+                mediaEl.appendChild(v);
+                createBannerUnmuteOverlay(mediaEl);
+            } else {
+                const el = document.createElement('img');
+                el.src = `${file}?v=${stamp}`;
+                el.alt = 'Portal banner';
+                el.classList.add('active');
+                mediaEl.appendChild(el);
+            }
         }
 
         function initCoinBeep() {
@@ -1313,6 +1351,9 @@
 
         function playCoinBeep() {
             if (!isInserting) return;
+            if (typeof insertCoinBgAudio !== 'undefined' && insertCoinBgAudio && !insertCoinBgAudio.paused) {
+                return;
+            }
             if (!coinBeepAudio) coinBeepAudio = document.getElementById('coin-beep');
             if (coinBeepAudio) {
                 try {
@@ -1438,6 +1479,7 @@
         // Init
         document.addEventListener('DOMContentLoaded', async () => {
             await loadPortalConfig();
+            setupBannerUnmuteOnFirstInteraction();
             updateStatus().then(() => {
                 // After initial status check, try auto-restore if needed
                 initAutoRestore();
@@ -1965,6 +2007,78 @@
             if (timeEl) timeEl.textContent = `${h}:${m}:${s}`;
         }
 
+        // Insert Coin Background Audio
+        let insertCoinBgAudio = null;
+        function playInsertCoinBgAudio() {
+            try {
+                if (!portalConfig || !portalConfig.insert_coin_bg_audio) return;
+                if (!insertCoinBgAudio) {
+                    insertCoinBgAudio = new Audio(portalConfig.insert_coin_bg_audio);
+                    insertCoinBgAudio.loop = true;
+                } else if (insertCoinBgAudio.src !== location.origin + portalConfig.insert_coin_bg_audio) {
+                    insertCoinBgAudio.src = portalConfig.insert_coin_bg_audio;
+                }
+                insertCoinBgAudio.currentTime = 0;
+                insertCoinBgAudio.play().catch(() => {});
+            } catch (e) {}
+        }
+        function stopInsertCoinBgAudio() {
+            try {
+                if (insertCoinBgAudio) {
+                    insertCoinBgAudio.pause();
+                    insertCoinBgAudio.currentTime = 0;
+                }
+            } catch (e) {}
+        }
+        function setBannerMute(muted) {
+            try {
+                const mediaEl = document.getElementById('portal-banner-media');
+                if (!mediaEl) return;
+                const vid = mediaEl.querySelector('video');
+                if (vid) {
+                    vid.muted = !!muted;
+                }
+            } catch (e) {}
+        }
+        function createBannerUnmuteOverlay(container) {
+            try {
+                if (!container) return;
+                // Remove existing overlay first
+                const prev = container.querySelector('.banner-unmute-overlay');
+                if (prev) prev.remove();
+                const vid = container.querySelector('video');
+                if (!vid) return;
+                // Only show if currently muted
+                if (!vid.muted) return;
+                const btn = document.createElement('button');
+                btn.textContent = 'Enable Sound';
+                btn.className = 'banner-unmute-overlay';
+                btn.style.cssText = 'position:absolute; top:10px; right:10px; z-index:5; background:rgba(0,0,0,0.6); color:#fff; border:none; border-radius:4px; padding:6px 10px; cursor:pointer; font-size:0.85rem;';
+                btn.onclick = () => {
+                    try {
+                        vid.muted = false;
+                        const p = vid.play();
+                        if (p && p.catch) p.catch(() => {});
+                        btn.remove();
+                    } catch (e) { btn.remove(); }
+                };
+                // Ensure container positioned
+                if (getComputedStyle(container).position === 'static') {
+                    container.style.position = 'relative';
+                }
+                container.appendChild(btn);
+            } catch (e) {}
+        }
+        function setupBannerUnmuteOnFirstInteraction() {
+            const handler = () => {
+                if (!isInserting) setBannerMute(false);
+                document.removeEventListener('click', handler);
+                document.removeEventListener('touchstart', handler);
+            };
+            document.addEventListener('click', handler, { once: true });
+            document.addEventListener('touchstart', handler, { once: true });
+        }
+
         function startCoinMode() {
             // Check Server First!
             fetch('/api/coin/start', { 
@@ -1982,6 +2096,8 @@
                      isInserting = true;
                      coinAmount = 0;
                      initCoinBeep();
+                     playInsertCoinBgAudio();
+                     setBannerMute(true);
                      const isExtend = !!(currentUser && Number(currentUser.time_remaining) > 0);
                      const titleEl = document.getElementById('coin-modal-title');
                      const descEl = document.getElementById('coin-modal-desc');
@@ -2005,6 +2121,8 @@
         async function closeCoinModal() {
             isInserting = false;
             stopCoinCountdown();
+            stopInsertCoinBgAudio();
+            setBannerMute(false);
             try {
                 const res = await fetch('/api/coin/done', { method: 'POST' });
                 // Optimistic UI update to ensure button flips immediately

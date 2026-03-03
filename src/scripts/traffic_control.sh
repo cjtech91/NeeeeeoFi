@@ -183,8 +183,8 @@ if [ "$COMMAND" == "mode" ]; then
         "gaming")
             # Diffserv4 (4 tins) prioritizes gaming traffic (DSCP EF/CS5/CS4)
             # ack-filter aggressively filters small ACKs to save upload
-            # wash strips extra DSCP to ensure only trusted traffic is prioritized
-            CAKE_OPTS="bandwidth 1000mbit nat diffserv4 ack-filter wash"
+            # Remove 'wash' so our DSCP markings for game ports are honored
+            CAKE_OPTS="bandwidth 1000mbit nat diffserv4 ack-filter"
             ;;
         "family")
             # Standard fair queuing, besteffort for most
@@ -207,6 +207,67 @@ if [ "$COMMAND" == "mode" ]; then
     # Re-apply WAN Qdisc
     run_tc qdisc del dev $WAN_IFACE root
     run_tc qdisc add dev $WAN_IFACE root cake $CAKE_OPTS
+    
+    # Program DSCP EF marking for popular game ports (both directions)
+    # We create/flush a dedicated chain to avoid duplicate rules across re-applies
+    iptables -t mangle -N GAMING_DSCP 2>/dev/null || true
+    iptables -t mangle -F GAMING_DSCP || true
+    
+    # Helper to add a port or range for both TCP and UDP, dport and sport
+    add_game_port() {
+        local PORTSPEC="$1"
+        # Outgoing to Internet (upload): router sees packets on WAN egress with dport
+        iptables -t mangle -A GAMING_DSCP -p udp --dport $PORTSPEC -j DSCP --set-dscp 46
+        iptables -t mangle -A GAMING_DSCP -p tcp --dport $PORTSPEC -j DSCP --set-dscp 46
+        # Replies/peer traffic (some games use symmetric ports)
+        iptables -t mangle -A GAMING_DSCP -p udp --sport $PORTSPEC -j DSCP --set-dscp 46
+        iptables -t mangle -A GAMING_DSCP -p tcp --sport $PORTSPEC -j DSCP --set-dscp 46
+    }
+    
+    # Call of Duty: Mobile
+    add_game_port 10000:10019
+    add_game_port 3013
+    add_game_port 7085:7995
+    add_game_port 8700:9030
+    add_game_port 10010:10019
+    add_game_port 17000:20100
+    # Mobile Legends (ML)
+    add_game_port 30000:30200
+    add_game_port 5000:5200
+    add_game_port 9992
+    add_game_port 1025
+    add_game_port 5500:5600
+    # Roblox
+    add_game_port 49152
+    add_game_port 3074
+    add_game_port 500
+    add_game_port 3074:3544
+    add_game_port 4500
+    # Valorant / Riot
+    add_game_port 8393:8400
+    add_game_port 2099
+    add_game_port 5222:5223
+    add_game_port 27016:27024
+    add_game_port 54000:54012
+    add_game_port 7000:8000
+    add_game_port 61000:61050
+    # Warzone
+    add_game_port 5094
+    add_game_port 8001:8045
+    # Wild Rift
+    add_game_port 5100
+    add_game_port 2080:2099
+    add_game_port 1935
+    add_game_port 3478:3480
+    add_game_port 3544
+    add_game_port 4500
+    
+    # Attach chain to PREROUTING for inbound (LAN download) and POSTROUTING for outbound (upload)
+    # This ensures markings are applied regardless of routing table nuances
+    iptables -t mangle -D PREROUTING -j GAMING_DSCP 2>/dev/null || true
+    iptables -t mangle -D POSTROUTING -j GAMING_DSCP 2>/dev/null || true
+    iptables -t mangle -A PREROUTING -j GAMING_DSCP
+    iptables -t mangle -A POSTROUTING -j GAMING_DSCP
     
     echo "QoS Mode Applied: $MODE ($CAKE_OPTS)"
     exit 0

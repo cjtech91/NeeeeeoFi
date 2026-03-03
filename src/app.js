@@ -1,6 +1,5 @@
 const express = require('express');
 const os = require('os');
-const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const { initDb, db } = require('./database/db');
 const path = require('path');
@@ -83,8 +82,8 @@ console.log('Portal File:', path.join(__dirname, '../public', 'portal.html'));
 console.log('------------------');
 
 // Middleware
-app.use(bodyParser.json({ limit: '100mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 app.use(cookieParser());
 // Trust reverse proxies so req.ip/req.ips/X-Forwarded-For are usable
 app.set('trust proxy', true);
@@ -171,6 +170,20 @@ app.use('/api', (req, res, next) => {
     next();
 });
 
+// Auto-trigger expiration check after PPPoE admin mutations (no restart needed)
+app.use((req, res, next) => {
+    const mutating = req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE';
+    if (mutating && req.path && req.path.startsWith('/api/admin/pppoe/')) {
+        res.on('finish', () => {
+            try { 
+                pppoeServerService.triggerExpirationCheck(); 
+                if (pppoeServerService.ensureExpiredRules) pppoeServerService.ensureExpiredRules();
+            } catch (e) {}
+        });
+    }
+    next();
+});
+
 // Set view engine
 // app.set('view engine', 'ejs');
 // app.set('views', path.join(__dirname, 'views'));
@@ -179,10 +192,14 @@ app.use('/api', (req, res, next) => {
 // PPPoE Expired Redirection Middleware
 app.use((req, res, next) => {
     // Check if request is coming from Expired Pool (172.15.10.x)
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    
+    let clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    // If XFF has multiple IPs, take the first
+    if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
     // Normalize IP (handle ::ffff:172.15.10.x)
-    const ipv4 = clientIp.replace(/^.*:/, '');
+    let ipv4 = clientIp.replace(/^.*:/, '');
+    // Last safeguard: extract first IPv4-like token if present
+    const m = ipv4.match(/(\d{1,3}(?:\.\d{1,3}){3})/);
+    if (m) ipv4 = m[1];
 
     // Get config dynamically
     let expiredPrefix = '172.15.10.';
@@ -201,19 +218,58 @@ app.use((req, res, next) => {
         // Fallback to default
     }
 
-    if (ipv4.startsWith(expiredPrefix)) {
+    // Detect if the client IP belongs to an expired PPPoE user, regardless of pool
+    let isExpiredClient = false;
+    try {
+        if (ipv4) {
+            const row = db.prepare('SELECT expiration_date FROM pppoe_users WHERE current_ip = ?').get(ipv4);
+            if (row && row.expiration_date) {
+                const exp = new Date(row.expiration_date);
+                if (!isNaN(exp.getTime()) && exp.getTime() < Date.now()) {
+                    isExpiredClient = true;
+                }
+            }
+        }
+    } catch (e) {}
+
+    const inExpiredPool = ipv4 && ipv4.startsWith(expiredPrefix);
+    if (inExpiredPool || isExpiredClient) {
         // Redirect to expired portal if not already there
         if (req.path === '/expired.html' || 
             req.path.startsWith('/api/') || 
             req.path.startsWith('/assets/') ||
+            req.path.startsWith('/expired-assets/') ||
+            req.path.startsWith('/socket.io') ||
             req.path.match(/\.(css|js|png|jpg|ico|woff2?)$/)) {
             return next();
         }
         
-        // Force redirect to the Expired Gateway IP (e.g. 172.15.10.1)
-        // We use the prefix (172.15.10.) + "1" to construct the gateway IP.
-        const expiredGateway = `${expiredPrefix}1`;
-        return res.redirect(`http://${expiredGateway}/expired.html`);
+        // Build target:
+        // - If client is in the expired pool, send to gateway IP (prefix + 1)
+        // - Otherwise, send to the PPPoE server local IP (avoid using Host header from external sites)
+        let target = '';
+        const stamp = (Date.now() % 1000000).toString();
+        if (inExpiredPool) {
+            const expiredGateway = `${expiredPrefix}1`;
+            target = `http://${expiredGateway}/expired.html?t=${stamp}`;
+        } else {
+            const base = serverIp || '127.0.0.1';
+            target = `http://${base}/expired.html?t=${stamp}`;
+        }
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+        return res.redirect(302, target);
+    }
+    next();
+});
+
+// Ensure expired.html is never cached by captive portals
+app.use((req, res, next) => {
+    if (req.path === '/expired.html') {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
     }
     next();
 });
@@ -1852,8 +1908,31 @@ app.get('/api/admin/system/verify', isAuthenticated, requireSuperAdmin, async (r
 
 app.post('/api/admin/system/reboot', isAuthenticated, async (req, res) => {
     try {
-        await systemService.reboot();
+        // 1) Pause all connected users
+        try {
+            db.prepare('UPDATE users SET is_paused = 1 WHERE is_connected = 1').run();
+        } catch (e) {
+            console.error('Failed to pause users before reboot:', e);
+        }
+        // 2) Invalidate all admin sessions (force logout of admin and super admin)
+        try {
+            db.prepare('UPDATE admins SET session_token = NULL').run();
+        } catch (e) {
+            console.error('Failed to clear admin sessions before reboot:', e);
+        }
+        // 3) Clear current requester's cookie immediately
+        try {
+            res.clearCookie('admin_session');
+        } catch (e) {}
+        // 4) Respond success first, then trigger reboot asynchronously
         res.json({ success: true });
+        setTimeout(async () => {
+            try {
+                await systemService.reboot();
+            } catch (e) {
+                console.error('Reboot error:', e);
+            }
+        }, 300);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -2180,6 +2259,19 @@ app.get('/api/admin/system/timezones', isAuthenticated, async (req, res) => {
         res.json(timezones);
     } catch (e) {
         res.status(500).json({ error: e.message });
+    }
+});
+
+// Manual trigger for PPPoE expiration check (no restart needed)
+app.post('/api/admin/pppoe/expire/check-now', isAuthenticated, (req, res) => {
+    try {
+        // 1) Run lightweight in-app checks
+        pppoeServerService.triggerExpirationCheck();
+        // 2) Re-apply PPPoE server config to ensure iptables/NAT rules are present (same effect as restart, but single click)
+        try { pppoeServerService.applyConfig(); } catch (e) {}
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
@@ -2537,7 +2629,9 @@ app.get('/api/portal/config', (req, res) => {
         ticker_enabled: configService.get('portal_ticker_enabled', false),
         announcement_enabled: configService.get('portal_announcement_enabled', false),
         announcement_title: configService.get('portal_announcement_title', 'Announcement'),
-        announcement_message: configService.get('portal_announcement_message', '')
+        announcement_message: configService.get('portal_announcement_message', ''),
+        insert_coin_bg_image: configService.get('portal_insert_coin_bg_image', ''),
+        insert_coin_bg_audio: configService.get('portal_insert_coin_bg_audio', '')
     };
     res.json(config);
 });
@@ -2660,6 +2754,125 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
     res.json({ success: true });
 });
 
+// Upload Insert Coin assets (image/audio)
+app.post('/api/admin/portal/assets', isAuthenticated, (req, res) => {
+    try {
+        const { type, filename, fileData } = req.body || {};
+        if (!type || !fileData) return res.status(400).json({ success: false, error: 'type and fileData required' });
+        const isImage = type === 'insert_coin_bg_image';
+        const isAudio = type === 'insert_coin_bg_audio';
+        if (!isImage && !isAudio) return res.status(400).json({ success: false, error: 'invalid type' });
+        
+        const safeDir = path.join(__dirname, '../public/portal-assets');
+        if (!fs.existsSync(safeDir)) fs.mkdirSync(safeDir, { recursive: true });
+        
+        // Derive extension from provided filename; fallback for safety
+        let ext = '';
+        if (filename && typeof filename === 'string' && filename.includes('.')) {
+            ext = filename.split('.').pop().toLowerCase();
+        }
+        // Validate extension
+        if (isImage && !['jpg','jpeg','png','webp'].includes(ext)) ext = 'png';
+        if (isAudio && !['mp3','wav'].includes(ext)) ext = 'mp3';
+        // Build a safe filename (keep multiple uploads)
+        const baseName = (filename || (isAudio ? 'audio' : 'image')).replace(/[^a-z0-9_\-\.]/gi, '_').replace(/\.[^.]+$/, '');
+        const ts = Date.now();
+        const targetName = isAudio ? `${baseName}_${ts}.${ext}` : `${baseName}_${ts}.${ext}`;
+        const targetPath = path.join(safeDir, targetName);
+        const buffer = Buffer.from(fileData, 'base64');
+        fs.writeFileSync(targetPath, buffer);
+        
+        const publicUrl = `/portal-assets/${targetName}`;
+        if (isImage) configService.set('portal_insert_coin_bg_image', publicUrl, 'portal');
+        if (isAudio) configService.set('portal_insert_coin_bg_audio', publicUrl, 'portal'); // set newly uploaded as active by default
+        
+        res.json({ success: true, url: publicUrl });
+    } catch (e) {
+        console.error('Upload asset error:', e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// List uploaded insert coin audio files
+app.get('/api/admin/portal/audio-files', isAuthenticated, (req, res) => {
+    try {
+        const safeDir = path.join(__dirname, '../public/portal-assets');
+        let files = [];
+        if (fs.existsSync(safeDir)) {
+            files = fs.readdirSync(safeDir)
+                .filter(f => /\.(mp3|wav)$/i.test(f))
+                .map(f => ({ name: f, url: `/portal-assets/${f}` }))
+                .sort((a, b) => b.name.localeCompare(a.name));
+        }
+        // Always include default beep
+        const defaultBeep = { name: 'beed.mp3', url: '/beed.mp3', builtin: true };
+        // Ensure no duplicates by name (case-insensitive)
+        const uniq = new Map();
+        uniq.set(defaultBeep.name.toLowerCase(), defaultBeep);
+        for (const f of files) {
+            if (!uniq.has(f.name.toLowerCase())) uniq.set(f.name.toLowerCase(), f);
+        }
+        const list = Array.from(uniq.values());
+        res.json({ files: list, active: configService.get('portal_insert_coin_bg_audio', '/beed.mp3') || '/beed.mp3' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Select active audio file
+app.post('/api/admin/portal/audio/select', isAuthenticated, (req, res) => {
+    try {
+        const { filename } = req.body || {};
+        if (!filename) return res.status(400).json({ success: false, error: 'filename required' });
+        let publicUrl = '';
+        if (filename.toLowerCase() === 'beed.mp3') {
+            publicUrl = '/beed.mp3';
+        } else {
+            const safeDir = path.join(__dirname, '../public/portal-assets');
+            const fullPath = path.join(safeDir, path.basename(filename));
+            if (!fs.existsSync(fullPath)) return res.status(404).json({ success: false, error: 'file not found' });
+            publicUrl = `/portal-assets/${path.basename(filename)}`;
+        }
+        configService.set('portal_insert_coin_bg_audio', publicUrl, 'portal');
+        res.json({ success: true, url: publicUrl });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Delete uploaded audio (not default)
+app.delete('/api/admin/portal/audio/:filename', isAuthenticated, (req, res) => {
+    try {
+        const { filename } = req.params || {};
+        if (!filename) return res.status(400).json({ success: false, error: 'filename required' });
+        if (filename.toLowerCase() === 'beed.mp3') {
+            return res.status(400).json({ success: false, error: 'Cannot delete default audio' });
+        }
+        const safeDir = path.join(__dirname, '../public/portal-assets');
+        const fullPath = path.join(safeDir, path.basename(filename));
+        // Security: ensure path is inside safeDir (cross-platform safe)
+        const rel = path.relative(safeDir, fullPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            return res.status(400).json({ success: false, error: 'invalid path' });
+        }
+        // If active, revert to default
+        const active = configService.get('portal_insert_coin_bg_audio', '/beed.mp3') || '/beed.mp3';
+        if (active && active.endsWith('/' + path.basename(filename))) {
+            configService.set('portal_insert_coin_bg_audio', '/beed.mp3', 'portal');
+        }
+        try {
+            fs.unlinkSync(fullPath);
+        } catch (e) {
+            // If file already missing, treat as success (idempotent)
+            if (e.code !== 'ENOENT') {
+                throw e;
+            }
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
 // --- Portal Templates ---
 app.post('/api/admin/portal-templates', isAuthenticated, (req, res) => {
     try {
@@ -2802,12 +3015,23 @@ app.delete('/api/admin/slideshow-image/:filename', isAuthenticated, (req, res) =
 
 app.post('/api/admin/upload-banner', isAuthenticated, (req, res) => {
     const { image, type } = req.body;
-    if (!image || !type) return res.status(400).json({ error: 'Missing image data' });
+    if (!image || !type) return res.status(400).json({ error: 'Missing media data' });
     
     try {
-        const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+        // Strip any data URI prefix (image or video)
+        const base64Data = image.replace(/^data:[^;]+;base64,/, "");
         const buffer = Buffer.from(base64Data, 'base64');
-        const ext = type === 'image/png' ? 'png' : 'jpg';
+        // Determine extension by content type
+        let ext = 'jpg';
+        if (type === 'image/png') ext = 'png';
+        else if (type === 'image/jpeg') ext = 'jpg';
+        else if (type === 'image/gif') ext = 'gif';
+        else if (type === 'video/mp4') ext = 'mp4';
+        else if (type === 'video/webm') ext = 'webm';
+        else if (type === 'video/ogg') ext = 'ogv';
+        else if (type === 'video/x-msvideo') ext = 'avi';
+        else return res.status(400).json({ error: 'Unsupported media type' });
+
         const filename = `custom-banner.${ext}`;
         const filepath = path.join(__dirname, '../public', filename);
         
@@ -2832,6 +3056,111 @@ app.get('/api/admin/walled-garden', isAuthenticated, (req, res) => {
     }
 });
 
+// ---- PPPoE Expired Portal Config ----
+// Public endpoint consumed by expired.html
+app.get('/api/pppoe/expired-config', (req, res) => {
+    const cfg = {
+        title: configService.get('pppoe_expired_title', 'Account Expired'),
+        message_line1: configService.get('pppoe_expired_message1', 'Your internet access has been suspended because your PPPoE account has expired.'),
+        message_line2: configService.get('pppoe_expired_message2', 'Please contact the administrator or renew your subscription to restore access.'),
+        footer_text: configService.get('pppoe_expired_footer_text', 'NEOFI SYSTEMS'),
+        footer_link: configService.get('pppoe_expired_footer_link', ''),
+        bg_image: configService.get('pppoe_expired_bg', ''),
+        qr1: configService.get('pppoe_expired_qr1', ''),
+        qr2: configService.get('pppoe_expired_qr2', ''),
+        title_color: configService.get('pppoe_expired_title_color', ''),
+        line1_color: configService.get('pppoe_expired_line1_color', ''),
+        line2_color: configService.get('pppoe_expired_line2_color', ''),
+        footer_color: configService.get('pppoe_expired_footer_color', ''),
+        card_color: configService.get('pppoe_expired_card_color', ''),
+        version: Date.now()
+    };
+    res.json(cfg);
+});
+
+// Admin save config (text/link fields)
+app.post('/api/admin/pppoe/expired-config', isAuthenticated, (req, res) => {
+    const { title, message_line1, message_line2, footer_text, footer_link, title_color, line1_color, line2_color, footer_color, card_color } = req.body || {};
+    if (title !== undefined) configService.set('pppoe_expired_title', title, 'pppoe');
+    if (message_line1 !== undefined) configService.set('pppoe_expired_message1', message_line1, 'pppoe');
+    if (message_line2 !== undefined) configService.set('pppoe_expired_message2', message_line2, 'pppoe');
+    if (footer_text !== undefined) configService.set('pppoe_expired_footer_text', footer_text, 'pppoe');
+    if (footer_link !== undefined) configService.set('pppoe_expired_footer_link', footer_link, 'pppoe');
+    if (title_color !== undefined) configService.set('pppoe_expired_title_color', title_color, 'pppoe');
+    if (line1_color !== undefined) configService.set('pppoe_expired_line1_color', line1_color, 'pppoe');
+    if (line2_color !== undefined) configService.set('pppoe_expired_line2_color', line2_color, 'pppoe');
+    if (footer_color !== undefined) configService.set('pppoe_expired_footer_color', footer_color, 'pppoe');
+    if (card_color !== undefined) configService.set('pppoe_expired_card_color', card_color, 'pppoe');
+    res.json({ success: true });
+});
+
+// Admin upload assets (background, QR1, QR2)
+app.post('/api/admin/pppoe/expired-assets', isAuthenticated, (req, res) => {
+    try {
+        const { type, filename, fileData } = req.body || {};
+        if (!type || !fileData) return res.status(400).json({ success: false, error: 'type and fileData required' });
+        const validTypes = ['bg', 'qr1', 'qr2'];
+        if (!validTypes.includes(type)) return res.status(400).json({ success: false, error: 'invalid type' });
+        const dir = path.join(__dirname, '../public/expired-assets');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const base = (filename || 'asset').replace(/[^a-z0-9_\-\.]/gi, '_').replace(/\.[^.]+$/, '');
+        const ext = (filename && filename.includes('.')) ? filename.split('.').pop().toLowerCase() : 'png';
+        const allowed = ['png','jpg','jpeg','gif','webp'];
+        const finalExt = allowed.includes(ext) ? ext : 'png';
+        const out = `${base}_${Date.now()}.${finalExt}`;
+        const buf = Buffer.from(fileData, 'base64');
+        fs.writeFileSync(path.join(dir, out), buf);
+        const url = `/expired-assets/${out}`;
+        if (type === 'bg') configService.set('pppoe_expired_bg', url, 'pppoe');
+        if (type === 'qr1') configService.set('pppoe_expired_qr1', url, 'pppoe');
+        if (type === 'qr2') configService.set('pppoe_expired_qr2', url, 'pppoe');
+        res.json({ success: true, url });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Remove assets and clear config
+app.delete('/api/admin/pppoe/expired-assets/:type', isAuthenticated, (req, res) => {
+    try {
+        const { type } = req.params || {};
+        const keyMap = { bg: 'pppoe_expired_bg', qr1: 'pppoe_expired_qr1', qr2: 'pppoe_expired_qr2' };
+        const key = keyMap[type];
+        if (!key) return res.status(400).json({ success: false, error: 'invalid type' });
+        const current = configService.get(key, '');
+        if (current && current.startsWith('/expired-assets/')) {
+            try {
+                const fp = path.join(__dirname, '../public', current.replace(/^\//, ''));
+                if (fs.existsSync(fp)) fs.unlinkSync(fp);
+            } catch (e) {}
+        }
+        configService.set(key, '', 'pppoe');
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Fallback remover via POST (for environments that block DELETE)
+app.post('/api/admin/pppoe/expired-assets/remove', isAuthenticated, (req, res) => {
+    try {
+        const { type } = req.body || {};
+        const keyMap = { bg: 'pppoe_expired_bg', qr1: 'pppoe_expired_qr1', qr2: 'pppoe_expired_qr2' };
+        const key = keyMap[type];
+        if (!key) return res.status(400).json({ success: false, error: 'invalid type' });
+        const current = configService.get(key, '');
+        if (current && current.startsWith('/expired-assets/')) {
+            try {
+                const fp = path.join(__dirname, '../public', current.replace(/^\//, ''));
+                if (fs.existsSync(fp)) fs.unlinkSync(fp);
+            } catch (e) {}
+        }
+        configService.set(key, '', 'pppoe');
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
 app.post('/api/admin/walled-garden', isAuthenticated, async (req, res) => {
     const { domain, type } = req.body;
     if (!domain || !type) return res.status(400).json({ error: 'Domain and Type are required' });

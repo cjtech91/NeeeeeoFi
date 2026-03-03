@@ -1084,6 +1084,15 @@
                 const config = await res.json();
                 portalConfig = config;
                 
+                // Set coin beep to selected audio if provided
+                try {
+                    const beep = document.getElementById('coin-beep');
+                    if (beep && config.insert_coin_bg_audio) {
+                        beep.src = config.insert_coin_bg_audio;
+                        beep.load();
+                    }
+                } catch (e) {}
+                
                 // Apply Styles
                 const root = document.documentElement;
 
@@ -1225,11 +1234,38 @@
             // Clear existing
             mediaEl.innerHTML = '';
 
-            const el = document.createElement('img');
-            el.src = `${file}?v=${stamp}`;
-            el.alt = 'Portal banner';
-            el.classList.add('active');
-            mediaEl.appendChild(el);
+            const isVideo = /\.(mp4|webm|ogv|avi)$/i.test(file);
+            if (isVideo) {
+                const v = document.createElement('video');
+                v.src = `${file}?v=${stamp}`;
+                v.autoplay = true;
+                v.loop = true;
+                v.muted = true;
+                v.playsInline = true;
+                v.style.width = '100%';
+                v.style.height = '100%';
+                v.classList.add('active');
+                mediaEl.appendChild(v);
+                try {
+                    const prev = mediaEl.querySelector('.banner-unmute-overlay');
+                    if (prev) prev.remove();
+                    if (v.muted) {
+                        const btn = document.createElement('button');
+                        btn.textContent = 'Enable Sound';
+                        btn.className = 'banner-unmute-overlay';
+                        btn.style.cssText = 'position:absolute; top:10px; right:10px; z-index:5; background:rgba(0,0,0,0.6); color:#fff; border:none; border-radius:4px; padding:6px 10px; cursor:pointer; font-size:0.85rem;';
+                        btn.onclick = () => { try { v.muted = false; v.play().catch(()=>{}); btn.remove(); } catch(e) { btn.remove(); } };
+                        if (getComputedStyle(mediaEl).position === 'static') mediaEl.style.position = 'relative';
+                        mediaEl.appendChild(btn);
+                    }
+                } catch(e) {}
+            } else {
+                const el = document.createElement('img');
+                el.src = `${file}?v=${stamp}`;
+                el.alt = 'Portal banner';
+                el.classList.add('active');
+                mediaEl.appendChild(el);
+            }
         }
 
         function initCoinBeep() {
@@ -1272,6 +1308,9 @@
 
         function playCoinBeep() {
             if (!isInserting) return;
+            if (typeof insertCoinBgAudio !== 'undefined' && insertCoinBgAudio && !insertCoinBgAudio.paused) {
+                return;
+            }
             if (!coinBeepAudio) coinBeepAudio = document.getElementById('coin-beep');
             if (coinBeepAudio) {
                 try {
@@ -1364,6 +1403,18 @@
         // Init
         document.addEventListener('DOMContentLoaded', async () => {
             await loadPortalConfig();
+            // Unmute banner video after first user gesture (autoplay policy)
+            const unmuteOnce = () => {
+                try {
+                    const mediaEl = document.getElementById('portal-banner-media');
+                    const vid = mediaEl ? mediaEl.querySelector('video') : null;
+                    if (vid && !isInserting) vid.muted = false;
+                } catch (e) {}
+                document.removeEventListener('click', unmuteOnce);
+                document.removeEventListener('touchstart', unmuteOnce);
+            };
+            document.addEventListener('click', unmuteOnce, { once: true });
+            document.addEventListener('touchstart', unmuteOnce, { once: true });
             updateStatus().then(() => {
                 // After initial status check, try auto-restore if needed
                 initAutoRestore();
@@ -1882,6 +1933,30 @@
             if (timeEl) timeEl.textContent = `${h}:${m}:${s}`;
         }
 
+        // Insert Coin Background Audio
+        let insertCoinBgAudio = null;
+        function playInsertCoinBgAudio() {
+            try {
+                if (!portalConfig || !portalConfig.insert_coin_bg_audio) return;
+                if (!insertCoinBgAudio) {
+                    insertCoinBgAudio = new Audio(portalConfig.insert_coin_bg_audio);
+                    insertCoinBgAudio.loop = true;
+                } else if (insertCoinBgAudio.src !== location.origin + portalConfig.insert_coin_bg_audio) {
+                    insertCoinBgAudio.src = portalConfig.insert_coin_bg_audio;
+                }
+                insertCoinBgAudio.currentTime = 0;
+                insertCoinBgAudio.play().catch(() => {});
+            } catch (e) {}
+        }
+        function stopInsertCoinBgAudio() {
+            try {
+                if (insertCoinBgAudio) {
+                    insertCoinBgAudio.pause();
+                    insertCoinBgAudio.currentTime = 0;
+                }
+            } catch (e) {}
+        }
+
         function startCoinMode() {
             // Check Server First!
             fetch('/api/coin/start', { 
@@ -1899,6 +1974,12 @@
                      isInserting = true;
                      coinAmount = 0;
                      initCoinBeep();
+                     try {
+                         const mediaEl = document.getElementById('portal-banner-media');
+                         const vid = mediaEl ? mediaEl.querySelector('video') : null;
+                         if (vid) vid.muted = true;
+                     } catch (e) {}
+                     playInsertCoinBgAudio();
                      const isExtend = !!(currentUser && Number(currentUser.time_remaining) > 0);
                      const titleEl = document.getElementById('coin-modal-title');
                      const descEl = document.getElementById('coin-modal-desc');
@@ -1922,6 +2003,12 @@
         async function closeCoinModal() {
             isInserting = false;
             stopCoinCountdown();
+            try {
+                const mediaEl = document.getElementById('portal-banner-media');
+                const vid = mediaEl ? mediaEl.querySelector('video') : null;
+                if (vid) vid.muted = false;
+            } catch (e) {}
+            stopInsertCoinBgAudio();
             try {
                 const res = await fetch('/api/coin/done', { method: 'POST' });
                 // Optimistic UI update to ensure button flips immediately

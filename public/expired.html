@@ -152,6 +152,35 @@
             justify-content: center;
             display: none;
         }
+        /* Account details grid */
+        .details-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            border: 1px solid #90caf9;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #eaf5ff;
+        }
+        .details-grid .cell {
+            padding: 10px;
+            font-size: 0.95rem;
+            color: #2d3436;
+            background: #eaf5ff;
+            border-right: 1px solid #90caf9;
+            border-bottom: 1px solid #90caf9;
+        }
+        .details-grid .cell:nth-child(2n) {
+            border-right: none; /* no right border for value column */
+        }
+        .details-grid .cell.label {
+            font-weight: 700;
+            background: #e3f2fd;
+        }
+        .details-grid .cell:last-child,
+        .details-grid .cell:nth-last-child(2) {
+            border-bottom: none; /* remove bottom border for last row */
+        }
 
         * {
             box-sizing: border-box;
@@ -169,6 +198,9 @@
             justify-content: center;
             align-items: center;
             padding: 20px;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
         }
 
         .container {
@@ -179,6 +211,8 @@
             box-shadow: var(--shadow);
             padding: 30px 20px;
             text-align: center;
+            transition: background-color 0.2s ease;
+            overflow: hidden; /* keep inner content within rounded corners */
         }
 
         .icon-circle {
@@ -244,20 +278,34 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
         </div>
-        <h1>Account Expired</h1>
-        <p>Your internet access has been suspended because your PPPoE account has expired.</p>
-        <p>Please contact the administrator or renew your subscription to restore access.</p>
+        <h1 id="exp-title" style="color: var(--text);">Account Expired</h1>
+        <p id="exp-line1" style="color: var(--text-muted);">Your internet access has been suspended because your PPPoE account has expired.</p>
+        <p id="exp-line2" style="color: var(--text-muted);">Please contact the administrator or renew your subscription to restore access.</p>
         
-        <div id="account-details" style="display:none; text-align: left; background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #90caf9;">
-            <p style="margin-bottom: 8px; color: #2d3436; font-size: 0.95rem;"><strong>Username:</strong> <span id="user-username" style="color: #0984e3; font-weight: bold; margin-left: 5px;"></span></p>
-            <p style="margin-bottom: 8px; color: #2d3436; font-size: 0.95rem;"><strong>Profile:</strong> <span id="user-profile" style="color: #0984e3; font-weight: bold; margin-left: 5px;"></span></p>
-            <p style="margin-bottom: 8px; color: #2d3436; font-size: 0.95rem;"><strong>Amount to Paid:</strong> <span id="user-price" style="color: #27ae60; font-weight: bold; margin-left: 5px;"></span></p>
-            <p style="margin-bottom: 0; color: #2d3436; font-size: 0.95rem;"><strong>Expired On:</strong> <span id="user-expiration" style="color: #d63031; font-weight: bold; margin-left: 5px;"></span></p>
+        <div id="qr-container" style="display:none; margin: 10px 0;">
+            <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                <img id="qr1" alt="QR 1" style="display:none; width:140px; height:140px; object-fit:contain; border:1px solid #eee; border-radius:8px; background:#fff; padding:8px;">
+                <img id="qr2" alt="QR 2" style="display:none; width:140px; height:140px; object-fit:contain; border:1px solid #eee; border-radius:8px; background:#fff; padding:8px;">
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">Scan to pay (e.g., GCash, Maya)</div>
+        </div>
+        
+        <div id="account-details" style="display:none; text-align: left; margin: 10px 0 20px; max-width: 100%; box-sizing: border-box;">
+            <div class="details-grid">
+                <div class="cell label">Username:</div>
+                <div class="cell value"><span id="user-username" style="color:#0984e3; font-weight:700;"></span></div>
+                <div class="cell label">Profile:</div>
+                <div class="cell value"><span id="user-profile" style="color:#0984e3; font-weight:700;"></span></div>
+                <div class="cell label">Amount to Paid:</div>
+                <div class="cell value"><span id="user-price" style="color:#27ae60; font-weight:700;"></span></div>
+                <div class="cell label">Expired On:</div>
+                <div class="cell value"><span id="user-expiration" style="color:#d63031; font-weight:700;"></span></div>
+            </div>
         </div>
 
         <!-- Optional: Button to refresh or contact info -->
     </div>
-    <div class="developer-footer">NEOFI SYSTEMS</div>
+    <div class="developer-footer" id="exp-footer">NEOFI SYSTEMS</div>
     <!-- Chat Widget -->
     <div class="chat-widget-btn" onclick="toggleChat()">
         <svg viewBox="0 0 24 24">
@@ -417,8 +465,44 @@
             }
         }
 
+        async function applyExpiredConfig() {
+            try {
+                const res = await fetch('/api/pppoe/expired-config?t=' + Date.now());
+                const cfg = await res.json();
+                if (cfg.bg_image) document.body.style.backgroundImage = `url('${cfg.bg_image}')`;
+                else document.body.style.removeProperty('background-image');
+                const t = document.getElementById('exp-title');
+                const l1 = document.getElementById('exp-line1');
+                const l2 = document.getElementById('exp-line2');
+                if (t) t.textContent = cfg.title || t.textContent;
+                if (l1) l1.textContent = cfg.message_line1 || l1.textContent;
+                if (l2) l2.textContent = cfg.message_line2 || l2.textContent;
+                if (t && cfg.title_color) t.style.color = cfg.title_color;
+                if (l1 && cfg.line1_color) l1.style.color = cfg.line1_color;
+                if (l2 && cfg.line2_color) l2.style.color = cfg.line2_color;
+                const card = document.querySelector('.container');
+                if (card && cfg.card_color) card.style.background = cfg.card_color;
+                const f = document.getElementById('exp-footer');
+                if (f) {
+                    if (cfg.footer_color) f.style.color = cfg.footer_color;
+                    if (cfg.footer_link) {
+                        f.innerHTML = `<a href="${cfg.footer_link}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor;">${cfg.footer_text || 'NEOFI SYSTEMS'}</a>`;
+                    } else {
+                        f.textContent = cfg.footer_text || 'NEOFI SYSTEMS';
+                    }
+                }
+                const qrWrap = document.getElementById('qr-container');
+                const q1 = document.getElementById('qr1');
+                const q2 = document.getElementById('qr2');
+                let any = false;
+                if (cfg.qr1 && q1) { q1.src = cfg.qr1; q1.style.display = 'block'; any = true; }
+                if (cfg.qr2 && q2) { q2.src = cfg.qr2; q2.style.display = 'block'; any = true; }
+                if (qrWrap) qrWrap.style.display = any ? 'block' : 'none';
+            } catch (e) {}
+        }
+
         // Start
-        document.addEventListener('DOMContentLoaded', initChat);
+        document.addEventListener('DOMContentLoaded', () => { applyExpiredConfig(); initChat(); });
     </script>
 </body>
 </html>

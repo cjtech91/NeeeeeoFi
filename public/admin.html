@@ -20,7 +20,7 @@
 
 
         // Helper for display
-        function formatDuration(totalMinutes) {
+        function formatDurationMinutes(totalMinutes) {
             const d = Math.floor(totalMinutes / 1440);
             const h = Math.floor((totalMinutes % 1440) / 60);
             const m = totalMinutes % 60;
@@ -52,7 +52,7 @@
                     
                     tr.innerHTML = `
                         <td>₱${rate.amount}</td>
-                        <td>${formatDuration(rate.minutes)}</td>
+                        <td>${formatDurationMinutes(rate.minutes)}</td>
                         <td>${uploadMbps} / ${downloadMbps}</td>
                         <td>${rate.is_pausable ? '<span class="badge bg-success">Pausable</span>' : '<span class="badge bg-secondary">Continuous</span>'}</td>
                         <td>
@@ -248,6 +248,52 @@
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
+        function formatSpeedKbps(kbps) {
+            const v = Number(kbps) || 0;
+            if (v < 1000) return v + ' Kbps';
+            return (v / 1024).toFixed(2) + ' Mbps';
+        }
+        function setupTableSorting(tableId) {
+            const table = document.getElementById(tableId);
+            if (!table) return;
+            const thead = table.querySelector('thead');
+            if (!thead) return;
+            const headers = Array.from(thead.querySelectorAll('th'));
+            headers.forEach((th, idx) => {
+                const label = (th.innerText || '').trim().toLowerCase();
+                if (label.includes('action')) return;
+                th.style.cursor = 'pointer';
+                th.onclick = () => sortTableBy(tableId, idx);
+            });
+        }
+        function sortTableBy(tableId, colIdx) {
+            const table = document.getElementById(tableId);
+            if (!table) return;
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const dirKey = '_sort_dir_' + tableId + '_' + colIdx;
+            const currentDir = table[dirKey] || 'asc';
+            const nextDir = currentDir === 'asc' ? 'desc' : 'asc';
+            rows.sort((a, b) => {
+                const ta = (a.children[colIdx]?.innerText || '').trim();
+                const tb = (b.children[colIdx]?.innerText || '').trim();
+                const na = parseFloat(ta.replace(/[^0-9.:-]/g, ''));
+                const nb = parseFloat(tb.replace(/[^0-9.:-]/g, ''));
+                let cmp;
+                if (!isNaN(na) && !isNaN(nb)) cmp = na - nb;
+                else {
+                    const da = Date.parse(ta);
+                    const db = Date.parse(tb);
+                    if (!isNaN(da) && !isNaN(db)) cmp = da - db;
+                    else cmp = ta.localeCompare(tb, undefined, { numeric: true, sensitivity: 'base' });
+                }
+                return nextDir === 'asc' ? cmp : -cmp;
+            });
+            tbody.innerHTML = '';
+            rows.forEach(r => tbody.appendChild(r));
+            table[dirKey] = nextDir;
+        }
 
         function loadQoSUsers() {
             fetch('/api/admin/dashboard')
@@ -328,7 +374,7 @@
         }
 
         const qosDescriptions = {
-            'gaming': '<strong>Gaming / Low-Latency Focused</strong><br>AI-driven prioritization for competitive gaming. Minimizes jitter (<5ms) and protects against lag spikes using micro-burst protection. Ideal for gamers and streamers.',
+            'gaming': '<strong>Gaming / Low-Latency Focused</strong><br>AI-driven prioritization for competitive gaming. Minimizes jitter (<5ms) and protects against lag spikes. Prioritizes common game ports automatically (CODM, ML, Roblox, Valorant, Warzone, Wild Rift).',
             'family': '<strong>Family / Household Management</strong><br>Balances bandwidth across all users. Ensures fair sharing for video calls, streaming, and browsing. Includes priority ladders for parents vs kids.',
             'enterprise': '<strong>Enterprise / Business Critical</strong><br>Guaranteed performance for VoIP, Teams, and mission-critical apps. Uses strict slicing to ensure reliability even during heavy load.',
             'green': '<strong>Green / Sustainable Angle</strong><br>Optimizes network for energy efficiency. Delays non-critical background tasks during high-load/high-carbon periods while keeping real-time apps smooth.'
@@ -341,7 +387,13 @@
             if (mode === 'gaming') {
                 html += '<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border);">' +
                         '<button class="btn btn-danger" style="background:var(--danger); color:white; border:none;" onclick="triggerRageMode()">🔥 Activate Rage Mode (5m)</button>' +
-                        '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:5px;">Temporarily boosts all gaming traffic to absolute priority. Use when you experience lag spikes.</p>' +
+                        '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:5px;">Prioritized ports include:<br>' +
+                        'CODM: 10000-10019, 3013, 7085-7995, 8700-9030, 10010-10019, 17000-20100<br>' +
+                        'ML: 30000-30200, 5000-5200, 9992, 1025, 5500-5600<br>' +
+                        'Roblox: 49152, 3074, 500, 3074-3544, 4500<br>' +
+                        'Valorant: 8393-8400, 2099, 5222-5223, 27016-27024, 54000-54012, 7000-8000, 61000-61050<br>' +
+                        'Warzone: 5094, 8001-8045<br>' +
+                        'Wild Rift: 5100, 2080-2099, 1935, 3478-3480, 3544, 4500</p>' +
                         '</div>';
             } else if (mode === 'green') {
                  html += '<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:15px;">' +
@@ -1210,6 +1262,11 @@
                 };
                 sendBtn.addEventListener('mousedown', handleSendClick);
                 sendBtn.addEventListener('touchstart', handleSendClick, {passive: false});
+            }
+            
+            // Load PPPoE expired portal config on page load
+            if (typeof loadExpiredConfig === 'function') {
+                loadExpiredConfig();
             }
              
          });
@@ -3753,6 +3810,14 @@
                                         <th style="position: sticky; top: 0; background: var(--table-header-bg); z-index: 1;">
                                             <span style="display:inline-flex;align-items:center;gap:6px;">
                                                 <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2zm0 17a7 7 0 1 1 7-7a7 7 0 0 1-7 7zm-1-4h2v-2h-2zm0-6h2v4h-2z"/>
+                                                </svg>
+                                                <span>Speed</span>
+                                            </span>
+                                        </th>
+                                        <th style="position: sticky; top: 0; background: var(--table-header-bg); z-index: 1;">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path fill="currentColor" d="M3 5v14h18V5H3zm16 12H5V7h14v10zM7 9h5v2H7V9zm0 4h5v2H7v-2z"/>
                                                 </svg>
                                                 <span>IP Address</span>
@@ -3845,7 +3910,9 @@
                                     <input type="text" id="pppoe-server-ntp" class="login-input" placeholder="pool.ntp.org" style="margin: 2px 0; padding: 6px;">
                                 </div>
                             </div>
-                            <button class="btn btn-primary" onclick="savePppoeServerConfig()" style="margin-top:10px;">Save & Restart Server</button>
+                            <div style="display:flex; gap:10px; margin-top:10px;">
+                                <button class="btn btn-primary" onclick="savePppoeServerConfig()">Save & Restart Server</button>
+                            </div>
                         </div>
                     </div>
 
@@ -3875,7 +3942,7 @@
                         </div>
                         <div style="padding:0;">
                             <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-                                <table class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
+                                <table id="plans-table" class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
                                     <thead>
                                         <tr style="background-color: var(--table-header-bg); color: var(--text-main); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">
                                             <th style="padding: 12px 15px; position: sticky; top: 0; background: var(--table-header-bg); z-index: 10;">
@@ -3940,7 +4007,7 @@
                         </div>
                         <div style="padding:0;">
                             <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-                                <table class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
+                                <table id="pppoe-users-table" class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
                                     <thead>
                                         <tr style="background-color: var(--table-header-bg); color: var(--text-main); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">
                                             <th style="padding: 12px 15px; position: sticky; top: 0; background: var(--table-header-bg); z-index: 10;">
@@ -4016,7 +4083,7 @@
                         </div>
                         <div style="padding:0;">
                             <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-                                <table class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
+                                <table id="pppoe-status-table" class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
                                     <thead>
                                         <tr style="background-color: var(--table-header-bg); color: var(--text-main); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">
                                             <th style="padding: 12px 15px; position: sticky; top: 0; background: var(--table-header-bg); z-index: 10;">
@@ -4104,7 +4171,7 @@
                         </div>
                         <div style="padding:0;">
                             <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-                                <table class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
+                                <table id="pppoe-expired-table" class="sales-grid-table" style="width: 100%; border-collapse: collapse;">
                                     <thead>
                                         <tr style="background-color: var(--table-header-bg); color: var(--text-main); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">
                                             <th style="padding: 12px 15px; position: sticky; top: 0; background: var(--table-header-bg); z-index: 10;">
@@ -4402,7 +4469,7 @@
                     <!-- ACTIVE CODES Card -->
                     <div class="card" style="margin-top: 25px;">
                         <div class="card-header" id="active-codes-header">
-                            <div class="card-title" id="active-codes-header-title">ACTIVE CODES (SESSIONS) <span id="active-codes-title-counts" style="font-size:0.85rem; margin-left:8px; color:var(--text-muted)"></span></div>
+                            <div class="card-title" id="active-codes-header-title">ACTIVE CODES <span id="active-codes-title-counts" style="font-size:0.85rem; margin-left:8px; color:var(--text-muted)"></span></div>
                             <div id="active-codes-header-filter" style="display:flex; align-items:center; gap:10px;">
                                 <div style="display:flex; align-items:center; gap:5px;">
                                     <span style="font-size:0.8rem; color:var(--text-muted);">Show:</span>
@@ -4439,7 +4506,7 @@
                                                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path fill="currentColor" d="M3 5v14h18V5H3zm16 12H5V7h14v10zM7 9h5v2H7V9zm0 4h3v2H7v-2z"/>
                                                 </svg>
-                                                <span>MAC Address <span class="sort-indicator"></span></span>
+                                                <span>MAC <span class="sort-indicator"></span></span>
                                             </span>
                                         </th>
                                         <th id="th-sort-ip" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('ip')">
@@ -4447,7 +4514,7 @@
                                                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path fill="currentColor" d="M3 5v14h18V5H3zm16 12H5V7h14v10zM7 9h3v2H7V9zm0 4h5v2H7v-2z"/>
                                                 </svg>
-                                                <span>IP Address <span class="sort-indicator"></span></span>
+                                                <span>IP <span class="sort-indicator"></span></span>
                                             </span>
                                         </th>
                                         <th id="th-sort-interface" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('interface')">
@@ -4474,12 +4541,20 @@
                                                 <span>Total Coins <span class="sort-indicator"></span></span>
                                             </span>
                                         </th>
+                                        <th id="th-sort-speedlimit" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('speedlimit')">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M12 3a9 9 0 1 0 9 9a9 9 0 0 0-9-9zm0 2a7 7 0 1 1-7 7a7 7 0 0 1 7-7zm-1 3h2v4h3v2h-5z"/>
+                                                </svg>
+                                                <span>Speed Limit <span class="sort-indicator"></span></span>
+                                            </span>
+                                        </th>
                                         <th id="th-sort-traffic" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('traffic')">
                                             <span style="display:inline-flex;align-items:center;gap:6px;">
                                                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path fill="currentColor" d="M4 18h2v-5H4v5zm4 0h2V9H8v9zm4 0h2V5h-2v13zm4 0h2v-8h-2v8z"/>
                                                 </svg>
-                                                <span>Traffic (DL/UP) <span class="sort-indicator"></span></span>
+                                                <span>Traffic <span class="sort-indicator"></span></span>
                                             </span>
                                         </th>
                                         <th id="th-sort-idle" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('idle')">
@@ -4487,7 +4562,7 @@
                                                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path fill="currentColor" d="M12 1a9 9 0 1 0 9 9a9 9 0 0 0-9-9zm0 16a7 7 0 1 1 7-7a7 7 0 0 1-7 7zm-1-11h2v5h-2zm0 6h2v2h-2z"/>
                                                 </svg>
-                                                <span>Idle Countdown <span class="sort-indicator"></span></span>
+                                                <span>Idle <span class="sort-indicator"></span></span>
                                             </span>
                                         </th>
                                         <th id="th-sort-status" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('status')">
@@ -5616,9 +5691,9 @@
 
                 <!-- VIEW: Portal Logs -->
                 <div id="view-portal" class="view-section" style="display:none;">
-                    <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
+                    <div style="display: flex; flex-direction: column; gap: 20px; align-items: stretch;">
                         <!-- Portal Configuration Card -->
-                        <div class="card" style="flex: 1; min-width: 250px; max-width: 600px;">
+                        <div class="card" style="flex: 1; min-width: 250px;">
                             <div class="card-header">
                                 <div class="card-title">Portal Configuration</div>
                             </div>
@@ -5731,8 +5806,8 @@
                                         </div>
                                     </div>
                                     <div style="grid-column: 1 / -1;" id="banner-upload-section">
-                                        <label for="portal-banner-upload" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Banner Image (PNG/JPG)</label>
-                                        <input type="file" id="portal-banner-upload" accept="image/png, image/jpeg" style="margin:0 0 10px 0;">
+                                        <label for="portal-banner-upload" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">Banner Media (Image/Video)</label>
+                                        <input type="file" id="portal-banner-upload" accept="image/png, image/jpeg, image/gif, video/mp4, video/webm, video/ogg, video/x-msvideo" style="margin:0 0 10px 0;">
                                         <button type="button" class="btn btn-sm btn-primary" onclick="uploadPortalBanner()">Upload Banner</button>
                                     </div>
                                 </div>
@@ -5784,6 +5859,134 @@
                     <!-- Portal Preview Card -->
                     <div class="card" style="flex: 1; min-width: 250px;">
                         <div class="card-header">
+                            <div class="card-title">Insert Coin Customization</div>
+                        </div>
+                        <div style="padding: 16px; display: grid; grid-template-columns: 1fr; gap: 16px;">
+                            <div>
+                                <div style="font-weight:600; margin-bottom:6px;">Insert Coin Background Audio</div>
+                                <audio id="insert-coin-audio-preview" controls style="display:none; width:100%;"></audio>
+                                <input type="file" id="insert-coin-audio-input" accept=".mp3,.wav,audio/*" style="margin-top:8px;">
+                                <button class="btn btn-sm btn-primary" style="margin-top:8px;" onclick="uploadInsertCoinAudio()">Upload Audio</button>
+                                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">Supported: MP3, WAV.</div>
+                                <div style="margin-top:12px;">
+                                    <label style="display:block; font-weight:600; margin-bottom:6px;">Select Active Audio</label>
+                                    <div style="display:flex; gap:8px; align-items:center;">
+                                        <select id="insert-coin-audio-select" class="login-input" style="flex:1; margin:0;"></select>
+                                        <button class="btn btn-sm btn-secondary" onclick="applySelectedInsertCoinAudio()">Use</button>
+                                        <button class="btn btn-sm" onclick="loadInsertCoinAudioFiles()">Refresh</button>
+                                        <button class="btn btn-sm btn-danger" onclick="deleteSelectedInsertCoinAudio()">Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PPPoE Expired Portal Editor -->
+                    <style>
+                        input[type="color"].rounded-color{
+                            -webkit-appearance: none;
+                            appearance: none;
+                            border: 1px solid var(--border);
+                            border-radius: 8px;
+                            padding: 0;
+                            background: var(--input-bg);
+                            overflow: hidden;
+                            width: 80px;
+                            height: 36px;
+                            cursor: pointer;
+                        }
+                        input[type="color"].rounded-color::-webkit-color-swatch-wrapper{ padding:0; }
+                        input[type="color"].rounded-color::-webkit-color-swatch{ border:none; border-radius:8px; }
+                    </style>
+                    <div class="card" style="flex: 1; min-width: 250px;">
+                        <div class="card-header">
+                            <div class="card-title">PPPoE Expired Portal</div>
+                        </div>
+                        <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                            <div style="grid-column: 1 / -1;">
+                                <label style="display:block; font-weight:600; margin-bottom:6px;">Title</label>
+                                <input id="exp-ttl" class="login-input" placeholder="Account Expired" style="margin:0;">
+                            </div>
+                            <div style="grid-column: 1 / -1;">
+                                <label style="display:block; font-weight:600; margin-bottom:6px;">Message Line 1</label>
+                                <input id="exp-l1" class="login-input" placeholder="Your internet access has been suspended..." style="margin:0;">
+                            </div>
+                            <div style="grid-column: 1 / -1;">
+                                <label style="display:block; font-weight:600; margin-bottom:6px;">Message Line 2</label>
+                                <input id="exp-l2" class="login-input" placeholder="Please contact admin..." style="margin:0;">
+                            </div>
+                            <div>
+                                <label style="display:block; font-weight:600; margin-bottom:6px;">Footer Text</label>
+                                <input id="exp-ft" class="login-input" placeholder="NEOFI SYSTEMS" style="margin:0;">
+                            </div>
+                            <div>
+                                <label style="display:block; font-weight:600; margin-bottom:6px;">Footer Link (URL)</label>
+                                <input id="exp-fl" class="login-input" placeholder="https://myisp.com" style="margin:0;">
+                            </div>
+                            <div style="grid-column: 1 / -1; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 10px;">
+                                <div style="font-weight:600; margin-bottom:6px;">Colors</div>
+                                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                                    <div>
+                                        <label style="display:block; font-weight:600; margin-bottom:4px;">Title Color</label>
+                                        <input id="exp-ttl-color" type="color" value="#2d3436" class="rounded-color" style="height:36px; width:80px; padding:0;">
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-weight:600; margin-bottom:4px;">Line 1 Color</label>
+                                        <input id="exp-l1-color" type="color" value="#636e72" class="rounded-color" style="height:36px; width:80px; padding:0;">
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-weight:600; margin-bottom:4px;">Line 2 Color</label>
+                                        <input id="exp-l2-color" type="color" value="#636e72" class="rounded-color" style="height:36px; width:80px; padding:0;">
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-weight:600; margin-bottom:4px;">Footer Color</label>
+                                        <input id="exp-ft-color" type="color" value="#636e72" class="rounded-color" style="height:36px; width:80px; padding:0;">
+                                    </div>
+                                    <div>
+                                        <label style="display:block; font-weight:600; margin-bottom:4px;">Card Background Color</label>
+                                        <input id="exp-card-color" type="color" value="#ffffff" class="rounded-color" style="height:36px; width:80px; padding:0;">
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <label style="display:block; font-weight:600; margin-bottom:6px;">Background Image</label>
+                                <img id="exp-bg-prev" alt="Preview" style="display:none; width:100%; max-width:240px; height:auto; border:1px solid var(--border); border-radius:6px; background:var(--card-bg); margin-bottom:6px;">
+                                <input type="file" id="exp-bg" accept="image/*">
+                                <div style="display:flex; gap:8px; margin-top:6px;">
+                                    <button class="btn btn-sm btn-primary" onclick="uploadExpiredAsset('bg')">Upload BG</button>
+                                    <button class="btn btn-sm btn-danger" onclick="clearExpiredAsset('bg')">Remove BG</button>
+                                </div>
+                            </div>
+                            <div style="grid-column: 1 / -1; display:flex; gap:12px; flex-wrap:wrap;">
+                                <div style="flex:1; min-width:240px;">
+                                    <label style="display:block; font-weight:600; margin-bottom:6px;">QR Code 1 (e.g., GCash)</label>
+                                    <img id="exp-qr1-prev" alt="QR1" style="display:none; width:140px; height:140px; object-fit:contain; border:1px solid var(--border); border-radius:6px; background:#fff; padding:8px; margin-bottom:6px;">
+                                    <input type="file" id="exp-qr1" accept="image/*">
+                                    <div style="display:flex; gap:8px; margin-top:6px;">
+                                        <button class="btn btn-sm btn-primary" onclick="uploadExpiredAsset('qr1')">Upload QR1</button>
+                                        <button class="btn btn-sm btn-danger" onclick="clearExpiredAsset('qr1')">Remove QR1</button>
+                                    </div>
+                                </div>
+                                <div style="flex:1; min-width:240px;">
+                                    <label style="display:block; font-weight:600; margin-bottom:6px;">QR Code 2 (e.g., Maya)</label>
+                                    <img id="exp-qr2-prev" alt="QR2" style="display:none; width:140px; height:140px; object-fit:contain; border:1px solid var(--border); border-radius:6px; background:#fff; padding:8px; margin-bottom:6px;">
+                                    <input type="file" id="exp-qr2" accept="image/*">
+                                    <div style="display:flex; gap:8px; margin-top:6px;">
+                                        <button class="btn btn-sm btn-primary" onclick="uploadExpiredAsset('qr2')">Upload QR2</button>
+                                        <button class="btn btn-sm btn-danger" onclick="clearExpiredAsset('qr2')">Remove QR2</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="grid-column: 1 / -1; display:flex; gap:10px;">
+                                <button class="btn btn-primary" onclick="saveExpiredConfig()">Save Expired Portal</button>
+                                <a class="btn btn-secondary" href="/expired.html" target="_blank">Open expired.html</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Portal Preview Card -->
+                    <div class="card" style="flex: 1; min-width: 250px;">
+                        <div class="card-header">
                             <div class="card-title">Portal Overview</div>
                             <div style="display: flex; gap: 10px;">
                                 <button class="btn btn-sm btn-secondary" onclick="setPreviewMode('mobile')">📱 Mobile</button>
@@ -5791,7 +5994,7 @@
                             </div>
                         </div>
                         <div style="background: var(--bg-body); padding: 10px; border-radius: 8px; display: flex; justify-content: center; min-height: 600px; overflow: hidden;">
-                            <iframe id="portal-preview-frame" src="portal.html" style="width: 100%; max-width: 375px; height: 667px; border: 4px solid var(--text-main); border-radius: 12px; background: var(--card-bg); transition: all 0.3s ease;"></iframe>
+                            <iframe id="portal-preview-frame" src="/portal.html" style="width: 100%; max-width: 375px; height: 667px; border: 4px solid var(--text-main); border-radius: 12px; background: var(--card-bg); transition: all 0.3s ease;"></iframe>
                         </div>
                     </div>
                 </div>
@@ -7886,7 +8089,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
              handleLogSearchInput(document.getElementById('log-search-input'));
         }
 
-        function formatDuration(seconds) {
+        function formatDurationSeconds(seconds) {
             if (!seconds || seconds <= 0) return '0s';
             const d = Math.floor(seconds / 86400);
             const h = Math.floor((seconds % 86400) / 3600);
@@ -9474,8 +9677,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         function updatePortalPreview(themeName) {
             const frame = document.getElementById('portal-preview-frame');
             if (frame) {
-                if (themeName && !frame.src.endsWith(themeName)) {
-                    frame.src = themeName;
+                if (themeName) {
+                    const normalized = themeName.startsWith('/') ? themeName : `/${themeName}`;
+                    if (!frame.src.endsWith(normalized)) {
+                        frame.src = normalized;
+                    }
                 }
                 
                 const config = getCurrentPortalConfig();
@@ -9487,6 +9693,201 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     }, '*');
                 }, 100);
             }
+        }
+
+        async function uploadInsertCoinAudio() {
+            const input = document.getElementById('insert-coin-audio-input');
+            if (!input || !input.files || input.files.length === 0) { alert('Select an audio file first.'); return; }
+            const file = input.files[0];
+            if (!/\.(mp3|wav)$/i.test(file.name)) { alert('Please select MP3 or WAV.'); return; }
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const base64 = reader.result.split(',')[1];
+                    const res = await fetch('/api/admin/portal/assets', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({ type: 'insert_coin_bg_audio', filename: file.name, fileData: base64 })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.success) throw new Error(data.error || 'Upload failed');
+                    const preview = document.getElementById('insert-coin-audio-preview');
+                    if (preview) {
+                        preview.src = data.url + `?v=${Date.now()}`;
+                        preview.style.display = 'block';
+                        preview.load();
+                    }
+                    await loadInsertCoinAudioFiles(); // refresh list and point to new active
+                    alert('Background audio updated.');
+                } catch (e) { alert('Upload failed: ' + e.message); }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function loadInsertCoinAudioFiles() {
+            try {
+                const res = await fetch('/api/admin/portal/audio-files', { credentials: 'include' });
+                const data = await res.json();
+                const sel = document.getElementById('insert-coin-audio-select');
+                if (!sel) return;
+                sel.innerHTML = '';
+                const files = (data && data.files) || [];
+                if (files.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = 'No audio uploaded';
+                    sel.appendChild(opt);
+                    return;
+                }
+                files.forEach(f => {
+                    const opt = document.createElement('option');
+                    opt.value = f.name;
+                    opt.textContent = f.name;
+                    if (data.active && data.active.endsWith('/' + f.name)) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+            } catch (e) { console.error('Load audio files failed', e); }
+        }
+
+        async function applySelectedInsertCoinAudio() {
+            const sel = document.getElementById('insert-coin-audio-select');
+            if (!sel || !sel.value) { alert('Select a file first.'); return; }
+            try {
+                const res = await fetch('/api/admin/portal/audio/select', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({ filename: sel.value })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Failed to set active audio');
+                const preview = document.getElementById('insert-coin-audio-preview');
+                if (preview) {
+                    preview.src = data.url + `?v=${Date.now()}`;
+                    preview.style.display = 'block';
+                    preview.load();
+                }
+                alert('Active audio set.');
+            } catch (e) { alert('Failed to set active audio: ' + e.message); }
+        }
+
+        async function deleteSelectedInsertCoinAudio() {
+            const sel = document.getElementById('insert-coin-audio-select');
+            if (!sel || !sel.value) { alert('Select a file first.'); return; }
+            if (sel.value.toLowerCase() === 'beed.mp3') { alert('Cannot delete default audio'); return; }
+            if (!confirm(`Delete ${sel.value}?`)) return;
+            try {
+                // Stop preview to release file handle on Windows
+                try {
+                    const preview = document.getElementById('insert-coin-audio-preview');
+                    if (preview) {
+                        preview.pause();
+                        preview.removeAttribute('src');
+                        preview.load();
+                    }
+                } catch (e) {}
+                const res = await fetch('/api/admin/portal/audio/' + encodeURIComponent(sel.value), { method: 'DELETE', credentials: 'include' });
+                let data = {};
+                try { data = await res.json(); } catch (e) {}
+                if (!res.ok || (data && data.success === false)) {
+                    throw new Error((data && data.error) || 'Delete failed');
+                }
+                await loadInsertCoinAudioFiles();
+                alert('Deleted.');
+            } catch (e) { alert('Failed to delete: ' + e.message); }
+        }
+
+        // ---- PPPoE Expired Portal Editor ----
+        async function loadExpiredConfig() {
+            try {
+                const res = await fetch('/api/pppoe/expired-config?t=' + Date.now());
+                const cfg = await res.json();
+                const byId = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+                byId('exp-ttl', cfg.title);
+                byId('exp-l1', cfg.message_line1);
+                byId('exp-l2', cfg.message_line2);
+                byId('exp-ft', cfg.footer_text);
+                byId('exp-fl', cfg.footer_link);
+                byId('exp-ttl-color', cfg.title_color || '#2d3436');
+                byId('exp-l1-color', cfg.line1_color || '#636e72');
+                byId('exp-l2-color', cfg.line2_color || '#636e72');
+                byId('exp-ft-color', cfg.footer_color || '#636e72');
+                byId('exp-card-color', cfg.card_color || '#ffffff');
+                const setImg = (id, url) => { const el = document.getElementById(id); if (el && url) { el.src = url; el.style.display = 'block'; } };
+                setImg('exp-bg-prev', cfg.bg_image);
+                setImg('exp-qr1-prev', cfg.qr1);
+                setImg('exp-qr2-prev', cfg.qr2);
+            } catch (e) { console.error('Failed to load expired config', e); }
+        }
+        async function saveExpiredConfig() {
+            try {
+                const body = {
+                    title: document.getElementById('exp-ttl').value,
+                    message_line1: document.getElementById('exp-l1').value,
+                    message_line2: document.getElementById('exp-l2').value,
+                    footer_text: document.getElementById('exp-ft').value,
+                    footer_link: document.getElementById('exp-fl').value,
+                    title_color: document.getElementById('exp-ttl-color').value,
+                    line1_color: document.getElementById('exp-l1-color').value,
+                    line2_color: document.getElementById('exp-l2-color').value,
+                    footer_color: document.getElementById('exp-ft-color').value,
+                    card_color: document.getElementById('exp-card-color').value
+                };
+                const res = await fetch('/api/admin/pppoe/expired-config', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) throw new Error('Save failed');
+                alert('Expired portal saved.');
+            } catch (e) { alert('Failed to save: ' + e.message); }
+        }
+        async function uploadExpiredAsset(type) {
+            const map = { bg: 'exp-bg', qr1: 'exp-qr1', qr2: 'exp-qr2' };
+            const input = document.getElementById(map[type]);
+            if (!input || !input.files || input.files.length === 0) return alert('Select a file first.');
+            const file = input.files[0];
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const base64 = reader.result.split(',')[1];
+                    const res = await fetch('/api/admin/pppoe/expired-assets', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ type, filename: file.name, fileData: base64 })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.success) throw new Error(data.error || 'Upload failed');
+                    if (type === 'bg') { const p = document.getElementById('exp-bg-prev'); if (p) { p.src = data.url; p.style.display = 'block'; } }
+                    if (type === 'qr1') { const p = document.getElementById('exp-qr1-prev'); if (p) { p.src = data.url; p.style.display = 'block'; } }
+                    if (type === 'qr2') { const p = document.getElementById('exp-qr2-prev'); if (p) { p.src = data.url; p.style.display = 'block'; } }
+                    alert('Uploaded.');
+                } catch (e) { alert('Upload failed: ' + e.message); }
+            };
+            reader.readAsDataURL(file);
+        }
+        async function clearExpiredAsset(type) {
+            if (!confirm('Remove this asset?')) return;
+            try {
+                let res = await fetch('/api/admin/pppoe/expired-assets/' + encodeURIComponent(type), { method: 'DELETE', credentials: 'include' });
+                if (!res.ok) {
+                    res = await fetch('/api/admin/pppoe/expired-assets/remove', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ type })
+                    });
+                }
+                const data = await res.json().catch(()=>({}));
+                if (!res.ok || (data && data.success === false)) throw new Error((data && data.error) || 'Remove failed');
+                if (type === 'bg') { const p = document.getElementById('exp-bg-prev'); if (p) { p.src = ''; p.style.display = 'none'; } }
+                if (type === 'qr1') { const p = document.getElementById('exp-qr1-prev'); if (p) { p.src = ''; p.style.display = 'none'; } }
+                if (type === 'qr2') { const p = document.getElementById('exp-qr2-prev'); if (p) { p.src = ''; p.style.display = 'none'; } }
+                alert('Removed.');
+            } catch (e) { alert('Failed to remove: ' + e.message); }
         }
 
         async function loadPortalConfig() {
@@ -9567,6 +9968,17 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 document.getElementById('portal-status-container-size').value = config.status_icon_container_size || 38;
                 document.getElementById('portal-banner-height').value = config.banner_height || 190;
                 
+                // Insert Coin assets preview
+                try {
+                    const audioPrev = document.getElementById('insert-coin-audio-preview');
+                    if (config.insert_coin_bg_audio && audioPrev) {
+                        audioPrev.src = config.insert_coin_bg_audio;
+                        audioPrev.style.display = 'block';
+                        audioPrev.load();
+                    }
+                    await loadInsertCoinAudioFiles();
+                } catch(e) {}
+
                 // Banner Settings
                 // Default to true if undefined
                 document.getElementById('portal-use-default-banner').checked = config.use_default_banner !== false;
@@ -9832,21 +10244,21 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         async function uploadPortalBanner() {
             const fileInput = document.getElementById('portal-banner-upload');
             const file = fileInput.files[0];
-            if (!file) return alert('Please select a banner image');
+            if (!file) return alert('Please select a banner image or video');
             
-            // Limit file size to 2MB
-            if (file.size > 2 * 1024 * 1024) return alert('File size must be less than 2MB');
+            // Limit file size to 25MB for videos
+            if (file.size > 25 * 1024 * 1024) return alert('File size must be less than 25MB');
 
             const reader = new FileReader();
             reader.onload = async (e) => {
-                const base64Image = e.target.result;
+                const base64Data = e.target.result;
                 try {
                     const res = await fetch('/api/admin/upload-banner', {
                         method: 'POST',
                         credentials: 'include',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
-                            image: base64Image,
+                            image: base64Data,
                             type: file.type
                         })
                     });
@@ -10404,6 +10816,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
                 interfaces.forEach(iface => {
                     if (iface.name === 'lo') return; // Hide loopback
+                    // Hide PPP interfaces from Physical/Main list
+                    if (iface.name && iface.name.toLowerCase().startsWith('ppp')) return;
                     
                     const isVlan = iface.name.includes('.') || iface.name.startsWith('vlan');
                     
@@ -10417,9 +10831,19 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
                     // Speed Info
                     let speedInfo = '<span style="color:var(--text-muted);font-size:0.85rem;">N/A</span>';
-                    if (iface.speed && iface.speed !== 'N/A') {
-                        speedInfo = `<div style="font-weight:600;">${iface.speed}</div>`;
-                        if (iface.duplex) speedInfo += `<div style="font-size:0.75rem;color:var(--text-muted);">${iface.duplex}</div>`;
+                    if (!isVlan) {
+                        if (iface.speed && iface.speed !== 'N/A') {
+                            speedInfo = `<div style="font-weight:600;">${iface.speed}</div>`;
+                            if (iface.duplex) speedInfo += `<div style="font-size:0.75rem;color:var(--text-muted);">${iface.duplex}</div>`;
+                        }
+                    } else {
+                        // For VLANs, show parent physical interface speed where possible
+                        const parentName = iface.name.split('.')[0];
+                        const parent = interfaces.find(x => x.name === parentName);
+                        if (parent && parent.speed && parent.speed !== 'N/A') {
+                            speedInfo = `<div style="font-weight:600;">${parent.speed}</div>`;
+                            if (parent.duplex) speedInfo += `<div style="font-size:0.75rem;color:var(--text-muted);">${parent.duplex}</div>`;
+                        }
                     }
 
                     const tr = document.createElement('tr');
@@ -10429,6 +10853,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         tr.innerHTML = `
                             <td style="font-weight:600; color: var(--text-main);">${iface.name}</td>
                             <td>${statusBadge}</td>
+                            <td>${speedInfo}</td>
                             <td>${iface.ip}</td>
                             <td style="font-family:monospace;">${iface.mac}</td>
                             <td>${iface.netmask}</td>
@@ -10457,7 +10882,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 });
 
                 if (!hasPhysical && tbodyPhysical) tbodyPhysical.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:10px; color:var(--text-muted);">No physical interfaces found</td></tr>';
-                if (!hasVlan && tbodyVlan) tbodyVlan.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:10px; color:var(--text-muted);">No VLAN interfaces found</td></tr>';
+                if (!hasVlan && tbodyVlan) tbodyVlan.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:10px; color:var(--text-muted);">No VLAN interfaces found</td></tr>';
 
             } catch (e) {
                 console.error("Interfaces load error", e);
@@ -10466,6 +10891,12 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
         // Init
         checkAuth();
+        document.addEventListener('DOMContentLoaded', () => {
+            setupTableSorting('plans-table');
+            setupTableSorting('pppoe-users-table');
+            setupTableSorting('pppoe-status-table');
+            setupTableSorting('pppoe-expired-table');
+        });
         loadCompanySettings();
 
         // --- Pull to Refresh Logic (Touch & Mouse) ---
@@ -10866,6 +11297,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 
                 interfaces.forEach(iface => {
                     const name = iface.name;
+                    // Hide PPP mapping
+                    if (name && name.toLowerCase().startsWith('ppp')) return;
                     if (name === 'end0') {
                         visualInterfaceMap[name] = 'eth0';
                     } else if (name.startsWith('enx')) {
@@ -11669,7 +12102,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             } catch (e) {
                 console.error("Error loading active codes", e);
                 const tbody = document.querySelector('#active-codes-table tbody');
-                if(tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--danger);">Error loading data: ${e.message}</td></tr>`;
+                if(tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:20px; color:var(--danger);">Error loading data: ${e.message}</td></tr>`;
             }
         }
 
@@ -11739,6 +12172,10 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                              valA = num(a.total_coins);
                              valB = num(b.total_coins);
                              break;
+                         case 'speedlimit':
+                             valA = num(a.download_speed) + num(a.upload_speed);
+                             valB = num(b.download_speed) + num(b.upload_speed);
+                             break;
                          case 'traffic':
                              valA = num(a.total_data_down) + num(a.total_data_up);
                              valB = num(b.total_data_down) + num(b.total_data_up);
@@ -11781,7 +12218,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
              updateSortIndicators();
 
              if (filteredUsers.length === 0) {
-                 tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px;">No active codes found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:20px;">No active codes found</td></tr>';
                  return;
              }
 
@@ -11814,22 +12251,41 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                  const dlSpeed = u.current_speed ? toMbps(u.current_speed.dl_speed) : '0.00';
                  const ulSpeed = u.current_speed ? toMbps(u.current_speed.ul_speed) : '0.00';
 
-                 const totalCoins = Number(u.total_coins || 0);
+               const totalCoins = Number(u.total_coins || 0);
+               const limitDlMbps = Math.floor((Number(u.download_speed) || 0) / 1024);
+               const limitUlMbps = Math.floor((Number(u.upload_speed) || 0) / 1024);
+                const dlSpeedIntM = Math.floor(((u.current_speed && u.current_speed.dl_speed) ? u.current_speed.dl_speed : 0) * 8 / 1000000);
+                const ulSpeedIntM = Math.floor(((u.current_speed && u.current_speed.ul_speed) ? u.current_speed.ul_speed : 0) * 8 / 1000000);
+                const dlTotalCompact = (dl || '').replace(/\s/g, '');
+                const ulTotalCompact = (ul || '').replace(/\s/g, '');
+                const hasLimit = (limitDlMbps > 0) || (limitUlMbps > 0);
+                const dlRatio = limitDlMbps > 0 ? (dlSpeedIntM / limitDlMbps) : 0;
+                const ulRatio = limitUlMbps > 0 ? (ulSpeedIntM / limitUlMbps) : 0;
+                const ratioMax = Math.max(dlRatio, ulRatio);
+                let codeColor = null;
+                if (hasLimit) {
+                    if (ratioMax >= 1) codeColor = 'var(--status-expired)';      // Red at 100%
+                    else if (ratioMax >= 0.7) codeColor = 'var(--warning)';      // Orange at 70%
+                }
+                const codeHtml = u.last_voucher_code 
+                    ? `<span style="font-weight:bold; color:${codeColor || 'var(--primary)'};">${u.last_voucher_code}</span>`
+                    : `<span style="font-weight:bold; color:${codeColor || 'inherit'};">${u.user_code || u.session_code || '-'}</span>`;
 
                  tr.innerHTML = `
-                     <td style="padding:10px; text-align:center;">
-                         ${u.last_voucher_code ? `<span style="font-weight:bold; color:var(--primary);">${u.last_voucher_code}</span>` : (u.user_code || u.session_code || '-')}
-                     </td>
+                    <td style="padding:10px; text-align:center;">${codeHtml}</td>
                      <td style="padding:10px; text-align:center;">${u.mac_address}</td>
                      <td style="padding:10px; text-align:center;">${(u.ip_address || '-').replace('::ffff:', '')}</td>
                      <td style="padding:10px; text-align:center;">${iface}</td>
                      <td style="padding:10px; text-align:center;">${timeString}</td>
-                     <td style="padding:10px; text-align:center;">₱${totalCoins.toFixed(2)}</td>
+                    <td style="padding:10px; text-align:center;">₱${totalCoins.toFixed(2)}</td>
+                   <td style="padding:10px; text-align:center;">
+                       <div style="font-size:0.85rem; white-space:nowrap;">
+                           ↓${limitDlMbps}M/↑${limitUlMbps}M
+                       </div>
+                   </td>
                      <td style="padding:10px; text-align:center;">
                          <div style="font-size:0.85rem; white-space:nowrap;">
-                             <span style="color: var(--status-active);">&darr;</span> ${dl} <span style="font-weight:bold; color:var(--status-active);">(${dlSpeed} Mbps)</span>
-                             &nbsp;&nbsp;
-                             <span style="color: var(--info);">&uarr;</span> ${ul} <span style="font-weight:bold; color:var(--info);">(${ulSpeed} Mbps)</span>
+                             ↓ ${dlTotalCompact} (${dlSpeedIntM}M)&nbsp;&nbsp;&nbsp;&nbsp;↑ ${ulTotalCompact} (${ulSpeedIntM}M)
                          </div>
                      </td>
                      <td style="padding:10px; text-align:center;" class="idle-countdown-cell" 
@@ -13192,10 +13648,25 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 // Fetch interfaces first
                 const ifRes = await fetch('/api/admin/network-interfaces');
                 const interfaces = await ifRes.json();
+                // Fetch DHCP servers to filter out VLANs already used by DHCP
+                let usedDhcpIfaces = new Set();
+                try {
+                    const dhcpRes = await fetch('/api/admin/network/dhcp');
+                    const dhcpCfg = await dhcpRes.json();
+                    if (dhcpCfg && dhcpCfg.servers && Array.isArray(dhcpCfg.servers)) {
+                        dhcpCfg.servers.forEach(s => { if (s && s.interface) usedDhcpIfaces.add(s.interface); });
+                    }
+                } catch (e) {}
                 const ifSelect = document.getElementById('pppoe-server-iface');
                 ifSelect.innerHTML = '<option value="br0">br0 (Default)</option>';
                 interfaces.forEach(iface => {
-                    if (iface.name !== 'lo' && iface.name !== 'br0') {
+                    if (iface.name === 'lo' || iface.name === 'br0') return;
+                    // Hide PPP interfaces
+                    if (iface.name && iface.name.toLowerCase().startsWith('ppp')) return;
+                    // Hide VLAN interfaces already used by DHCP server
+                    const isVlan = iface.name && (iface.name.includes('.') || iface.name.startsWith('vlan'));
+                    if (isVlan && usedDhcpIfaces.has(iface.name)) return;
+                    {
                         const opt = document.createElement('option');
                         opt.value = iface.name;
                         opt.textContent = `${iface.name} (${iface.ip || 'No IP'})`;
@@ -13275,6 +13746,22 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 }
             } catch (e) {
                 alert('Error saving configuration');
+            }
+        }
+
+        async function applyRedirectRulesNow() {
+            try {
+                const res = await fetch('/api/admin/pppoe/expire/check-now', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({})
+                });
+                const data = await res.json().catch(()=>({}));
+                if (!res.ok || data.success === false) throw new Error(data.error || 'Failed');
+                alert('Redirect rules applied. Expired users should be redirected immediately.');
+            } catch (e) {
+                alert('Failed to apply redirect rules: ' + e.message);
             }
         }
 
@@ -13404,6 +13891,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
         // --- User Management ---
         let pppoeRefreshInterval = null;
+        // Track previous byte counters to compute per-user speeds client-side
+        const pppoePrevStats = {};
 
         function startPppoeStatsRefresh() {
             if (pppoeRefreshInterval) clearInterval(pppoeRefreshInterval);
@@ -13464,7 +13953,10 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 const statusVisibleIds = new Set();
                 const expiredVisibleIds = new Set();
 
+                const nowTs = Date.now();
+                const seenIds = new Set();
                 users.forEach(u => {
+                    seenIds.add(u.id);
                     // 1. Populate Management List (Only on full load)
                     if (allContainer && !isRefresh) {
                         allContainer.appendChild(createManagementRow(u));
@@ -13495,29 +13987,53 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 ? '<span class="badge bg-danger">Expired</span>' 
                                 : (isOnline ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Offline</span>');
 
-                            const upLimit = u.rate_limit_up ? (u.rate_limit_up / 1024).toFixed(1) + ' M' : 'Unlim';
-                            const downLimit = u.rate_limit_down ? (u.rate_limit_down / 1024).toFixed(1) + ' M' : 'Unlim';
+                            const upLimit = u.rate_limit_up ? Math.round(u.rate_limit_up / 1024) + ' M' : 'Unlim';
+                            const downLimit = u.rate_limit_down ? Math.round(u.rate_limit_down / 1024) + ' M' : 'Unlim';
                             
                             // Live stats
                             const uptime = u.uptime || 'N/A';
                             const currentIp = u.current_ip || 'N/A';
                             const mac = u.mac_address || 'N/A';
-                            const rx = u.rx ? formatBytes(u.rx) : '0 B';
-                            const tx = u.tx ? formatBytes(u.tx) : '0 B';
-                            const currentUp = u.current_up ? (u.current_up/1024).toFixed(1) + ' M' : '0.0 M';
-                            const currentDown = u.current_down ? (u.current_down/1024).toFixed(1) + ' M' : '0.0 M';
+                            const rxTotal = u.rx ? formatBytes(u.rx) : '0 B';
+                            const txTotal = u.tx ? formatBytes(u.tx) : '0 B';
+                            // Compute client-side speeds from byte counters as fallback
+                            let calcDown = 0, calcUp = 0;
+                            const prev = pppoePrevStats[u.id];
+                            if (prev && prev.ts && prev.rx != null && prev.tx != null) {
+                                const dt = (nowTs - prev.ts) / 1000;
+                                if (dt > 0.5) {
+                                    const rxDiff = Math.max(0, (u.rx || 0) - prev.rx);
+                                    const txDiff = Math.max(0, (u.tx || 0) - prev.tx);
+                                    calcDown = Math.round((rxDiff * 8) / (dt * 1000)); // Kbps
+                                    calcUp = Math.round((txDiff * 8) / (dt * 1000));   // Kbps
+                                }
+                            }
+                            // Store current for next tick
+                            pppoePrevStats[u.id] = { rx: u.rx || 0, tx: u.tx || 0, ts: nowTs };
+                            const rxSpeed = formatSpeedKbps(calcDown || u.current_down || 0);
+                            const txSpeed = formatSpeedKbps(calcUp || u.current_up || 0);
+                            // Utilization-based username color (max of up/down)
+                            const limitUpKbps = Number(u.rate_limit_up) || 0;
+                            const limitDownKbps = Number(u.rate_limit_down) || 0;
+                            const utilUp = limitUpKbps > 0 ? ((calcUp || u.current_up || 0) / limitUpKbps) : 0;
+                            const utilDown = limitDownKbps > 0 ? ((calcDown || u.current_down || 0) / limitDownKbps) : 0;
+                            const utilMax = Math.max(utilUp, utilDown);
+                            let nameColor = '';
+                            if (utilMax >= 1.0) nameColor = '#e74c3c';        // 100%+
+                            else if (utilMax >= 0.75) nameColor = '#e67e22';   // 75%+
+                            else if (utilMax >= 0.5) nameColor = '#f1c40f';    // 50%+
 
                             const rowId = `tr-pppoe-${u.id}`;
                             let tr = document.getElementById(rowId);
                             
                             const rowHtml = `
-                                <td style="padding: 12px 15px;">${u.username}</td>
+                                <td style="padding: 12px 15px; ${nameColor ? `color:${nameColor}; font-weight:700;` : ''}">${u.username}</td>
                                 <td style="padding: 12px 15px;">${statusBadge}</td>
                                 <td style="padding: 12px 15px;">${currentIp}</td>
                                 <td style="padding: 12px 15px;">${uptime}</td>
                                 <td style="padding: 12px 15px;">${upLimit} / ${downLimit}</td>
-                                <td style="padding: 12px 15px;">${rx}</td>
-                                <td style="padding: 12px 15px;">${tx}</td>
+                                <td style="padding: 12px 15px;" title="Total: ${rxTotal}">${rxSpeed}</td>
+                                <td style="padding: 12px 15px;" title="Total: ${txTotal}">${txSpeed}</td>
                                 <td style="padding: 12px 15px; text-align: center;">
                                     ${isExpired ? `
                                         <button class="btn btn-sm btn-success" onclick="renewPppoeUser(${u.id}, '${u.username}')" title="Renew User" style="min-width: 60px; padding: 2px 8px; font-size: 0.8rem;">
