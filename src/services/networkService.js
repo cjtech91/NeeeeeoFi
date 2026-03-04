@@ -32,6 +32,19 @@ class NetworkService {
      */
     async detectWanInterface() {
         try {
+            // Prefer PPPoE logical interface when mode is set and ppp0 exists
+            try {
+                const wanCfg = require('./networkConfigService').getWanConfig();
+                if (wanCfg && (wanCfg.mode === 'pppoe')) {
+                    const pppCheck = await this.runCommand('ip link show ppp0', true);
+                    if (pppCheck) {
+                        this.wanInterface = 'ppp0';
+                        // Do NOT overwrite DB permanently; status should still reflect live ppp0
+                        console.log('Detected PPPoE mode; preferring WAN interface: ppp0');
+                        return this.wanInterface;
+                    }
+                }
+            } catch (e) {}
             // 1. Check DB for saved WAN interface
             const savedWan = db.prepare("SELECT value FROM settings WHERE key = 'wan_interface'").get();
             if (savedWan && savedWan.value) {
@@ -374,6 +387,34 @@ class NetworkService {
         // 3. Setup Firewall on br0
         // Use logical interface (ppp0) for NAT if PPPoE is active
         await this.runCommand(`${firewallScript} ${firewallWanInterface} ${bridgeIp}`);
+        // If Dual/Multi WAN, ensure MASQUERADE on all WAN egress interfaces (including macvlan)
+        try {
+            if (wanConfig && (wanConfig.mode === 'dual_wan' || (wanConfig.mode === 'multi_wan' && Array.isArray(wanConfig.multi_wan)))) {
+                const wanItems = [];
+                if (wanConfig.mode === 'dual_wan' && wanConfig.dual_wan) {
+                    if (wanConfig.dual_wan.wan1 && wanConfig.dual_wan.wan1.interface) wanItems.push({ ...wanConfig.dual_wan.wan1, id: 1 });
+                    if (wanConfig.dual_wan.wan2 && wanConfig.dual_wan.wan2.interface) wanItems.push({ ...wanConfig.dual_wan.wan2, id: 2 });
+                } else if (Array.isArray(wanConfig.multi_wan)) {
+                    wanConfig.multi_wan.forEach((w, i) => { if (w.interface) wanItems.push({ ...w, id: i+1 }); });
+                }
+                // Map duplicates to macvlan names (same logic as routing script)
+                const counts = {};
+                const effIfs = wanItems.map(item => {
+                    const nm = item.interface;
+                    counts[nm] = (counts[nm] || 0) + 1;
+                    const occ = counts[nm];
+                    if (occ > 1) return `${nm}-wan${item.id}`;
+                    return nm;
+                });
+                // Ensure MASQUERADE for each effective iface
+                for (const ifn of effIfs) {
+                    await this.runCommand(`iptables -t nat -C POSTROUTING -o ${ifn} -j MASQUERADE`, true) ||
+                    await this.runCommand(`iptables -t nat -A POSTROUTING -o ${ifn} -j MASQUERADE`, true);
+                }
+            }
+        } catch (e) {
+            console.warn('Additional WAN NAT setup skipped:', e.message || e);
+        }
 
         // 2.0 Pre-create VLAN interfaces so DHCP config can assign IPs
         await this.createVlanInterfaces();
@@ -616,7 +657,15 @@ class NetworkService {
      */
     async getWanStatusDetailed() {
         // Ensure we have a WAN interface detected
-        const iface = await this.detectWanInterface();
+        let iface = await this.detectWanInterface();
+        // If PPPoE mode is set but iface is not ppp0, prefer ppp0 when present for accurate status
+        try {
+            const wanCfg = require('./networkConfigService').getWanConfig();
+            if (wanCfg && wanCfg.mode === 'pppoe') {
+                const pppCheck = await this.runCommand('ip link show ppp0', true);
+                if (pppCheck) iface = 'ppp0';
+            }
+        } catch (e) {}
         const result = {
             interface: iface || null,
             ip: null,
@@ -644,12 +693,62 @@ class NetworkService {
             } catch (_) {}
             // Gateway for this iface (prefer per-dev default route)
             try {
+                // 1) Per-device default route (if any)
                 let gwOut = await this.runCommand(`ip route show dev ${iface} | grep default | head -n 1`, true);
-                if (!gwOut || !/default/.test(gwOut)) {
-                    gwOut = await this.runCommand(`ip route show default | head -n 1`, true);
+                if (gwOut) {
+                    const gm = gwOut.match(/default via\s+(\d+(?:\.\d+){3})/);
+                    if (gm) result.gateway = gm[1];
                 }
-                const gm = gwOut && gwOut.match(/default via\s+(\d+(?:\.\d+){3})/);
-                if (gm) result.gateway = gm[1];
+                // 2) ECMP default: find the nexthop line that matches this iface
+                if (!result.gateway) {
+                    const full = await this.runCommand(`ip route show default`, true);
+                    if (full) {
+                        // Try match "nexthop via X dev IF"
+                        const reAll = new RegExp(`via\\s+(\\d+(?:\\.\\d+){3})\\s+dev\\s+${iface}\\b`, 'g');
+                        const all = [...full.matchAll(reAll)];
+                        if (all.length > 0) {
+                            result.gateway = all[0][1];
+                        } else {
+                            // Fallback: parse any "default via X dev IF"
+                            const reLine = new RegExp(`default\\s+via\\s+(\\d+(?:\\.\\d+){3})\\s+dev\\s+${iface}\\b`);
+                            const m2 = full.match(reLine);
+                            if (m2) result.gateway = m2[1];
+                        }
+                    }
+                }
+                // 3) Policy-routing aware probe: route a probe target via this interface
+                // This handles cases where only per-table defaults exist or ECMP formatting differs.
+                if (!result.gateway) {
+                    const targets = ['8.8.8.8', '1.1.1.1'];
+                    for (const t of targets) {
+                        // Try using oif constraint
+                        let pr = await this.runCommand(`ip route get ${t} oif ${iface}`, true);
+                        if (pr && /via\s+(\d+(?:\.\d+){3})/.test(pr)) {
+                            result.gateway = pr.match(/via\s+(\d+(?:\.\d+){3})/)[1];
+                            break;
+                        }
+                        // Try using from <src ip>
+                        if (result.ip) {
+                            pr = await this.runCommand(`ip route get ${t} from ${result.ip}`, true);
+                            if (pr) {
+                                // Ensure the selected dev matches iface
+                                const devMatch = pr.match(/\sdev\s+([^\s]+)/);
+                                const viaMatch = pr.match(/via\s+(\d+(?:\.\d+){3})/);
+                                if (devMatch && devMatch[1] === iface && viaMatch) {
+                                    result.gateway = viaMatch[1];
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                // 4) Heuristic: if still missing and IP is known, assume .1 gateway of the subnet
+                if (!result.gateway && result.ip) {
+                    const parts = result.ip.split('.');
+                    if (parts.length === 4) {
+                        result.gateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+                    }
+                }
             } catch (_) {}
             // Link speed (ethtool) - may fail for PPP/WiFi
             try {
@@ -674,6 +773,59 @@ class NetworkService {
                 } catch (_) {}
             }
             // Gateway reachability
+            if (result.gateway) {
+                try {
+                    // Bind ping to the interface to test the correct path
+                    const ping = await this.runCommand(`ping -I ${iface} -c 1 -W 1 ${result.gateway}`, true);
+                    result.gatewayReachable = !!(ping && /1 received/.test(ping));
+                } catch (_) {
+                    result.gatewayReachable = false;
+                }
+            }
+        } catch (_) {}
+        return result;
+    }
+
+    async getInterfaceStatus(iface) {
+        const result = {
+            interface: iface || null,
+            ip: null,
+            gateway: null,
+            operstate: null,
+            speed: null,
+            duplex: null,
+            gatewayReachable: null,
+        };
+        if (!iface) return result;
+        try {
+            if (process.platform === 'linux') {
+                try {
+                    const oper = fs.readFileSync(`/sys/class/net/${iface}/operstate`, 'utf8').trim();
+                    result.operstate = oper.toUpperCase();
+                } catch (_) {}
+            }
+            try {
+                const ipOut = await this.runCommand(`ip -4 addr show ${iface}`, true);
+                const m = ipOut && ipOut.match(/inet\s+(\d+(?:\.\d+){3})/);
+                if (m) result.ip = m[1];
+            } catch (_) {}
+            try {
+                let gwOut = await this.runCommand(`ip route show dev ${iface} | grep default | head -n 1`, true);
+                if (!gwOut || !/default/.test(gwOut)) {
+                    gwOut = await this.runCommand(`ip route show default | head -n 1`, true);
+                }
+                const gm = gwOut && gwOut.match(/default via\s+(\d+(?:\.\d+){3})/);
+                if (gm) result.gateway = gm[1];
+            } catch (_) {}
+            try {
+                const et = await this.runCommand(`ethtool ${iface}`, true);
+                if (et) {
+                    const sm = et.match(/Speed:\s*([0-9]+(?:Mb|Gb)\/s)/i);
+                    const dm = et.match(/Duplex:\s*(\w+)/i);
+                    if (sm) result.speed = sm[1];
+                    if (dm) result.duplex = dm[1];
+                }
+            } catch (_) {}
             if (result.gateway) {
                 try {
                     const ping = await this.runCommand(`ping -c 1 -W 1 ${result.gateway}`, true);

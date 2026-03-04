@@ -733,6 +733,55 @@ sysctl -w net.ipv4.ip_forward=1
 # Flush existing custom tables to avoid duplicates
 `;
 
+        // Detect duplicate physical interfaces and map to macvlan virtuals
+        const nameCounts = {};
+        wanItems = wanItems.map((item, idx) => {
+            const nm = item.interface;
+            nameCounts[nm] = (nameCounts[nm] || 0) + 1;
+            const occurrence = nameCounts[nm];
+            const id = (item.id ? item.id : (idx + 1));
+            // First occurrence keeps original name; subsequent create macvlan
+            if (occurrence > 1) {
+                const virt = `${nm}-wan${id}`;
+                return { ...item, id, parent: nm, interface: virt, _isMacvlan: true };
+            }
+            return { ...item, id, parent: nm, _isMacvlan: false };
+        });
+
+        // Emit helper to create macvlan with unique MAC and start DHCP if needed
+        script += `
+# Helper: ensure macvlan exists with unique MAC and (optionally) DHCP
+ensure_macvlan() {
+    local parent="$1"
+    local iface="$2"
+    local id="$3"
+    local mode="$4"   # dynamic|static
+    # Create macvlan if missing
+    ip link show "$iface" >/dev/null 2>&1 || ip link add link "$parent" name "$iface" type macvlan mode bridge
+    # Compute unique MAC: base parent MAC with +id on last octet
+    local base=$(cat /sys/class/net/$parent/address 2>/dev/null || echo "02:00:00:00:00:00")
+    local b1 b2 b3 b4 b5 b6
+    IFS=':' read -r b1 b2 b3 b4 b5 b6 <<< "$base"
+    local last=$(printf "%d" 0x$b6); last=$(( (last + id) % 256 )); b6=$(printf "%02x" $last)
+    local newmac="$b1:$b2:$b3:$b4:$b5:$b6"
+    ip link set dev "$iface" address "$newmac" 2>/dev/null || true
+    ip link set "$iface" up
+    # Start DHCP for dynamic
+    if [ "$mode" = "dynamic" ]; then
+        ip -4 addr show "$iface" | grep -q 'inet ' || dhclient -4 -pf /run/dhclient-"$iface".pid -lf /var/lib/dhcp/dhclient-"$iface".leases "$iface" >/dev/null 2>&1 || true
+    fi
+}
+`;
+
+        // Ensure macvlans for duplicates before policy routing
+        script += `\n# Ensure macvlan interfaces for duplicate WANs\n`;
+        wanItems.forEach((item) => {
+            if (item._isMacvlan) {
+                const mode = (item.mode || item.type || 'dynamic');
+                script += `ensure_macvlan "${item.parent}" "${item.interface}" "${item.id}" "${mode}"\n`;
+            }
+        });
+
         // Flush tables loop
         wanItems.forEach(item => {
             script += `ip rule flush table ${100 + item.id}\n`;
@@ -747,8 +796,17 @@ sysctl -w net.ipv4.ip_forward=1
             
             script += `\n# --- WAN ${item.id}: ${iface} ---\n`;
             script += `IP_${item.id}=$(ip -4 addr show ${iface} | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}' | head -n 1)\n`;
-            // Try to get dynamic gateway first
-            script += `GW_${item.id}=$(ip route show dev ${iface} | grep default | awk '{print $3}' | head -n 1)\n`;
+            // Resolve gateway strictly for this interface
+            // 1) Policy-aware probe bound to interface (best)
+            script += `GW_${item.id}=$(ip route get 8.8.8.8 oif ${iface} 2>/dev/null | awk '/via/ {print $3; exit}')\n`;
+            // 2) Parse ECMP default and pick the nexthop for this iface
+            script += `if [ -z "$GW_${item.id}" ]; then GW_${item.id}=$(ip route show default | awk 'match($0,/via ([0-9.]+) .* dev ${iface}( |$)/,a){print a[1]; exit}'); fi\n`;
+            // 3) Fallback: per-dev default parsing
+            script += `if [ -z "$GW_${item.id}" ]; then GW_${item.id}=$(ip route show dev ${iface} | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="via"){print $(i+1); exit}}' | head -n 1); fi\n`;
+            // 4) Last resort: per-table default if already present
+            script += `if [ -z "$GW_${item.id}" ]; then GW_${item.id}=$(ip route show table ${tableId} | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="via"){print $(i+1); exit}}' | head -n 1); fi\n`;
+            // 5) Heuristic fallback: assume .1 gateway of the interface subnet (common ISP setup)
+            script += `if [ -z "$GW_${item.id}" ] && [ -n "$IP_${item.id}" ]; then GW_${item.id}=$(echo $IP_${item.id} | awk -F. '{printf "%d.%d.%d.1", $1,$2,$3}'); fi\n`;
             
             // Override if static
             if (item.mode === 'static' && item.static && item.static.gateway) {
@@ -757,7 +815,9 @@ sysctl -w net.ipv4.ip_forward=1
 
             script += `if [ -n "$IP_${item.id}" ] && [ -n "$GW_${item.id}" ]; then\n`;
             script += `  echo "Configuring Table ${tableId} for ${iface} ($IP_${item.id} -> $GW_${item.id})"\n`;
-            script += `  ip route add default via $GW_${item.id} dev ${iface} table ${tableId}\n`;
+            // Ensure unique and correct rule/route per table
+            script += `  ip rule del from $IP_${item.id} table ${tableId} 2>/dev/null || true\n`;
+            script += `  ip route replace default via $GW_${item.id} dev ${iface} table ${tableId}\n`;
             script += `  ip rule add from $IP_${item.id} table ${tableId}\n`;
             script += `fi\n`;
         });
@@ -828,7 +888,7 @@ while true; do
             
             wanItems.forEach(item => {
                 script += `    if [ "$STATUS_${item.id}" == "UP" ]; then\n`;
-                script += `        CMD="$CMD nexthop via $GW_${item.id} dev ${item.interface} weight ${item.weight}"\n`;
+                script += `        CMD="$CMD nexthop via $GW_${item.id} dev ${item.interface} weight ${item.weight || 1}"\n`;
                 script += `        VALID_COUNT=$((VALID_COUNT+1))\n`;
                 script += `    fi\n`;
             });

@@ -5007,7 +5007,11 @@
                                 <div class="form-grid" style="align-items:start; gap:4px;">
                                     <!-- WAN 1 -->
                                     <div class="card" style="padding:6px; border:1px solid var(--border); box-shadow:none;">
-                                        <div style="font-weight:700; color:var(--primary); margin-bottom:4px; border-bottom:1px solid var(--border); padding-bottom:4px; font-size:0.9rem;">WAN 1 (Primary)</div>
+                                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:0.9rem; font-weight:700; color:var(--primary); margin-bottom:4px; border-bottom:1px solid var(--border); padding-bottom:4px;">
+                                            <span>WAN 1 (Primary)</span>
+                                            <span id="dual-wan1-badge" class="status-badge" style="font-size:0.7rem; background:var(--text-muted); color:var(--card-bg);">--</span>
+                                        </div>
+                                        <div id="dual-wan1-headline" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:4px;">--</div>
                                         
                                         <label style="font-weight:600; font-size:0.8rem; margin-bottom:0px;">Interface</label>
                                         <select id="dual-wan1-iface" class="login-input wan-iface-select" style="margin:1px 0; padding:4px;"></select>
@@ -5036,7 +5040,11 @@
 
                                     <!-- WAN 2 -->
                                     <div class="card" style="padding:6px; border:1px solid var(--border); box-shadow:none;">
-                                        <div style="font-weight:700; color:var(--primary); margin-bottom:4px; border-bottom:1px solid var(--border); padding-bottom:4px; font-size:0.9rem;">WAN 2 (Secondary)</div>
+                                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:0.9rem; font-weight:700; color:var(--primary); margin-bottom:4px; border-bottom:1px solid var(--border); padding-bottom:4px;">
+                                            <span>WAN 2 (Secondary)</span>
+                                            <span id="dual-wan2-badge" class="status-badge" style="font-size:0.7rem; background:var(--text-muted); color:var(--card-bg);">--</span>
+                                        </div>
+                                        <div id="dual-wan2-headline" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:4px;">--</div>
                                         
                                         <label style="font-weight:600; font-size:0.8rem; margin-bottom:0px;">Interface</label>
                                         <select id="dual-wan2-iface" class="login-input wan-iface-select" style="margin:1px 0; padding:4px;"></select>
@@ -11262,6 +11270,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
         async function loadNetworkConfig() {
             updateWanStatus(); // Check status on load
+            // Start dual WAN status updater if applicable (ensure single timer)
+            if (dualWanIntervalId) { clearInterval(dualWanIntervalId); dualWanIntervalId = null; }
+            dualWanIntervalId = setInterval(updateDualWanStatus, 3000);
             loadZeroTierStatus(); // Check ZeroTier status
             loadAntiIspConfig(); // Load Anti-ISP Detect settings
             try {
@@ -11783,6 +11794,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const statusEl = document.getElementById('wan-status');
             const textEl = document.getElementById('wan-status-text');
             const detailEl = document.getElementById('wan-detail-text');
+            const detailWrap = document.getElementById('wan-detail');
+            const statusWrap = statusEl ? statusEl.parentElement : null;
             if (!statusEl || !textEl) return;
             
             try {
@@ -11800,7 +11813,21 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     textEl.textContent = 'Offline';
                 }
                 
-                if (detailEl) {
+                // If in Dual WAN mode, hide the single-line interface detail to avoid confusion
+                const modeSel = document.getElementById('wan-mode');
+                const isDual = modeSel && modeSel.value === 'dual_wan';
+                if (isDual) {
+                    // Hide global status indicator and detail line entirely
+                    if (statusEl) statusEl.style.display = 'none';
+                    if (statusWrap && statusWrap.nextElementSibling && statusWrap.nextElementSibling.id === 'wan-detail') {
+                        statusWrap.nextElementSibling.style.display = 'none';
+                    }
+                    if (detailWrap) detailWrap.style.display = 'none';
+                    if (detailEl) detailEl.textContent = '';
+                    return;
+                } else if (detailEl) {
+                    if (statusEl && statusEl.style.display === 'none') statusEl.style.display = '';
+                    if (detailWrap && detailWrap.style.display === 'none') detailWrap.style.display = '';
                     const iface = data.interface || '--';
                     const ip = data.ip || '--';
                     const gw = data.gateway || '--';
@@ -11813,7 +11840,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     parts.push(ip);
                     if (data.gateway) parts.push(`→ ${gw} (${gwOk})`);
                     if (link) parts.push(`${link}${spd? ' ' + spd : ''}`);
-                    detailEl.textContent = parts.join(' • ');
+                    const newText = parts.join(' • ');
+                    if (detailEl.textContent !== newText) detailEl.textContent = newText;
                 }
             } catch (e) {
                 console.error('Failed to check WAN status:', e);
@@ -11821,6 +11849,92 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 textEl.textContent = 'Offline';
                 if (detailEl) detailEl.textContent = '';
             }
+        }
+        // --- Dual WAN live headlines & speeds ---
+        let dualPrevCounters = {};
+        let dualWanIntervalId = null;
+        function computeEffectiveWanNames(cfg) {
+            const wan1 = cfg?.dual_wan?.wan1?.interface;
+            const wan2 = cfg?.dual_wan?.wan2?.interface;
+            if (!wan1 || !wan2) return { w1: wan1 || '', w2: wan2 || '' };
+            if (wan1 === wan2) {
+                return { w1: wan1, w2: `${wan2}-wan2` };
+            }
+            return { w1: wan1, w2: wan2 };
+        }
+        function formatKbpsCompact(v) {
+            const n = Number(v) || 0;
+            if (n >= 1020) return Math.round(n / 1024) + 'Mbps';
+            return n + 'kbps';
+        }
+        async function updateDualWanStatus() {
+            try {
+                const cfgRes = await fetch('/api/admin/network/wan');
+                const cfg = await cfgRes.json();
+                if (!cfg || cfg.mode !== 'dual_wan') return;
+                const { w1, w2 } = computeEffectiveWanNames(cfg);
+                const [s1, s2] = await Promise.all([
+                    w1 ? fetch(`/api/admin/network/ifstatus?iface=${encodeURIComponent(w1)}`).then(r=>r.json()).catch(()=>null) : null,
+                    w2 ? fetch(`/api/admin/network/ifstatus?iface=${encodeURIComponent(w2)}`).then(r=>r.json()).catch(()=>null) : null
+                ]);
+                const h1 = document.getElementById('dual-wan1-headline');
+                const h2 = document.getElementById('dual-wan2-headline');
+                const b1 = document.getElementById('dual-wan1-badge');
+                const b2 = document.getElementById('dual-wan2-badge');
+                const baseLine = (s) => {
+                    if (!s) return '--';
+                    const parts = [];
+                    if (s.ip) parts.push(s.ip);
+                    if (s.gateway) parts.push(`→ ${s.gateway} (${s.gatewayReachable === true ? 'reachable' : s.gatewayReachable === false ? 'unreachable' : 'unknown'})`);
+                    const link = (s.operstate ? s.operstate : '').toUpperCase();
+                    const spd = s.speed || '';
+                    if (link) parts.push(`${link}${spd? ' ' + spd : ''}`);
+                    return parts.join(' • ');
+                };
+                let line1 = baseLine(s1);
+                let line2 = baseLine(s2);
+                const isOnline = (s) => !!(s && ((s.operstate && s.operstate.toUpperCase()==='UP') || s.gatewayReachable === true));
+                if (b1) {
+                    const on = isOnline(s1);
+                    b1.textContent = on ? 'Online' : 'Offline';
+                    b1.style.background = on ? 'var(--success)' : 'var(--danger)';
+                    b1.style.color = 'var(--card-bg)';
+                }
+                if (b2) {
+                    const on = isOnline(s2);
+                    b2.textContent = on ? 'Online' : 'Offline';
+                    b2.style.background = on ? 'var(--success)' : 'var(--danger)';
+                    b2.style.color = 'var(--card-bg)';
+                }
+                // Speeds from /proc/net/dev
+                const statsRes = await fetch('/api/admin/network-stats');
+                const stats = await statsRes.json();
+                const map = {};
+                (stats||[]).forEach(i => map[i.interface] = i);
+                const now = Date.now();
+                [w1, w2].forEach((iface, idx) => {
+                    if (!iface) return;
+                    const cur = map[iface];
+                    const prev = dualPrevCounters[iface];
+                    let up = 0, down = 0;
+                    if (cur && prev) {
+                        const dt = (now - prev.ts)/1000;
+                        if (dt > 0.5) {
+                            const rxDiff = Math.max(0, (cur.rx_bytes||0) - (prev.rx||0));
+                            const txDiff = Math.max(0, (cur.tx_bytes||0) - (prev.tx||0));
+                            down = Math.round((rxDiff*8)/(dt*1000));
+                            up = Math.round((txDiff*8)/(dt*1000));
+                        }
+                    }
+                    dualPrevCounters[iface] = { rx: cur?.rx_bytes||0, tx: cur?.tx_bytes||0, ts: now };
+                    const upStr = formatKbpsCompact(up);
+                    const downStr = formatKbpsCompact(down);
+                    if (idx === 0) line1 = `${line1} • ↑${upStr}/↓${downStr}`;
+                    else line2 = `${line2} • ↑${upStr}/↓${downStr}`;
+                });
+                if (h1 && h1.textContent !== line1) h1.textContent = line1;
+                if (h2 && h2.textContent !== line2) h2.textContent = line2;
+            } catch (e) {}
         }
 
         async function loadAntiIspConfig() {
@@ -11935,10 +12049,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     alert("Please select interfaces for both WAN 1 and WAN 2.");
                     return;
                 }
-                if (config.dual_wan.wan1.interface === config.dual_wan.wan2.interface) {
-                    alert("WAN 1 and WAN 2 cannot use the same interface.");
-                    return;
-                }
+                // Allow same physical interface; backend will create macvlan with unique MAC for WAN 2
             }
 
             // Collect Multi WAN Data

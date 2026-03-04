@@ -3805,6 +3805,17 @@ app.get('/api/admin/network/wan/status', isAuthenticated, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+// Interface-specific status (used by Dual WAN cards)
+app.get('/api/admin/network/ifstatus', isAuthenticated, async (req, res) => {
+    try {
+        const iface = req.query.iface;
+        if (!iface) return res.status(400).json({ error: 'iface required' });
+        const status = await networkService.getInterfaceStatus(iface);
+        res.json(status);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 app.get('/api/admin/network/wan', isAuthenticated, (req, res) => {
     res.json(networkConfigService.getWanConfig());
 });
