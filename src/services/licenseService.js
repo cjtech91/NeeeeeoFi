@@ -564,6 +564,29 @@ class LicenseService {
                 }
             }
             
+            // 3. Linux x86/x64: DMI System UUID (preferred for PCs/VMs)
+            if (process.platform === 'linux' && (process.arch === 'x64' || process.arch === 'ia32')) {
+                try {
+                    const dmiPath = '/sys/class/dmi/id/product_uuid';
+                    if (fs.existsSync(dmiPath)) {
+                        const raw = fs.readFileSync(dmiPath, 'utf8').trim();
+                        if (raw && !/^00000000-0000-0000-0000-000000000000$/i.test(raw)) {
+                            this.systemSerial = raw.toUpperCase();
+                            return;
+                        }
+                    }
+                } catch (e) {}
+                // Fallback: dmidecode (may require privileges)
+                try {
+                    const dmidecode = execSync('dmidecode -s system-uuid', { encoding: 'utf8' });
+                    const uuid = String(dmidecode || '').trim();
+                    if (uuid && !/^00000000-0000-0000-0000-000000000000$/i.test(uuid)) {
+                        this.systemSerial = uuid.toUpperCase();
+                        return;
+                    }
+                } catch (e) {}
+            }
+            
             // 3. Windows BIOS Serial
             if (process.platform === 'win32') {
                 try {

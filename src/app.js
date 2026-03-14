@@ -1124,12 +1124,13 @@ async function handleCoinPulseEvent(pulseCount, source) {
     const pulses = Number(pulseCount) || 0;
     if (pulses <= 0) return;
 
-    io.emit('coin_pulse', { pulses, source });
-
     const sessionKey = source || 'hardware';
     const session = coinSessions.get(sessionKey);
 
     if (session) {
+        try {
+            io.emit('coin_pulse', { pulses, source, mac: session.mac });
+        } catch (e) {}
         const mode = session.selectionMode || configService.get('vendo_selection_mode') || 'auto';
         if (mode === 'manual' && session.targetDeviceId) {
             if (source !== session.targetDeviceId) {
@@ -1214,6 +1215,9 @@ async function handleCoinPulseEvent(pulseCount, source) {
             }, 60000);
 
             coinSessions.set(sessionKeyAuto, autoSession);
+            try {
+                io.emit('coin_pulse', { pulses, source, mac });
+            } catch (e) {}
 
             const bestAuto = calculateTimeFromRates(pulses, autoSession.clientId);
             const minutesAuto = bestAuto.minutes || 0;
@@ -1233,6 +1237,14 @@ async function handleCoinPulseEvent(pulseCount, source) {
 coinService.on('coin', async (pulseCount) => {
     console.log(`Hardware Coin Event: ${pulseCount} pulses`);
     await handleCoinPulseEvent(pulseCount, 'hardware');
+});
+coinService.on('pulse', (count) => {
+    try {
+        const s = coinSessions.get('hardware');
+        const mac = s && s.mac ? s.mac : null;
+        const pulses = Number(count) || 1;
+        io.emit('coin_pulse', { pulses, source: 'hardware', mac });
+    } catch (e) {}
 });
 
 // Middleware: Check Session & Seamless Reconnection
@@ -4936,7 +4948,9 @@ app.post('/api/session/pause', async (req, res) => {
             const now = new Date();
             const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
 
-            db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, updated_at = ? WHERE id = ?').run(timestamp, req.user.id);
+            // Mark paused and clear cumulative traffic counters for a fresh view on resume
+            db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, total_data_up = 0, total_data_down = 0, last_traffic_at = ?, updated_at = ? WHERE id = ?')
+              .run(timestamp, timestamp, req.user.id);
             
             const userCode = req.user.user_code || 'Unknown';
             const currentUser = db.prepare('SELECT time_remaining FROM users WHERE id = ?').get(req.user.id);

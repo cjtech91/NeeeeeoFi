@@ -30,7 +30,8 @@ class CoinService extends EventEmitter {
         this.lastPulseTime = 0;
         this.debounceTimer = null;
         this.timer = null;
-        this.debounceTime = parseInt(configService.get('coin_debounce', 10)); // Default 10ms (was 50ms) to fix missed pulses
+        // Use a small software debounce and disable kernel debounce to avoid double-filtering
+        this.debounceTime = parseInt(configService.get('coin_debounce', 3)); // Default 3ms
         this.commitTime = 300;  // Wait 300ms for more pulses before committing
         
         this.isBanned = false;
@@ -86,8 +87,13 @@ class CoinService extends EventEmitter {
 
         // --- Coin Settings ---
         const pin = parseInt(configService.get('coin_pin', 12)); // Default 12 (PA12)
-        let pinEdge = configService.get('coin_pin_edge', 'rising');
+        // Allow robust detection across boards; we'll only count active level below
+        let pinEdge = configService.get('coin_pin_edge', 'both');
         if (typeof pinEdge === 'string') pinEdge = pinEdge.toLowerCase();
+        // Active level: most acceptors are active-low (line pulled LOW during pulse)
+        const activeLevelCfg = String(configService.get('coin_active_level', 'auto')).toLowerCase();
+        // auto = detect first observed active level from interrupt callback
+        this.activeLevel = (activeLevelCfg === 'high') ? 1 : (activeLevelCfg === 'low' ? 0 : null);
         
         // --- Bill Settings ---
         const billPin = parseInt(configService.get('bill_pin', 19)); // Default 19 (PA19) - Changed from 15 to avoid EBUSY
@@ -120,7 +126,7 @@ class CoinService extends EventEmitter {
 
         if (Gpio) {
             const initPin = async (pinNum, edge, label) => {
-                const debounce = this.debounceTime;
+                const debounce = 0; // disable kernel debounce; we handle in software
                 try {
                     const gpio = new Gpio(pinNum, 'in', edge, { debounceTimeout: debounce });
                     return gpio;
@@ -218,6 +224,16 @@ class CoinService extends EventEmitter {
             return;
         }
 
+        // Auto-detect active level on first interrupt if configured as 'auto'
+        try {
+            if (this.activeLevel === null && (value === 0 || value === 1)) {
+                this.activeLevel = value;
+                console.log(`CoinService: Auto-detected active level = ${this.activeLevel === 0 ? 'LOW' : 'HIGH'}`);
+            }
+            // Only count when we see the configured active level (avoid double counting with 'both' edges)
+            if (this.activeLevel !== null && value !== this.activeLevel) return;
+        } catch (e) {}
+
         if (this.checkBanCondition()) return;
         
         const now = Date.now();
@@ -227,6 +243,9 @@ class CoinService extends EventEmitter {
         this.lastPulseTime = now;
 
         this.pulseCount++;
+        try {
+            this.emit('pulse', 1);
+        } catch (e) {}
         
         // Reset the commit timer
         if (this.timer) clearTimeout(this.timer);

@@ -797,6 +797,10 @@ ensure_macvlan() {
             script += `\n# --- WAN ${item.id}: ${iface} ---\n`;
             script += `IP_${item.id}=$(ip -4 addr show ${iface} | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}' | head -n 1)\n`;
             // Resolve gateway strictly for this interface
+            // 0) Try read DHCP lease file for this interface (dhclient) to get 'option routers'
+            script += `GW_${item.id}=""\n`;
+            script += `LEASE_FILE="/var/lib/dhcp/dhclient-${iface}.leases"\n`;
+            script += `if [ -z "$GW_${item.id}" ] && [ -f "$LEASE_FILE" ]; then GW_${item.id}=$(awk '/option routers/{gw=$3} END{gsub(/;$/,"",gw); print gw}' "$LEASE_FILE"); fi\n`;
             // 1) Policy-aware probe bound to interface (best)
             script += `GW_${item.id}=$(ip route get 8.8.8.8 oif ${iface} 2>/dev/null | awk '/via/ {print $3; exit}')\n`;
             // 2) Parse ECMP default and pick the nexthop for this iface
@@ -818,7 +822,8 @@ ensure_macvlan() {
             // Ensure unique and correct rule/route per table
             script += `  ip rule del from $IP_${item.id} table ${tableId} 2>/dev/null || true\n`;
             script += `  ip route replace default via $GW_${item.id} dev ${iface} table ${tableId}\n`;
-            script += `  ip rule add from $IP_${item.id} table ${tableId}\n`;
+            // Add rule with low preference (higher priority than 'main' 32766)
+            script += `  ip rule add pref $((100 + ${item.id})) from $IP_${item.id} table ${tableId}\n`;
             script += `fi\n`;
         });
 

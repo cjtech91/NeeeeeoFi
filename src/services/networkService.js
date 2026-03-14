@@ -693,6 +693,17 @@ class NetworkService {
             } catch (_) {}
             // Gateway for this iface (prefer per-dev default route)
             try {
+                // 0) Read dhclient lease file for this interface to get 'option routers' (most accurate per-if)
+                try {
+                    const leasePath = `/var/lib/dhcp/dhclient-${iface}.leases`;
+                    if (fs.existsSync(leasePath)) {
+                        const content = fs.readFileSync(leasePath, 'utf8');
+                        const matches = [...content.matchAll(/option\s+routers\s+(\d+(?:\.\d+){3});/g)];
+                        if (matches && matches.length > 0) {
+                            result.gateway = matches[matches.length - 1][1];
+                        }
+                    }
+                } catch (_) {}
                 // 1) Per-device default route (if any)
                 let gwOut = await this.runCommand(`ip route show dev ${iface} | grep default | head -n 1`, true);
                 if (gwOut) {

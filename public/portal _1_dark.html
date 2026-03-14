@@ -1496,6 +1496,28 @@
             document.getElementById('modal-coin-time').textContent = `Equivalent Time: ${formatMinutes(data.minutes)}`;
             startCoinCountdown(30, 30);
         });
+        // Per-pulse sync and beep
+        socket.on('coin_pulse', (data) => {
+            if (!isInserting) return;
+            if (!currentUser || !currentUser.mac) return;
+            if ((currentUser.mac || '').toLowerCase() !== (data.mac || '').toLowerCase()) return;
+            const pulses = Number(data.pulses) || 0;
+            if (pulses <= 0) return;
+            coinAmount = (Number(coinAmount) || 0) + pulses;
+            const amountStr = `₱${coinAmount.toFixed(2)}`;
+            const amtEl1 = document.getElementById('modal-coin-amount');
+            const amtEl2 = document.getElementById('coin-display');
+            if (amtEl1) amtEl1.textContent = amountStr;
+            if (amtEl2) amtEl2.textContent = amountStr;
+            let remaining = pulses;
+            const beepEach = () => {
+                if (!isInserting || remaining <= 0) return;
+                playCoinBeep();
+                remaining--;
+                if (remaining > 0) setTimeout(beepEach, 70);
+            };
+            beepEach();
+        });
 
         socket.on('user_code_generated', (data) => {
             if (currentUser && currentUser.mac === data.mac) {
