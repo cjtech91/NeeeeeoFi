@@ -1030,7 +1030,7 @@
                 <div class="coin-slot"></div>
             </div>
             <div style="font-size:2rem; font-weight:bold; color:var(--success); margin-bottom:20px;" id="modal-coin-amount">₱0.00</div>
-            <div style="font-size:1rem; font-weight:600; color:#333; margin-bottom:20px;" id="modal-coin-time">Equivalent Time: 0 Min</div>
+            <div style="font-size:1rem; font-weight:600; color:#333; margin-bottom:20px; white-space: pre;" id="modal-coin-time">Time: 0 Min     Point:0</div>
             <div class="coin-countdown">
                 <div class="coin-countdown-bar">
                     <div class="coin-countdown-fill" id="coin-countdown-fill"></div>
@@ -1093,6 +1093,9 @@
         let selectedVendoMode = 'auto';
         let selectedVendoId = localStorage.getItem('vendo_target') || 'hardware';
         let portalConfig = {};
+        let ratesCache = [];
+        let pendingCoinPoints = 0;
+        let lastPendingCoinMinutes = 0;
 
         // Device ID Management (Persistent Session)
         function getOrCreateDeviceId() {
@@ -1586,6 +1589,63 @@
             return `${h} Hr${h > 1 ? 's' : ''}${rem > 0 ? ' ' + rem + ' Min' : ''}`;
         }
 
+        function calcMinutesFromRates(amount) {
+            const amt = Math.max(0, Math.floor(Number(amount) || 0));
+            if (!Array.isArray(ratesCache) || ratesCache.length === 0) return 0;
+            const normalized = ratesCache
+                .map(r => ({ amount: Number(r.amount) || 0, minutes: Number(r.minutes) || 0 }))
+                .filter(r => r.amount > 0 && r.minutes >= 0)
+                .sort((a, b) => (b.amount - a.amount) || (b.minutes - a.minutes));
+            if (normalized.length === 0) return 0;
+            let remaining = amt;
+            let totalMinutes = 0;
+            for (const rate of normalized) {
+                if (remaining < rate.amount) continue;
+                const count = Math.floor(remaining / rate.amount);
+                totalMinutes += count * rate.minutes;
+                remaining -= count * rate.amount;
+                if (remaining <= 0) break;
+            }
+            if (remaining > 0) {
+                const base = normalized.find(r => r.amount === 1);
+                if (base) totalMinutes += remaining * base.minutes;
+            }
+            return totalMinutes;
+        }
+
+        function calcPendingPoints(amount) {
+            const amt = Math.max(0, Math.floor(Number(amount) || 0));
+            const rate = Number(portalConfig && portalConfig.points_earning_rate) || 0;
+            if (rate <= 0) return 0;
+            const raw = amt * rate;
+            return Math.round(raw * 100) / 100;
+        }
+
+        function setCoinMeta(minutes, points) {
+            const el = document.getElementById('modal-coin-time');
+            if (!el) return;
+            lastPendingCoinMinutes = Number(minutes) || 0;
+            pendingCoinPoints = Number(points) || 0;
+            const pointsText = Number.isInteger(pendingCoinPoints) ? String(pendingCoinPoints) : pendingCoinPoints.toFixed(2);
+            el.textContent = `Time: ${formatMinutes(lastPendingCoinMinutes)}     Point:${pointsText}`;
+            try {
+                const total = (currentUser ? (Number(currentUser.points_balance) || 0) : 0) + pendingCoinPoints;
+                const codeSpan = document.getElementById('code-display');
+                if (!codeSpan) return;
+                const badge = codeSpan.querySelector('.points-badge');
+                const totalText = Number.isInteger(total) ? String(total) : total.toFixed(2);
+                if (total > 0) {
+                    if (badge) {
+                        badge.textContent = `Points:${totalText}`;
+                    } else if (currentUser && currentUser.session_code) {
+                        codeSpan.insertAdjacentHTML('beforeend', `<span class="points-badge">Points:${totalText}</span>`);
+                    }
+                } else if (badge) {
+                    badge.remove();
+                }
+            } catch (e) {}
+        }
+
         socket.on('coin_pending_update', (data) => {
             if (!currentUser || !currentUser.mac) return;
             if ((currentUser.mac || '').toLowerCase() !== (data.mac || '').toLowerCase()) return;
@@ -1598,8 +1658,11 @@
             coinAmount = Number(data.amount) || 0;
             document.getElementById('modal-coin-amount').textContent = `₱${coinAmount.toFixed(2)}`;
             document.getElementById('coin-display').textContent = `₱${coinAmount.toFixed(2)}`;
-            document.getElementById('modal-coin-time').textContent = `Equivalent Time: ${formatMinutes(data.minutes)}`;
-            startCoinCountdown(30, 30);
+            const localPoints = calcPendingPoints(coinAmount);
+            const serverPoints = Number(data.points);
+            const points = (data.points != null && Number.isFinite(serverPoints)) ? Math.max(serverPoints, localPoints) : localPoints;
+            setCoinMeta(data.minutes, points);
+            startCoinCountdown(60, 60);
         });
         // Per-pulse sync and beep
         socket.on('coin_pulse', (data) => {
@@ -1614,6 +1677,10 @@
             const amtEl2 = document.getElementById('coin-display');
             if (amtEl1) amtEl1.textContent = amountStr;
             if (amtEl2) amtEl2.textContent = amountStr;
+            const localPoints = calcPendingPoints(coinAmount);
+            const points = Math.max(pendingCoinPoints || 0, localPoints);
+            const minutes = lastPendingCoinMinutes || calcMinutesFromRates(coinAmount);
+            setCoinMeta(minutes, points);
             let remaining = pulses;
             const beepEach = () => {
                 if (!isInserting || remaining <= 0) return;
@@ -1669,6 +1736,7 @@
             localStorage.setItem('vendo_target', id);
             const nameEl = document.getElementById('selected-device-name');
             if (nameEl) nameEl.textContent = name;
+            fetchRates();
             renderDeviceList(lastKnownDevices);
             updateFreeTimeWidgetVisibility();
             closeDeviceModal();
@@ -1758,9 +1826,12 @@
                 if (data.session_code && codeSpan) {
                     let html = `<span>${data.session_code}</span>`;
                     // Points Display
-                    const points = data.points_balance || 0;
+                    const basePoints = Number(data.points_balance) || 0;
+                    const livePendingPoints = isInserting ? (Number(pendingCoinPoints) || calcPendingPoints(coinAmount || data.pending_amount || 0)) : 0;
+                    const points = basePoints + livePendingPoints;
                     if (points > 0) {
-                         html += `<span class="points-badge">Points:${points}</span>`;
+                         const pointsText = Number.isInteger(points) ? String(points) : points.toFixed(2);
+                         html += `<span class="points-badge">Points:${pointsText}</span>`;
                     }
                     codeSpan.innerHTML = html;
                 }
@@ -2113,7 +2184,7 @@
                      if (titleEl) titleEl.textContent = isExtend ? 'Extend Time' : 'Insert Coins Now';
                      if (descEl) descEl.textContent = isExtend ? 'Insert coins to extend your remaining time.' : 'Please insert coins into the slot.';
                      document.getElementById('modal-coin-amount').textContent = '₱0.00';
-                     document.getElementById('modal-coin-time').textContent = 'Equivalent Time: 0 Min';
+                     setCoinMeta(0, 0);
                      document.getElementById('coin-display').textContent = `₱${Number((currentUser && currentUser.pending_amount) || 0).toFixed(2)}`;
                      openModal('coin-modal');
                      startCoinCountdown(60, 60);
@@ -2129,6 +2200,8 @@
 
         async function closeCoinModal() {
             isInserting = false;
+            pendingCoinPoints = 0;
+            lastPendingCoinMinutes = 0;
             stopCoinCountdown();
             stopInsertCoinBgAudio();
             try {
@@ -2298,6 +2371,7 @@
                 }
                 const res = await fetch(url);
                 const rates = await res.json();
+                ratesCache = Array.isArray(rates) ? rates : [];
                 const list = document.getElementById('rates-list');
                 
                 if (rates.length === 0) {

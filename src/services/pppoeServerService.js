@@ -190,7 +190,8 @@ class PppoeServerService {
             const expiredUsers = db.prepare(`
                 SELECT current_ip FROM pppoe_users 
                 WHERE current_ip IS NOT NULL AND current_ip != '' 
-                  AND datetime(expiration_date) < datetime('now')
+                  AND expiration_date IS NOT NULL AND expiration_date != ''
+                  AND datetime(replace(expiration_date, 'T', ' ')) < datetime('now')
             `).all();
             if (Array.isArray(expiredUsers)) {
                 expiredUsers.forEach(u => {

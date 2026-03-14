@@ -141,14 +141,14 @@ class SessionService extends EventEmitter {
                         UPDATE users 
                         SET total_data_up = total_data_up + ?, 
                             total_data_down = total_data_down + ?
-                        WHERE ip_address = ? AND is_connected = 1
+                        WHERE ip_address = ? AND is_connected = 1 AND is_paused = 0
                     `);
 
                     const updateActivity = db.prepare(`
                         UPDATE users 
                         SET last_active_at = ?,
                             last_traffic_at = ?
-                        WHERE ip_address = ? AND is_connected = 1
+                        WHERE ip_address = ? AND is_connected = 1 AND is_paused = 0
                     `);
 
                     for (const u of trafficUpdates) {
@@ -446,7 +446,7 @@ class SessionService extends EventEmitter {
             await this.updateTrafficStats();
 
             // Update DB - Keep is_connected = 1 so status shows "Paused" instead of "Offline"
-            db.prepare('UPDATE users SET is_paused = 1, is_connected = 1 WHERE id = ?').run(user.id);
+            db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, total_data_up = 0, total_data_down = 0, last_traffic_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
             
             // Log Event
             try {

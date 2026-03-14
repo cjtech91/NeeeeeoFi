@@ -8,17 +8,21 @@
     <link rel="apple-touch-icon" href="/neologo.png">
     <style>
         :root {
-            --primary: #3498db; /* Blue */
-            --success: #2ecc71; /* Green */
-            --danger: #e74c3c; /* Red */
-            --purple: #9b59b6; /* Purple */
-            --bg: #f0f2f5; /* Light Background */
-            --text: #2c3e50; /* Dark Text */
-            --text-muted: #7f8c8d; /* Muted Text */
-            --white: #ffffff; /* White Container */
-            --shadow: 0 8px 30px rgba(0,0,0,0.12); /* Soft Shadow */
-            --radius: 20px; /* More rounded card */
-            --btn-radius: 50px; /* Pill buttons */
+            --primary: #2b5dab;
+            --success: #2e7d32;
+            --danger: #b23b2f;
+            --purple: #6c4aa5;
+            --bg: #efe7d6;
+            --text: #2b241b;
+            --text-muted: #6b5f50;
+            --white: #fffaf0;
+            --shadow: 0 18px 60px rgba(43, 36, 27, 0.16);
+            --radius: 16px;
+            --btn-radius: 14px;
+            --paper-border: rgba(43, 36, 27, 0.12);
+            --paper-line: rgba(43, 36, 27, 0.05);
+            --ink-strong: rgba(43, 36, 27, 0.9);
+            --ink-soft: rgba(43, 36, 27, 0.55);
         }
 
         * {
@@ -30,6 +34,10 @@
 
         body {
             background: var(--bg);
+            background-image:
+                radial-gradient(1200px 800px at 20% 10%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 60%),
+                radial-gradient(900px 600px at 80% 30%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 55%),
+                repeating-linear-gradient(0deg, rgba(43, 36, 27, 0.00) 0px, rgba(43, 36, 27, 0.00) 22px, var(--paper-line) 23px);
             color: var(--text);
             min-height: 100vh;
             display: flex;
@@ -58,6 +66,21 @@
             overflow: hidden;
             text-align: center;
             padding-bottom: 10px;
+            border: 1px solid var(--paper-border);
+            position: relative;
+        }
+
+        .container::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(800px 300px at 20% 0%, rgba(0,0,0,0.05), rgba(0,0,0,0) 60%),
+                radial-gradient(900px 400px at 90% 20%, rgba(0,0,0,0.04), rgba(0,0,0,0) 55%),
+                repeating-linear-gradient(90deg, rgba(0,0,0,0.00) 0px, rgba(0,0,0,0.00) 40px, rgba(0,0,0,0.02) 41px);
+            mix-blend-mode: multiply;
+            opacity: 0.4;
         }
 
         .portal-banner {
@@ -68,6 +91,7 @@
             display: block;
             background: var(--white);
             /* border-bottom: 1px solid rgba(0,0,0,0.06); */
+            border-bottom: 1px solid var(--paper-border);
         }
 
         .portal-banner::after {
@@ -112,8 +136,8 @@
             border-radius: 999px;
             display: grid;
             place-items: center;
-            background: rgba(0, 0, 0, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(43, 36, 27, 0.72);
+            border: 1px solid rgba(255, 250, 240, 0.22);
             backdrop-filter: blur(10px);
             z-index: 3;
         }
@@ -221,7 +245,7 @@
             line-height: 1.1;
             margin: 5px 0;
             white-space: nowrap;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.25);
+            text-shadow: 0 2px 0 rgba(43, 36, 27, 0.08);
         }
 
         .timer-value.long {
@@ -241,10 +265,10 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
-            background: #f8f9fa;
-            border: 1px solid #e1e4e8;
+            background: rgba(43, 36, 27, 0.03);
+            border: 1px solid var(--paper-border);
             padding: 8px 16px;
-            border-radius: 50px;
+            border-radius: 999px;
             cursor: pointer;
             transition: all 0.2s;
             font-size: 0.9rem;
@@ -255,8 +279,8 @@
         }
 
         .device-trigger:hover {
-            background: #eef1f5;
-            border-color: #d1d5da;
+            background: rgba(43, 36, 27, 0.05);
+            border-color: rgba(43, 36, 27, 0.18);
         }
 
         /* Buttons */
@@ -270,14 +294,14 @@
         .btn {
             width: 100%;
             padding: 12px;
-            border: none;
+            border: 1px solid rgba(255, 250, 240, 0.22);
             border-radius: var(--btn-radius);
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.1s, opacity 0.2s;
             color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 24px rgba(43, 36, 27, 0.16);
             white-space: nowrap;
         }
 
@@ -304,7 +328,7 @@
         .btn-free-time {
             background: transparent;
             color: var(--primary);
-            border: 1px solid var(--primary);
+            border: 1px solid rgba(43, 93, 171, 0.45);
             box-shadow: none;
             border-radius: var(--btn-radius);
             margin-top: 5px;
@@ -349,11 +373,11 @@
             width: 100%;
             padding: 10px 14px;
             padding-right: 100px; /* Space for button */
-            border: 1px solid #ddd;
-            border-radius: 50px;
+            border: 1px solid var(--paper-border);
+            border-radius: 999px;
             font-size: 0.95rem;
             outline: none;
-            background: #fff;
+            background: rgba(255, 250, 240, 0.85);
             color: var(--text);
             height: 50px;
         }
@@ -379,10 +403,10 @@
         .coin-countdown-bar {
             width: 100%;
             height: 10px;
-            background: #444;
+            background: rgba(43, 36, 27, 0.18);
             border-radius: 999px;
             overflow: hidden;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
+            box-shadow: inset 0 1px 2px rgba(43, 36, 27, 0.22);
         }
 
         .coin-countdown-fill {
@@ -427,6 +451,8 @@
             text-align: center;
             transform: scale(0.95);
             transition: transform 0.2s;
+            border: 1px solid var(--paper-border);
+            box-shadow: 0 20px 70px rgba(43, 36, 27, 0.35);
         }
 
         .modal.show .modal-content {
@@ -471,8 +497,8 @@
         .rate-header {
             display: grid;
             grid-template-columns: 0.8fr 1.0fr 1.1fr 0.9fr;
-            border-bottom: 1px solid #444;
-            background: #2c3e50;
+            border-bottom: 1px solid var(--paper-border);
+            background: rgba(43, 36, 27, 0.92);
         }
 
         .rate-header-col {
@@ -481,18 +507,18 @@
             font-size: 0.8rem;
             text-transform: uppercase;
             letter-spacing: 0.6px;
-            color: #bdc3c7;
+            color: rgba(255, 250, 240, 0.82);
             font-weight: 600;
         }
 
         .rate-header-col:not(:last-child) {
-            border-right: 1px solid #444;
+            border-right: 1px solid rgba(255, 250, 240, 0.16);
         }
 
         .rate-item {
             display: grid;
             grid-template-columns: 0.8fr 1.0fr 1.1fr 0.9fr;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--paper-border);
             background: var(--white);
         }
 
@@ -503,7 +529,7 @@
         }
 
         .rate-col:not(:last-child) {
-            border-right: 1px solid #333;
+            border-right: 1px solid var(--paper-border);
         }
 
         .rate-label {
@@ -523,7 +549,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 6px 10px; /* Reduced height */
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--paper-border);
             background: var(--white);
         }
 
@@ -565,7 +591,7 @@
         }
 
         .toast {
-            background: #333;
+            background: rgba(43, 36, 27, 0.92);
             color: #fff;
             backdrop-filter: blur(10px);
             border-radius: 12px;
@@ -576,7 +602,7 @@
             gap: 12px;
             animation: slideInDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             pointer-events: auto;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,250,240,0.12);
         }
         
         .toast.error { border-left: 4px solid var(--danger); }
@@ -645,12 +671,12 @@
             height: 400px;
             background: var(--white);
             border-radius: 12px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            box-shadow: 0 22px 70px rgba(43, 36, 27, 0.4);
             display: flex;
             flex-direction: column;
             z-index: 1000;
             overflow: hidden;
-            border: 1px solid #333;
+            border: 1px solid var(--paper-border);
             /* Animation */
             opacity: 0;
             visibility: hidden;
@@ -686,7 +712,7 @@
         }
         .chat-widget-input {
             padding: 10px;
-            border-top: 1px solid #333;
+            border-top: 1px solid var(--paper-border);
             display: flex;
             gap: 5px;
             background: var(--white);
@@ -694,10 +720,10 @@
         .chat-widget-input input {
             flex: 1;
             padding: 8px;
-            border: 1px solid #444;
+            border: 1px solid var(--paper-border);
             border-radius: 4px;
             outline: none;
-            background: #2c2c2c;
+            background: rgba(255, 250, 240, 0.85);
             color: var(--text);
         }
         .chat-widget-input button {
@@ -728,8 +754,8 @@
         }
         .chat-msg.received {
             align-self: flex-start;
-            background: #444;
-            color: #fff;
+            background: rgba(43, 36, 27, 0.10);
+            color: var(--text);
             border-bottom-left-radius: 2px;
         }
         .chat-unread-badge {
@@ -759,14 +785,14 @@
             align-items: center;
             justify-content: space-between;
             padding: 8px 12px;
-            border-bottom: 1px solid #f1f2f6;
+            border-bottom: 1px solid var(--paper-border);
             cursor: pointer;
             border-radius: 6px;
             transition: background 0.2s;
             font-size: 0.9rem;
         }
         .device-item:hover {
-            background: #f8f9fa;
+            background: rgba(43, 36, 27, 0.04);
         }
         .device-item:last-child {
             border-bottom: none;

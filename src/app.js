@@ -845,18 +845,8 @@ async function finalizeCoinSession(sessionKey, reason) {
 
     // Calculate Points Earned
     const pointsEarningRate = Number(configService.get('points_earning_rate')) || 0; // Default 0 (disabled) if not set
-    const pointsEarned = Math.floor(amount * pointsEarningRate);
-
-    // Apply points if earned
-    if (pointsEarned > 0 && user) {
-        try {
-            db.prepare('UPDATE users SET points_balance = COALESCE(points_balance, 0) + ? WHERE id = ?').run(pointsEarned, user.id);
-            // Update the local user object for speed/limit calculations if needed (though not used below)
-            user.points_balance = (user.points_balance || 0) + pointsEarned;
-        } catch (e) {
-            console.error('[Sales] Failed to add points:', e);
-        }
-    }
+    const pointsEarnedRaw = amount * pointsEarningRate;
+    const pointsEarned = Math.round(pointsEarnedRaw * 100) / 100;
 
     if (secondsToAdd <= 0) {
         io.emit('coin_finalized', { mac, amount, secondsAdded: 0, reason });
@@ -985,7 +975,9 @@ async function finalizeCoinSession(sessionKey, reason) {
     io.emit('session_updated', { mac, is_paused: 0 });
     // Emit points update if points were earned
     if (pointsEarned > 0) {
-        io.emit('points_earned', { mac, points: pointsEarned, total: (user ? user.points_balance : 0) + pointsEarned });
+        const basePoints = user ? (Number(user.points_balance) || 0) : 0;
+        const totalPoints = Math.round((basePoints + pointsEarned) * 100) / 100;
+        io.emit('points_earned', { mac, points: pointsEarned, total: totalPoints });
     }
     io.emit('coin_finalized', { mac, amount, secondsAdded: secondsToAdd, reason });
     return { success: true, amount, minutesAdded: minutesToAdd, secondsAdded: secondsToAdd, pointsEarned };
@@ -1153,18 +1145,23 @@ async function handleCoinPulseEvent(pulseCount, source) {
         const minutes = best.minutes;
         session.pendingMinutes = minutes;
 
+        const pointsEarningRate = Number(configService.get('points_earning_rate')) || 0;
+        const pendingPointsRaw = totalAmount * pointsEarningRate;
+        const pendingPoints = Math.round(pendingPointsRaw * 100) / 100;
+
         console.log(`[Coin] ${source || 'unknown'} | User ${session.mac} | Total: P${totalAmount} | Time: ${minutes} mins`);
 
         io.emit('coin_pending_update', {
             mac: session.mac,
             amount: totalAmount,
-            minutes: minutes
+            minutes: minutes,
+            points: pendingPoints
         });
 
         if (session.timeout) clearTimeout(session.timeout);
         session.timeout = setTimeout(() => {
             finalizeCoinSession(sessionKey, 'timeout').catch(e => console.error('[Coin] Finalize error:', e));
-        }, 30000);
+        }, 60000);
     } else {
         // Fallback: Auto-create a coin session for the most recent active user (optional)
         const autoEnabledRaw = configService.get('auto_coin_session_enabled');
@@ -1223,10 +1220,15 @@ async function handleCoinPulseEvent(pulseCount, source) {
             const minutesAuto = bestAuto.minutes || 0;
             console.log(`[Coin][Auto] ${source || 'unknown'} | User ${mac} | Total: P${pulses} | Time: ${minutesAuto} mins`);
 
+            const pointsEarningRate = Number(configService.get('points_earning_rate')) || 0;
+            const pendingPointsRaw = pulses * pointsEarningRate;
+            const pendingPoints = Math.round(pendingPointsRaw * 100) / 100;
+
             io.emit('coin_pending_update', {
                 mac,
                 amount: pulses,
-                minutes: minutesAuto
+                minutes: minutesAuto,
+                points: pendingPoints
             });
         } catch (e) {
             console.error('[Coin][Auto] Failed to create auto coin session:', e.message);
@@ -2116,6 +2118,24 @@ app.get('/api/admin/system/backup', isAuthenticated, (req, res) => {
 app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
     res.set('Cache-Control', 'no-store');
 
+    let pppoeExpiredCount = 0;
+    try {
+        const nowMs = Date.now();
+        const rows = db.prepare("SELECT expiration_date FROM pppoe_users WHERE expiration_date IS NOT NULL AND expiration_date != ''").all();
+        for (const r of rows) {
+            const raw = r && r.expiration_date != null ? String(r.expiration_date) : '';
+            if (!raw) continue;
+            let d = new Date(raw);
+            if (Number.isNaN(d.getTime())) {
+                const alt = raw.includes('T') ? raw : raw.replace(' ', 'T');
+                d = new Date(alt);
+            }
+            if (!Number.isNaN(d.getTime()) && d.getTime() < nowMs) {
+                pppoeExpiredCount++;
+            }
+        }
+    } catch (e) {}
+
     const stats = {
         uptime: os.uptime(),
         load_avg: os.loadavg(),
@@ -2143,7 +2163,7 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
         clients_expired: db.prepare("SELECT COUNT(*) as c FROM users WHERE time_remaining <= 0").get().c || 0,
         pppoe_online: db.prepare("SELECT COUNT(*) as c FROM pppoe_users WHERE current_ip IS NOT NULL AND current_ip != ''").get().c || 0,
         pppoe_offline: db.prepare("SELECT COUNT(*) as c FROM pppoe_users WHERE current_ip IS NULL OR current_ip = ''").get().c || 0,
-        pppoe_expired: db.prepare("SELECT COUNT(*) as c FROM pppoe_users WHERE datetime(expiration_date) < datetime('now')").get().c || 0
+        pppoe_expired: pppoeExpiredCount
     };
     res.json(stats);
 });
@@ -2643,7 +2663,8 @@ app.get('/api/portal/config', (req, res) => {
         announcement_title: configService.get('portal_announcement_title', 'Announcement'),
         announcement_message: configService.get('portal_announcement_message', ''),
         insert_coin_bg_image: configService.get('portal_insert_coin_bg_image', ''),
-        insert_coin_bg_audio: configService.get('portal_insert_coin_bg_audio', '')
+        insert_coin_bg_audio: configService.get('portal_insert_coin_bg_audio', ''),
+        points_earning_rate: configService.get('points_earning_rate')
     };
     res.json(config);
 });
@@ -4948,7 +4969,6 @@ app.post('/api/session/pause', async (req, res) => {
             const now = new Date();
             const timestamp = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
 
-            // Mark paused and clear cumulative traffic counters for a fresh view on resume
             db.prepare('UPDATE users SET is_paused = 1, is_connected = 1, total_data_up = 0, total_data_down = 0, last_traffic_at = ?, updated_at = ? WHERE id = ?')
               .run(timestamp, timestamp, req.user.id);
             

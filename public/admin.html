@@ -3357,7 +3357,7 @@
                                     </div>
                                     <div class="info-row">
                                         <span class="info-label">Expired</span>
-                                        <span class="info-value" id="pppoe-expired-count">0</span>
+                                        <span class="info-value" id="pppoe-expired-count-dashboard">0</span>
                                     </div>
                                 </div>
                             </div>
@@ -4321,7 +4321,7 @@
                                         <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
                                     </svg>
                                     <span>Expired PPPoE Users</span>
-                                    <span id="pppoe-expired-count" class="badge bg-secondary" style="margin-left:8px; font-size:0.75em;">0</span>
+                                    <span id="pppoe-expired-count-card" class="badge bg-secondary" style="margin-left:8px; font-size:0.75em;">0</span>
                                 </span>
                             </div>
                             <div style="display:flex; align-items:center; gap:10px;">
@@ -8088,7 +8088,7 @@
 
                 if (document.getElementById('pppoe-online-count')) document.getElementById('pppoe-online-count').textContent = (data.pppoe_online || 0);
                 if (document.getElementById('pppoe-offline-count')) document.getElementById('pppoe-offline-count').textContent = (data.pppoe_offline || 0);
-                if (document.getElementById('pppoe-expired-count')) document.getElementById('pppoe-expired-count').textContent = (data.pppoe_expired || 0);
+                if (document.getElementById('pppoe-expired-count-dashboard')) document.getElementById('pppoe-expired-count-dashboard').textContent = (data.pppoe_expired || 0);
 
                 await refreshTopVendoSummary(false);
                 await refreshTopClientsSummary(false);
@@ -14501,7 +14501,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 // Update Counts
                 const usersCountEl = document.getElementById('pppoe-users-count');
                 const statusCountEl = document.getElementById('pppoe-status-count');
-                const expiredCountEl = document.getElementById('pppoe-expired-count');
+                const expiredCountEl = document.getElementById('pppoe-expired-count-card');
 
                 if (usersCountEl) usersCountEl.textContent = users.length;
                 if (statusCountEl) statusCountEl.textContent = statusVisibleIds.size;

@@ -132,7 +132,8 @@ class VoucherService {
             // 1.1 Calculate and Award Points
             const pointsEarningRate = Number(configService.get('points_earning_rate')) || 0;
             const voucherPrice = Number(voucher.price) || 0;
-            const pointsEarned = Math.floor(voucherPrice * pointsEarningRate);
+            const pointsEarnedRaw = voucherPrice * pointsEarningRate;
+            const pointsEarned = Math.round(pointsEarnedRaw * 100) / 100;
             
             if (pointsEarned > 0) {
                  db.prepare('UPDATE users SET points_balance = COALESCE(points_balance, 0) + ? WHERE id = ?').run(pointsEarned, user.id);

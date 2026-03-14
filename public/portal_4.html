@@ -8,17 +8,26 @@
     <link rel="apple-touch-icon" href="/neologo.png">
     <style>
         :root {
-            --primary: #3498db; /* Blue */
-            --success: #2ecc71; /* Green */
-            --danger: #e74c3c; /* Red */
-            --purple: #9b59b6; /* Purple */
-            --bg: #f0f2f5; /* Light Background */
-            --text: #2c3e50; /* Dark Text */
-            --text-muted: #7f8c8d; /* Muted Text */
-            --white: #ffffff; /* White Container */
-            --shadow: 0 8px 30px rgba(0,0,0,0.12); /* Soft Shadow */
-            --radius: 20px; /* More rounded card */
-            --btn-radius: 50px; /* Pill buttons */
+            --primary: #3a3a3a;
+            --success: #2f2f2f;
+            --danger: #4a4a4a;
+            --purple: #5a5a5a;
+            --bg: #e6e3dd;
+            --text: #1f1f1f;
+            --text-muted: #6a6a6a;
+            --white: #fbfaf7;
+            --shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+            --radius: 16px;
+            --btn-radius: 14px;
+            --paper-border: rgba(0, 0, 0, 0.12);
+            --paper-line: rgba(0, 0, 0, 0.05);
+            --ink-strong: rgba(0, 0, 0, 0.86);
+            --ink-soft: rgba(0, 0, 0, 0.55);
+            --paper-surface: rgba(251, 250, 247, 1);
+            --paper-shadow-inset: none;
+            --paper-emboss: none;
+            --warning: #6f6f6f;
+            --accent: #4a4a4a;
         }
 
         * {
@@ -30,6 +39,7 @@
 
         body {
             background: var(--bg);
+            background-image: none;
             color: var(--text);
             min-height: 100vh;
             display: flex;
@@ -51,31 +61,39 @@
 
         .container {
             width: 100%;
-            max-width: 360px;
+            max-width: 420px;
             background: var(--white);
-            border-radius: var(--radius);
+            border-radius: 0;
             box-shadow: var(--shadow);
             overflow: hidden;
             text-align: center;
             padding-bottom: 10px;
+            border: 1px solid var(--paper-border);
+            position: relative;
         }
+
+        .container::before { display: none; }
 
         .portal-banner {
             width: 100%;
-            height: 190px;
+            height: 210px;
             position: relative;
             overflow: hidden;
             display: block;
             background: var(--white);
             /* border-bottom: 1px solid rgba(0,0,0,0.06); */
+            border-bottom: 1px solid var(--paper-border);
         }
 
         .portal-banner::after {
-            display: none;
             content: "";
             position: absolute;
-            inset: 0;
-            background: linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.22) 100%);
+            left: -1px;
+            right: -1px;
+            bottom: -1px;
+            height: 26px;
+            background: var(--white);
+            clip-path: polygon(0% 40%, 6% 55%, 12% 42%, 18% 60%, 24% 46%, 30% 62%, 36% 48%, 42% 63%, 48% 50%, 54% 65%, 60% 52%, 66% 64%, 72% 50%, 78% 62%, 84% 46%, 90% 60%, 96% 44%, 100% 58%, 100% 100%, 0% 100%);
             pointer-events: none;
             z-index: 2;
         }
@@ -112,10 +130,11 @@
             border-radius: 999px;
             display: grid;
             place-items: center;
-            background: rgba(0, 0, 0, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.62);
+            border: 1px solid rgba(255, 250, 240, 0.22);
             backdrop-filter: blur(10px);
             z-index: 3;
+            display: none;
         }
 
         .portal-status-pill svg {
@@ -126,17 +145,17 @@
 
         .portal-status-pill.connected {
             color: var(--success);
-            box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.18), 0 0 18px rgba(46, 204, 113, 0.55);
+            box-shadow: none;
         }
 
         .portal-status-pill.disconnected {
             color: var(--text-muted);
-            box-shadow: 0 0 0 3px rgba(99, 110, 114, 0.18), 0 0 18px rgba(99, 110, 114, 0.45);
+            box-shadow: none;
         }
 
         .portal-status-pill.paused {
-            color: #f39c12;
-            box-shadow: 0 0 0 3px rgba(243, 156, 18, 0.18), 0 0 18px rgba(243, 156, 18, 0.55);
+            color: var(--warning);
+            box-shadow: none;
         }
 
         .portal-status-pill.connected #status-icon-connected,
@@ -151,6 +170,7 @@
             padding: 4px 12px 4px;
             background: var(--white);
             /* border-bottom: 1px solid #f1f2f6; */
+            border-bottom: 0;
         }
         
         .status-icon {
@@ -162,9 +182,9 @@
         }
 
         .status-text {
-            font-size: 1.12rem;
+            font-size: 1.1rem;
             font-weight: 700;
-            color: var(--text-muted);
+            color: var(--text);
             margin-top: 0;
         }
 
@@ -177,7 +197,7 @@
         }
 
         .status-text.paused {
-            color: #f39c12;
+            color: var(--warning);
         }
 
         /* Info Row */
@@ -186,7 +206,7 @@
             justify-content: center;
             gap: 10px;
             font-size: 0.85rem;
-            color: var(--primary);
+            color: var(--text);
             margin-top: 5px;
             font-weight: 500;
         }
@@ -207,21 +227,21 @@
 
         .credit-label {
             font-size: 0.9rem;
-            color: var(--primary);
+            color: var(--text);
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         .timer-value {
-            font-size: clamp(3.0rem, 10vw, 4.0rem);
+            font-size: clamp(3.3rem, 10vw, 4.2rem);
             font-weight: 700;
-            color: var(--primary);
+            color: var(--text);
             font-variant-numeric: tabular-nums;
             line-height: 1.1;
             margin: 5px 0;
             white-space: nowrap;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.25);
+            text-shadow: none;
         }
 
         .timer-value.long {
@@ -231,7 +251,7 @@
         .code-display {
             font-size: 0.78rem;
             font-weight: 700;
-            color: #e67e22; /* Orange for code */
+            color: var(--accent);
             margin-bottom: 2px;
         }
 
@@ -241,44 +261,70 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
-            background: #f8f9fa;
-            border: 1px solid #e1e4e8;
-            padding: 8px 16px;
-            border-radius: 50px;
+            background: rgba(0, 0, 0, 0.03);
+            border: 1px solid var(--paper-border);
+            padding: 6px 8px;
+            border-radius: 0;
             cursor: pointer;
             transition: all 0.2s;
-            font-size: 0.9rem;
-            color: var(--text-muted);
+            font-size: 0.74rem;
+            color: var(--text);
             width: 100%;
-            max-width: 180px;
+            max-width: 130px;
             margin: 0 auto;
         }
 
         .device-trigger:hover {
-            background: #eef1f5;
-            border-color: #d1d5da;
+            background: rgba(0, 0, 0, 0.05);
+            border-color: rgba(0, 0, 0, 0.18);
         }
 
-        /* Buttons */
-        .actions {
+        #vendo-selection-container {
+            width: 100%;
+            padding: 0 16px;
+            align-items: center !important;
+        }
+
+        #free-time-widget {
+            margin-left: 0;
+        }
+
+        /* Action Layout */
+        .action-grid {
             padding: 8px 16px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 150px;
+            gap: 12px;
+            align-items: start;
+        }
+
+        .action-left {
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 10px;
+        }
+
+        .action-right {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
         }
 
         .btn {
             width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: var(--btn-radius);
+            padding: 12px 10px;
+            border: 1px solid rgba(0, 0, 0, 0.35);
+            border-radius: 0;
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.1s, opacity 0.2s;
-            color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            color: var(--text);
+            box-shadow: none;
             white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            background: #bdbdbd;
         }
 
         .btn:active {
@@ -286,25 +332,62 @@
         }
 
         .btn-insert {
-            background: var(--success);
+            background: #bdbdbd;
         }
 
         .btn-rates {
-            background: var(--primary);
+            background: #bdbdbd;
         }
 
         .btn-points {
-            background: var(--purple);
+            background: #bdbdbd;
         }
 
         .btn-pause {
-            background: var(--danger);
+            background: #bdbdbd;
+        }
+
+        .btn-circle {
+            width: 150px;
+            height: 150px;
+            border-radius: 999px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            font-size: 1.15rem;
+            font-weight: 700;
+            padding: 0;
+            line-height: 1.1;
+        }
+
+        @keyframes heartbeat {
+            0% { transform: scale(1); }
+            10% { transform: scale(1.06); }
+            20% { transform: scale(1); }
+            30% { transform: scale(1.04); }
+            45% { transform: scale(1); }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes heartbeat-shadow {
+            0% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+            10% { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22), 0 0 0 10px rgba(0, 0, 0, 0.06); }
+            20% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+            30% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18), 0 0 0 8px rgba(0, 0, 0, 0.05); }
+            45% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+            100% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+        }
+
+        #btn-insert.btn-circle {
+            animation: heartbeat 1.6s ease-in-out infinite, heartbeat-shadow 1.6s ease-in-out infinite;
+            transform-origin: center;
+            will-change: transform, box-shadow;
         }
 
         .btn-free-time {
             background: transparent;
             color: var(--primary);
-            border: 1px solid var(--primary);
+            border: 1px solid rgba(0, 0, 0, 0.35);
             box-shadow: none;
             border-radius: var(--btn-radius);
             margin-top: 5px;
@@ -318,7 +401,7 @@
         .code-display-block {
             text-align: center;
             font-weight: 700;
-            color: #e67e22; /* Orange */
+            color: var(--accent);
             font-size: 1rem;
             margin: 5px 0 10px;
             display: flex;
@@ -327,7 +410,7 @@
         }
 
         .points-badge {
-            color: #e67e22; /* Match Code Orange */
+            color: var(--accent);
             background: transparent;
             padding: 0;
             margin-left: 8px;
@@ -349,13 +432,14 @@
             width: 100%;
             padding: 10px 14px;
             padding-right: 100px; /* Space for button */
-            border: 1px solid #ddd;
-            border-radius: 50px;
+            border: 1px solid var(--paper-border);
+            border-radius: 0;
             font-size: 0.95rem;
             outline: none;
             background: #fff;
             color: var(--text);
             height: 50px;
+            box-shadow: none;
         }
 
         .btn-submit {
@@ -367,9 +451,25 @@
             color: white;
             border: none;
             padding: 0 16px;
-            border-radius: 50px;
+            border-radius: 0;
             font-weight: 600;
             cursor: pointer;
+            background: #bdbdbd;
+            border: 1px solid rgba(0, 0, 0, 0.35);
+            color: var(--text);
+        }
+
+        @media (max-width: 420px) {
+            .action-grid {
+                grid-template-columns: minmax(0, 1fr) 140px;
+            }
+            .action-right {
+                justify-content: flex-end;
+            }
+            .btn-circle {
+                width: 140px;
+                height: 140px;
+            }
         }
 
         .coin-countdown {
@@ -379,10 +479,10 @@
         .coin-countdown-bar {
             width: 100%;
             height: 10px;
-            background: #444;
+            background: rgba(0, 0, 0, 0.18);
             border-radius: 999px;
             overflow: hidden;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
+            box-shadow: none;
         }
 
         .coin-countdown-fill {
@@ -405,7 +505,7 @@
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.35);
             justify-content: center;
             align-items: center;
             z-index: 1000;
@@ -427,6 +527,8 @@
             text-align: center;
             transform: scale(0.95);
             transition: transform 0.2s;
+            border: 1px solid var(--paper-border);
+            box-shadow: var(--shadow);
         }
 
         .modal.show .modal-content {
@@ -471,8 +573,8 @@
         .rate-header {
             display: grid;
             grid-template-columns: 0.8fr 1.0fr 1.1fr 0.9fr;
-            border-bottom: 1px solid #444;
-            background: #2c3e50;
+            border-bottom: 1px solid var(--paper-border);
+            background: rgba(0, 0, 0, 0.82);
         }
 
         .rate-header-col {
@@ -481,18 +583,18 @@
             font-size: 0.8rem;
             text-transform: uppercase;
             letter-spacing: 0.6px;
-            color: #bdc3c7;
+            color: rgba(255, 255, 255, 0.82);
             font-weight: 600;
         }
 
         .rate-header-col:not(:last-child) {
-            border-right: 1px solid #444;
+            border-right: 1px solid rgba(255, 255, 255, 0.16);
         }
 
         .rate-item {
             display: grid;
             grid-template-columns: 0.8fr 1.0fr 1.1fr 0.9fr;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--paper-border);
             background: var(--white);
         }
 
@@ -503,7 +605,7 @@
         }
 
         .rate-col:not(:last-child) {
-            border-right: 1px solid #333;
+            border-right: 1px solid var(--paper-border);
         }
 
         .rate-label {
@@ -523,13 +625,13 @@
             align-items: center;
             justify-content: space-between;
             padding: 6px 10px; /* Reduced height */
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--paper-border);
             background: var(--white);
         }
 
         .point-rate-item .rate-amount {
             font-weight: 700;
-            color: #9b59b6;
+            color: var(--accent);
             flex: 0 0 70px; /* Fixed width */
             text-align: left;
         }
@@ -565,9 +667,9 @@
         }
 
         .toast {
-            background: #333;
+            background: rgba(0, 0, 0, 0.82);
             color: #fff;
-            backdrop-filter: blur(10px);
+            backdrop-filter: none;
             border-radius: 12px;
             padding: 12px 16px;
             box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
@@ -576,12 +678,12 @@
             gap: 12px;
             animation: slideInDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             pointer-events: auto;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.12);
         }
         
         .toast.error { border-left: 4px solid var(--danger); }
         .toast.success { border-left: 4px solid var(--success); }
-        .toast.warning { border-left: 4px solid #f39c12; }
+        .toast.warning { border-left: 4px solid var(--warning); }
 
         .toast-icon {
             font-size: 1.2rem;
@@ -645,12 +747,12 @@
             height: 400px;
             background: var(--white);
             border-radius: 12px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            box-shadow: var(--shadow);
             display: flex;
             flex-direction: column;
             z-index: 1000;
             overflow: hidden;
-            border: 1px solid #333;
+            border: 1px solid var(--paper-border);
             /* Animation */
             opacity: 0;
             visibility: hidden;
@@ -686,7 +788,7 @@
         }
         .chat-widget-input {
             padding: 10px;
-            border-top: 1px solid #333;
+            border-top: 1px solid var(--paper-border);
             display: flex;
             gap: 5px;
             background: var(--white);
@@ -694,10 +796,10 @@
         .chat-widget-input input {
             flex: 1;
             padding: 8px;
-            border: 1px solid #444;
+            border: 1px solid var(--paper-border);
             border-radius: 4px;
             outline: none;
-            background: #2c2c2c;
+            background: #fff;
             color: var(--text);
         }
         .chat-widget-input button {
@@ -728,8 +830,8 @@
         }
         .chat-msg.received {
             align-self: flex-start;
-            background: #444;
-            color: #fff;
+            background: rgba(0, 0, 0, 0.10);
+            color: var(--text);
             border-bottom-left-radius: 2px;
         }
         .chat-unread-badge {
@@ -759,20 +861,20 @@
             align-items: center;
             justify-content: space-between;
             padding: 8px 12px;
-            border-bottom: 1px solid #f1f2f6;
+            border-bottom: 1px solid var(--paper-border);
             cursor: pointer;
             border-radius: 6px;
             transition: background 0.2s;
             font-size: 0.9rem;
         }
         .device-item:hover {
-            background: #f8f9fa;
+            background: rgba(0, 0, 0, 0.04);
         }
         .device-item:last-child {
             border-bottom: none;
         }
         .device-item.active {
-            background: #ebf7ff;
+            background: rgba(0, 0, 0, 0.04);
             color: var(--primary);
             font-weight: 600;
         }
@@ -782,7 +884,7 @@
             border-radius: 50%;
             display: inline-block;
         }
-        .device-status-dot.online { background: var(--success); box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.2); }
+        .device-status-dot.online { background: var(--success); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12); }
         .device-status-dot.offline { background: var(--text-muted); opacity: 0.5; }
 
         /* Coin Animation */
@@ -825,10 +927,10 @@
             transform: translateX(-50%);
             width: 24px;
             height: 24px;
-            background: #f1c40f;
-            border: 2px solid #f39c12;
+            background: #d7d7d7;
+            border: 2px solid #a9a9a9;
             border-radius: 50%;
-            box-shadow: inset 0 0 0 2px #f1c40f, inset 0 0 0 3px #f39c12;
+            box-shadow: inset 0 0 0 2px #d7d7d7, inset 0 0 0 3px #a9a9a9;
             animation: insertCoin 1.5s infinite ease-in-out;
             z-index: 1;
         }
@@ -841,7 +943,7 @@
             transform: translate(-50%, -50%);
             font-size: 14px;
             font-weight: bold;
-            color: #d35400;
+            color: #6a6a6a;
         }
 
         @keyframes insertCoin {
@@ -932,11 +1034,15 @@
         </div>
 
         <!-- Action Grid -->
-        <div class="actions">
-            <button class="btn btn-insert" id="btn-insert" onclick="startCoinMode()">Insert Coins</button>
-            <button class="btn btn-pause" id="btn-pause" onclick="togglePause()" style="display:none;">Pause Time</button>
-            <button class="btn btn-rates" onclick="showRates()">Wifi Rates</button>
-            <button class="btn btn-points" id="btn-points" onclick="showPointRates()" style="display:none;">Redeem Points</button>
+        <div class="action-grid">
+            <div class="action-left">
+                <button class="btn btn-pause" id="btn-pause" onclick="togglePause()" style="display:none;">Pause Time</button>
+                <button class="btn btn-rates" onclick="showRates()">Wifi Rates</button>
+                <button class="btn btn-points" id="btn-points" onclick="showPointRates()" style="display:none;">Redeem Points</button>
+            </div>
+            <div class="action-right">
+                <button class="btn btn-insert btn-circle" id="btn-insert" onclick="startCoinMode()">Insert Coins</button>
+            </div>
         </div>
 
         <!-- Voucher Input (Inline) -->
@@ -961,7 +1067,7 @@
             <div id="device-list" class="device-list">
                 <!-- Device items populated via JS -->
             </div>
-            <button class="btn btn-rates" style="margin-top: 15px; background: #95a5a6;" onclick="closeDeviceModal()">Cancel</button>
+            <button class="btn btn-rates" style="margin-top: 15px; background: #8a8a8a;" onclick="closeDeviceModal()">Cancel</button>
         </div>
     </div>
 
@@ -1004,12 +1110,12 @@
         <div class="modal-content">
             <div class="modal-title">Redeem Points</div>
             <div style="text-align:center; margin-bottom:10px;">
-                Balance: <span id="modal-points-balance" style="font-weight:bold; color:#9b59b6;">0</span> pts
+                Balance: <span id="modal-points-balance" style="font-weight:bold; color:#4a4a4a;">0</span> pts
             </div>
             <div class="rate-list" id="point-rates-list">
                 <!-- Rates loaded here -->
             </div>
-            <button class="btn btn-rates" style="margin-top:15px; background:#95a5a6;" onclick="closeModal('point-rates-modal')">Close</button>
+            <button class="btn btn-rates" style="margin-top:15px; background:#8a8a8a;" onclick="closeModal('point-rates-modal')">Close</button>
         </div>
     </div>
 
@@ -1458,7 +1564,7 @@
                 banner.style.zIndex = '3000';
                 banner.style.display = 'none';
                 banner.style.padding = '10px 14px';
-                banner.style.background = '#c0392b';
+                banner.style.background = '#3a3a3a';
                 banner.style.color = '#fff';
                 banner.style.fontWeight = '600';
                 banner.style.textAlign = 'center';
@@ -1877,7 +1983,7 @@
                     if (currentVendo && currentVendo.isLicenseExpired) {
                         insertBtnOverride.textContent = 'License Expired';
                         insertBtnOverride.disabled = true;
-                        insertBtnOverride.style.background = '#e74c3c'; // Red
+                        insertBtnOverride.style.background = '#5a5a5a';
                         insertBtnOverride.style.opacity = '0.6';
                         insertBtnOverride.onclick = null; // Remove handler
                     } else {
@@ -1916,7 +2022,7 @@
                         statusText.className = 'status-text paused';
                         setPortalStatus('paused');
                         pauseBtn.textContent = 'Resume Time';
-                        pauseBtn.style.background = '#f39c12';
+                        pauseBtn.style.background = '#5a5a5a';
                         hasRedirected = false; // Reset so we redirect again on resume
                         
                         // Respect manual pause lock
@@ -2332,7 +2438,7 @@
                             <div style="font-weight:bold; color:#2c3e50;">${durationText}</div>
                             <div style="font-size:0.8rem; color:#7f8c8d;">${rate.description || 'No description'}</div>
                         </div>
-                        <button class="btn btn-rates btn-redeem" style="background: ${canAfford ? '#9b59b6' : '#95a5a6'};" 
+                        <button class="btn btn-rates btn-redeem" style="background: ${canAfford ? '#5a5a5a' : '#8a8a8a'};" 
                             ${canAfford ? `onclick="window.redeemPoints(${rate.points})"` : 'disabled'}>
                             ${canAfford ? 'Redeem' : 'Need Pts'}
                         </button>
