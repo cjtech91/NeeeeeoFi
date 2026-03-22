@@ -682,6 +682,78 @@ const initDb = () => {
       }
   } catch(e) {}
 
+  // Migration: Ensure coin pulse timing settings exist (for accurate multi-pulse coins like ₱20)
+  try {
+      const hasCoinDebounce = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_debounce'").get();
+      if (!hasCoinDebounce) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_debounce', '1', 'number', 'hardware')").run();
+      }
+      const hasCoinCommit = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_commit_time'").get();
+      if (!hasCoinCommit) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_commit_time', '400', 'number', 'hardware')").run();
+      }
+      const hasCoinCommitBase = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_commit_time_base'").get();
+      if (!hasCoinCommitBase) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_commit_time_base', '400', 'number', 'hardware')").run();
+      }
+      const hasCoinCommitLarge = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_commit_time_large'").get();
+      if (!hasCoinCommitLarge) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_commit_time_large', '1200', 'number', 'hardware')").run();
+      }
+      const hasCoinActive = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_active_level'").get();
+      if (!hasCoinActive) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_active_level', 'auto', 'string', 'hardware')").run();
+      }
+      const hasCoinSnapEnabled = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_pulse_snap_enabled'").get();
+      if (!hasCoinSnapEnabled) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_pulse_snap_enabled', 'true', 'boolean', 'hardware')").run();
+      }
+      const hasCoinSnapTol = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_pulse_snap_tolerance'").get();
+      if (!hasCoinSnapTol) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_pulse_snap_tolerance', '2', 'number', 'hardware')").run();
+      }
+      const hasCoinPulseMap = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_pulse_map'").get();
+      if (!hasCoinPulseMap) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_pulse_map', '{}', 'json', 'hardware')").run();
+      }
+      const hasSingleMode = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_mode'").get();
+      if (!hasSingleMode) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_mode', 'true', 'boolean', 'hardware')").run();
+      }
+      const hasMsSmall = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_ms_small'").get();
+      if (!hasMsSmall) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_ms_small', '250', 'number', 'hardware')").run();
+      }
+      const hasMsMed = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_ms_medium'").get();
+      if (!hasMsMed) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_ms_medium', '500', 'number', 'hardware')").run();
+      }
+      const hasMsLarge = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_ms_large'").get();
+      if (!hasMsLarge) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_ms_large', '900', 'number', 'hardware')").run();
+      }
+      const hasGapSmall = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_gap_ms_small'").get();
+      if (!hasGapSmall) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_gap_ms_small', '200', 'number', 'hardware')").run();
+      }
+      const hasGapMed = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_gap_ms_medium'").get();
+      if (!hasGapMed) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_gap_ms_medium', '250', 'number', 'hardware')").run();
+      }
+      const hasGapLarge = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_gap_ms_large'").get();
+      if (!hasGapLarge) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_gap_ms_large', '300', 'number', 'hardware')").run();
+      }
+      const hasGapAll = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_max_gap_ms'").get();
+      if (!hasGapAll) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_max_gap_ms', '800', 'number', 'hardware')").run();
+      }
+      const hasOverlapBurst = db.prepare("SELECT 1 FROM settings WHERE key = 'coin_single_coin_overlap_burst_ms'").get();
+      if (!hasOverlapBurst) {
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('coin_single_coin_overlap_burst_ms', '250', 'number', 'hardware')").run();
+      }
+  } catch(e) {}
+
   // Migrations for existing tables
   try {
     // Settings Migration

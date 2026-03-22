@@ -121,7 +121,7 @@ class BoardDetectionService {
                 coin_pin: 12,      // physical 3 = PA12
                 relay_pin: 11,     // physical 5 = PA11
                 bill_pin: 6,       // physical 7 = PA6 ← corrected
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -130,7 +130,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -139,7 +139,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -148,7 +148,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -157,7 +157,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -166,7 +166,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -175,7 +175,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -184,7 +184,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -193,7 +193,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -202,7 +202,7 @@ class BoardDetectionService {
                 coin_pin: 12,
                 relay_pin: 11,
                 bill_pin: 6,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -214,7 +214,7 @@ class BoardDetectionService {
                 coin_pin: 229,      // usually physical ~3 (check your exact pinout!)
                 relay_pin: 228,     // usually physical ~5
                 bill_pin: 72,       // usually physical ~7 (PC9)
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -223,7 +223,7 @@ class BoardDetectionService {
                 coin_pin: 229,
                 relay_pin: 228,
                 bill_pin: 72,
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },
@@ -234,7 +234,7 @@ class BoardDetectionService {
                 coin_pin: 2,       // physical 3 = GPIO2
                 relay_pin: 3,      // physical 5 = GPIO3
                 bill_pin: 4,       // physical 7 = GPIO4 ← corrected
-                coin_pin_edge: 'rising',
+                coin_pin_edge: 'falling',
                 bill_pin_edge: 'falling',
                 relay_pin_active: 'HIGH'
             },

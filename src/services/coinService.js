@@ -25,14 +25,21 @@ class CoinService extends EventEmitter {
         
         this.billPin = null;
         this.billValidator = null;
+        this.coinPinEdge = 'both';
+        this.coinIdleLevel = null;
+        this.lastCoinLevel = null;
+        this.burstStartNs = 0n;
+        this.burstLastNs = 0n;
+        this.burstMaxGapNs = 0n;
         
         this.pulseCount = 0;
         this.lastPulseTime = 0;
+        this.lastPulseTimeNs = 0n;
         this.debounceTimer = null;
         this.timer = null;
-        // Use a small software debounce and disable kernel debounce to avoid double-filtering
-        this.debounceTime = parseInt(configService.get('coin_debounce', 3)); // Default 3ms
-        this.commitTime = 300;  // Wait 300ms for more pulses before committing
+        this.debounceTime = 0;
+        this.commitTimeBase = 400;
+        this.commitTimeLarge = 1200;
         
         this.isBanned = false;
         this.banTimer = null;
@@ -85,14 +92,20 @@ class CoinService extends EventEmitter {
             return;
         }
 
+        this.debounceTime = Math.max(0, parseInt(configService.get('coin_debounce', this.debounceTime)));
+        this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time', this.commitTimeBase)));
+        this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time_base', this.commitTimeBase)));
+        this.commitTimeLarge = Math.max(this.commitTimeBase, parseInt(configService.get('coin_commit_time_large', this.commitTimeLarge)));
+
         // --- Coin Settings ---
         const pin = parseInt(configService.get('coin_pin', 12)); // Default 12 (PA12)
-        // Allow robust detection across boards; we'll only count active level below
-        let pinEdge = configService.get('coin_pin_edge', 'both');
-        if (typeof pinEdge === 'string') pinEdge = pinEdge.toLowerCase();
-        // Active level: most acceptors are active-low (line pulled LOW during pulse)
+        // Always use BOTH edges for maximum capture reliability; we will count only the active transition.
+        let pinEdge = 'both';
+        this.coinPinEdge = pinEdge;
+        // Active level configuration:
+        // - low/high: explicit pulse-active level
+        // - auto: determine active level from idle level after pin init (active = inverse(idle))
         const activeLevelCfg = String(configService.get('coin_active_level', 'auto')).toLowerCase();
-        // auto = detect first observed active level from interrupt callback
         this.activeLevel = (activeLevelCfg === 'high') ? 1 : (activeLevelCfg === 'low' ? 0 : null);
         
         // --- Bill Settings ---
@@ -107,7 +120,8 @@ class CoinService extends EventEmitter {
         this.banLimit = parseInt(configService.get('ban_limit_counter', 10)); 
         this.banDuration = parseInt(configService.get('ban_duration', 1)); // minutes
 
-        console.log(`CoinService: Init Coin(GPIO${pin}, ${pinEdge}) | Bill(GPIO${billPin}, ${billPinEdge}, x${this.billMultiplier}) | Ban(Limit: ${this.banLimit}s, Duration: ${this.banDuration}m)`);
+        const activeLabel = (this.activeLevel === null) ? 'AUTO' : (this.activeLevel === 0 ? 'LOW' : 'HIGH');
+        console.log(`CoinService: Init Coin(GPIO${pin}, ${pinEdge}, Active:${activeLabel}) | Bill(GPIO${billPin}, ${billPinEdge}, x${this.billMultiplier}) | Debounce(${this.debounceTime}ms) | Commit(Base:${this.commitTimeBase}ms Large:${this.commitTimeLarge}ms) | Ban(Limit: ${this.banLimit}s, Duration: ${this.banDuration}m)`);
 
         // Cleanup Coin Object
         if (this.coinInsert) {
@@ -166,6 +180,16 @@ class CoinService extends EventEmitter {
             // Coin
             this.coinInsert = await initPin(this.gpioPin, pinEdge, 'Coin');
             if (this.coinInsert) {
+                try {
+                    const idle = this.coinInsert.readSync();
+                    if (idle === 0 || idle === 1) {
+                        this.coinIdleLevel = idle;
+                        if (this.activeLevel === null) {
+                            this.activeLevel = idle === 0 ? 1 : 0;
+                        }
+                        console.log(`CoinService: Coin idle=${idle} => active=${this.activeLevel === 0 ? 'LOW' : 'HIGH'}`);
+                    }
+                } catch (e) {}
                 this.coinInsert.watch(this.handleCoinPulse.bind(this));
             }
             
@@ -224,25 +248,37 @@ class CoinService extends EventEmitter {
             return;
         }
 
-        // Auto-detect active level on first interrupt if configured as 'auto'
-        try {
-            if (this.activeLevel === null && (value === 0 || value === 1)) {
-                this.activeLevel = value;
-                console.log(`CoinService: Auto-detected active level = ${this.activeLevel === 0 ? 'LOW' : 'HIGH'}`);
-            }
-            // Only count when we see the configured active level (avoid double counting with 'both' edges)
-            if (this.activeLevel !== null && value !== this.activeLevel) return;
-        } catch (e) {}
+        const level = (value === 0 || value === 1) ? value : null;
+        if (level === null) return;
+        const prevLevel = this.lastCoinLevel;
+        this.lastCoinLevel = level;
+
+        if (this.coinPinEdge === 'both') {
+            const active = (this.activeLevel === 0 || this.activeLevel === 1) ? this.activeLevel : 0;
+            if (level !== active) return;
+            if (prevLevel === level) return;
+        }
 
         if (this.checkBanCondition()) return;
         
         const now = Date.now();
-        
-        // Simple debounce
-        if (now - this.lastPulseTime < this.debounceTime) return;
+        const nowNs = process.hrtime.bigint();
+        const debounceNs = BigInt(Math.max(0, Number(this.debounceTime) || 0)) * 1000000n;
+        if (debounceNs > 0n) {
+            if (this.lastPulseTimeNs && (nowNs - this.lastPulseTimeNs) < debounceNs) return;
+        }
         this.lastPulseTime = now;
+        this.lastPulseTimeNs = nowNs;
 
         this.pulseCount++;
+        try {
+            if (this.burstStartNs === 0n) this.burstStartNs = nowNs;
+            if (this.burstLastNs !== 0n) {
+                const gap = nowNs - this.burstLastNs;
+                if (gap > this.burstMaxGapNs) this.burstMaxGapNs = gap;
+            }
+            this.burstLastNs = nowNs;
+        } catch (e) {}
         try {
             this.emit('pulse', 1);
         } catch (e) {}
@@ -252,7 +288,7 @@ class CoinService extends EventEmitter {
 
         this.timer = setTimeout(() => {
             this.commitCoins();
-        }, this.commitTime);
+        }, (this.pulseCount >= 6) ? this.commitTimeLarge : this.commitTimeBase);
     }
     
     handleBillPulse(err, value) {
@@ -267,22 +303,73 @@ class CoinService extends EventEmitter {
         if (this.checkBanCondition()) return;
         
         const now = Date.now();
-        if (now - this.lastPulseTime < this.debounceTime) return;
+        const nowNs = process.hrtime.bigint();
+        const debounceNs = BigInt(Math.max(0, Number(this.debounceTime) || 0)) * 1000000n;
+        if (debounceNs > 0n) {
+            if (this.lastPulseTimeNs && (nowNs - this.lastPulseTimeNs) < debounceNs) return;
+        }
         this.lastPulseTime = now;
+        this.lastPulseTimeNs = nowNs;
         
         this.pulseCount += this.billMultiplier; 
         
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => {
             this.commitCoins();
-        }, this.commitTime);
+        }, (this.pulseCount >= 6) ? this.commitTimeLarge : this.commitTimeBase);
     }
 
     commitCoins() {
         if (this.pulseCount > 0) {
-            console.log(`Coin Inserted: ${this.pulseCount} pulses`);
-            this.emit('coin', this.pulseCount);
+            const rawPulses = this.pulseCount;
+            let amount = rawPulses;
+            let burstMs = 0;
+            let maxGapMs = 0;
+            try {
+                if (this.burstStartNs && this.burstLastNs && this.burstLastNs >= this.burstStartNs) {
+                    burstMs = Number((this.burstLastNs - this.burstStartNs) / 1000000n);
+                }
+                if (this.burstMaxGapNs && this.burstMaxGapNs > 0n) {
+                    maxGapMs = Number(this.burstMaxGapNs) / 1000000;
+                }
+            } catch (e) {}
+
+            try {
+                const map = configService.get('coin_pulse_map', null);
+                if (map && typeof map === 'object' && map[String(rawPulses)] != null) {
+                    const mapped = Number(map[String(rawPulses)]);
+                    if (Number.isFinite(mapped) && mapped > 0) amount = mapped;
+                } else {
+                    const snapEnabledRaw = configService.get('coin_pulse_snap_enabled', true);
+                    const snapEnabled = snapEnabledRaw !== false && snapEnabledRaw !== 'false' && snapEnabledRaw !== 0 && snapEnabledRaw !== '0';
+                    if (snapEnabled) {
+                        const singleModeRaw = configService.get('coin_single_coin_mode', true);
+                        const singleMode = singleModeRaw !== false && singleModeRaw !== 'false' && singleModeRaw !== 0 && singleModeRaw !== '0';
+                        if (singleMode) {
+                            const maxGapAllowedMs = Math.max(0, parseInt(configService.get('coin_single_coin_max_gap_ms', 800)));
+                            const allowSnap = maxGapMs <= maxGapAllowedMs;
+                            if (allowSnap) {
+                                if (rawPulses >= 11 && rawPulses <= 20) amount = 20;
+                                else if (rawPulses >= 6 && rawPulses <= 10) amount = 10;
+                                else if (rawPulses >= 2 && rawPulses <= 5) amount = 5;
+                            }
+                        } else {
+                            if (rawPulses >= 11 && rawPulses <= 20) amount = 20;
+                            else if (rawPulses >= 6 && rawPulses <= 10) amount = 10;
+                            else if (rawPulses >= 2 && rawPulses <= 5) amount = 5;
+                        }
+                    }
+                }
+            } catch (e) {}
+
+            if (amount !== rawPulses) console.log(`Coin Inserted: ${rawPulses} pulses -> ₱${amount}`);
+            else console.log(`Coin Inserted: ${rawPulses} pulses`);
+            this.emit('coin', amount);
             this.pulseCount = 0;
+            this.burstStartNs = 0n;
+            this.burstLastNs = 0n;
+            this.burstMaxGapNs = 0n;
+            this.lastCoinLevel = null;
             this.activityStart = 0; // Reset activity timer on successful commit
         }
     }
