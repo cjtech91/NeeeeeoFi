@@ -1,0 +1,15 @@
+name = "neofi-license"
+main = "src/index.js"
+compatibility_date = "2026-03-23"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "neofi_license"
+database_id = "REPLACE_ME"
+
+[vars]
+# Optional. If set, requests must include: Authorization: Bearer <API_TOKEN>
+API_TOKEN = ""
+
+# Set this as a Worker secret, not here:
+# wrangler secret put LICENSE_PRIVATE_KEY_PEM

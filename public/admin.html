@@ -6489,6 +6489,22 @@
                                     <button onclick="saveLicenseServerUrl()" class="btn btn-primary">Save Server URL</button>
                                 </div>
                             </div>
+
+                            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+
+                            <div id="cloudflare-license-section">
+                                <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Cloudflare Licensing</h3>
+                                <div style="display:flex; gap:10px; max-width: 900px; flex-wrap:wrap;">
+                                    <input type="text" id="license-activation-url-input" class="form-control" placeholder="https://<your-worker-domain>/activate" style="flex:1 1 360px;">
+                                    <input type="text" id="license-validate-url-input" class="form-control" placeholder="https://<your-worker-domain>/validate-license (optional)" style="flex:1 1 360px;">
+                                    <input type="text" id="license-heartbeat-url-input" class="form-control" placeholder="https://<your-worker-domain>/heartbeat (optional)" style="flex:1 1 360px;">
+                                    <input type="password" id="license-api-token-input" class="form-control" placeholder="API Token (Bearer) (optional)" style="flex:1 1 240px;">
+                                    <button onclick="saveCloudflareLicenseSettings()" class="btn btn-primary">Save License Settings</button>
+                                </div>
+                                <div style="font-size:0.85rem; color:var(--text-muted); margin-top:10px; line-height:1.4;">
+                                    Notes: If Validate URL is empty, NeoFi auto-derives it from Activation URL. API Token must match the Worker secret <code>API_TOKEN</code>.
+                                </div>
+                            </div>
                             
                             <div id="license-backend-wrapper" style="display:none;">
                                 <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
@@ -6496,14 +6512,7 @@
                                 <div style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
                                     <select id="license-backend-select" class="form-control" style="flex:0 0 200px;" onchange="updateBackendVisibility(this.value)">
                                         <option value="api">Custom API</option>
-                                        <option value="supabase">Supabase Function</option>
                                     </select>
-                                    <div id="supabase-section" style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
-                                        <input type="text" id="supabase-url-input" class="form-control" placeholder="https://...functions.supabase.co/activate" style="flex:1 1 auto;">
-                                        <input type="text" id="supabase-project-url-input" class="form-control" placeholder="https://<ref>.supabase.co (optional fallback)" style="flex:1 1 auto;">
-                                        <input type="password" id="supabase-key-input" class="form-control" placeholder="Supabase anon key (optional)" style="flex:1 1 auto;">
-                                        <button onclick="saveLicenseBackendSettings()" class="btn btn-primary">Save Backend Settings</button>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -13806,14 +13815,17 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     input.value = data.license_api_url || 'http://localhost:8080/api/activate';
                 }
                 const backendSel = document.getElementById('license-backend-select');
-                const supabaseUrlInput = document.getElementById('supabase-url-input');
-                const supabaseProjectUrlInput = document.getElementById('supabase-project-url-input');
-                const supabaseKeyInput = document.getElementById('supabase-key-input');
-                if (backendSel) backendSel.value = (data.license_backend || 'supabase');
-                if (supabaseUrlInput) supabaseUrlInput.value = data.supabase_activation_url || '';
-                if (supabaseProjectUrlInput) supabaseProjectUrlInput.value = data.supabase_project_url || '';
-                if (supabaseKeyInput) supabaseKeyInput.value = data.supabase_anon_key || '';
+                if (backendSel) backendSel.value = (data.license_backend || 'api');
                 if (backendSel) updateBackendVisibility(backendSel.value);
+
+                const act = document.getElementById('license-activation-url-input');
+                const val = document.getElementById('license-validate-url-input');
+                const hb = document.getElementById('license-heartbeat-url-input');
+                const tok = document.getElementById('license-api-token-input');
+                if (act) act.value = data.license_activation_url || '';
+                if (val) val.value = data.license_validate_url || '';
+                if (hb) hb.value = data.license_heartbeat_url || '';
+                if (tok) tok.value = data.license_api_token || '';
             } catch (e) {}
         }
 
@@ -13841,16 +13853,48 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             }
         }
 
+        async function saveCloudflareLicenseSettings() {
+            const sanitize = (s) => (s || '').trim().replace(/^[`'"]+|[`'"]+$/g, '');
+            const act = document.getElementById('license-activation-url-input');
+            const val = document.getElementById('license-validate-url-input');
+            const hb = document.getElementById('license-heartbeat-url-input');
+            const tok = document.getElementById('license-api-token-input');
+
+            const payload = {
+                license_backend: 'cloudflare',
+                license_activation_url: act ? sanitize(act.value) : '',
+                license_validate_url: val ? sanitize(val.value) : '',
+                license_heartbeat_url: hb ? sanitize(hb.value) : '',
+                license_api_token: tok ? sanitize(tok.value) : ''
+            };
+
+            if (!payload.license_activation_url) return alert('Please set the Activation URL');
+
+            try {
+                const btn = document.querySelector('button[onclick="saveCloudflareLicenseSettings()"]');
+                const orig = btn ? btn.textContent : 'Save License Settings';
+                if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+                const res = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('Failed to save');
+                alert('Cloudflare license settings saved. Restart NeoFi service/app to apply heartbeat changes.');
+            } catch (e) {
+                alert('Error saving: ' + e.message);
+            } finally {
+                const btn = document.querySelector('button[onclick="saveCloudflareLicenseSettings()"]');
+                if (btn) { btn.disabled = false; btn.textContent = 'Save License Settings'; }
+            }
+        }
+
         async function saveLicenseBackendSettings() {
             const backendSel = document.getElementById('license-backend-select');
-            const supabaseUrlInput = document.getElementById('supabase-url-input');
-            const supabaseProjectUrlInput = document.getElementById('supabase-project-url-input');
-            const supabaseKeyInput = document.getElementById('supabase-key-input');
             const payload = {
-                license_backend: backendSel ? backendSel.value : 'api',
-                supabase_activation_url: supabaseUrlInput ? supabaseUrlInput.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : '',
-                supabase_project_url: supabaseProjectUrlInput ? supabaseProjectUrlInput.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : '',
-                supabase_anon_key: supabaseKeyInput ? supabaseKeyInput.value.trim().replace(/^[`'"]+|[`'"]+$/g, '') : ''
+                license_backend: backendSel ? backendSel.value : 'api'
             };
             try {
                 const btn = document.querySelector('button[onclick="saveLicenseBackendSettings()"]');
@@ -13874,14 +13918,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
         function updateBackendVisibility(val) {
             const customApi = document.getElementById('custom-api-section');
-            const supa = document.getElementById('supabase-section');
-            if (val === 'supabase') {
-                if (customApi) customApi.style.display = 'none';
-                if (supa) supa.style.display = 'flex';
-            } else {
-                if (customApi) customApi.style.display = 'block';
-                if (supa) supa.style.display = 'none';
-            }
+            if (customApi) customApi.style.display = 'block';
         }
 
         async function activateLicense() {

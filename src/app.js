@@ -417,11 +417,6 @@ app.get('/admin', (req, res) => {
         configService.init();
         networkConfigService.init();
         
-        // Embed Supabase license backend settings
-        configService.set('license_backend', 'supabase', 'system');
-        configService.set('supabase_activation_url', 'https://nmrhhxsfcxabmoqriloj.supabase.co/functions/v1/activate', 'system');
-        configService.set('supabase_project_url', 'https://nmrhhxsfcxabmoqriloj.supabase.co', 'system');
-        configService.set('supabase_anon_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tcmhoeHNmY3hhYm1vcXJpbG9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0MDE3MzMsImV4cCI6MjA4NTk3NzczM30.jpX2PSm7wgzyFLRcLrC5sAi67o4fdDg0j11KIYfFfYA', 'system');
         // App version metadata
         configService.set('app_version', '1.1', 'system');
         
@@ -2609,7 +2604,8 @@ app.get('/api/admin/settings', isAuthenticated, (req, res) => {
         'temp_threshold', 
         'rate_1_peso', 
         'rate_5_peso', 
-        'rate_10_peso'
+        'rate_10_peso',
+        'license_api_token'
     ];
     hiddenKeys.forEach(key => delete filteredSettings[key]);
     res.json(filteredSettings);
@@ -3542,75 +3538,36 @@ app.post('/api/admin/subvendo/activate', isAuthenticated, async (req, res) => {
         const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
         if (!device) return res.status(404).json({ error: 'Device not found' });
 
-        // Supabase Check
-        const supabaseUrl = configService.get('supabase_activation_url');
-        const supabaseKey = configService.get('supabase_anon_key');
-        
-        if (supabaseUrl && supabaseKey) {
-            try {
-                // Construct REST URL
-                const url = new URL(supabaseUrl);
-                // Assume standard Supabase URL structure or use project URL if available
-                // If supabase_activation_url is a function URL, try to extract project URL or fallback
-                // Safest is to rely on user providing project URL separately or assume generic rest/v1 structure if feasible.
-                // However, previous code uses supabase_activation_url for main license. 
-                // Let's try to infer project URL.
-                let projectUrl = configService.get('supabase_project_url');
-                if (!projectUrl) {
-                     const host = url.hostname.replace('functions.supabase.co', 'supabase.co');
-                     projectUrl = `${url.protocol}//${host}`;
-                }
+        const activationUrlRaw = configService.get('license_activation_url') || configService.get('license_api_url');
+        if (!activationUrlRaw) {
+            return res.status(500).json({ error: 'License server not configured. Set license_activation_url or license_api_url.' });
+        }
 
-                // Query table: sub_vendo_licenses
-                const targetUrl = new URL(`${projectUrl}/rest/v1/sub_vendo_licenses?key=eq.${key}`);
-                
-                const resp = await fetch(targetUrl, {
-                    headers: {
-                        'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!resp.ok) {
-                    const text = await resp.text();
-                    throw new Error(`Server returned ${resp.status}: ${text}`);
-                }
+        try {
+            const baseUrl = new URL(activationUrlRaw);
+            baseUrl.pathname = '/subvendo/claim';
+            baseUrl.search = '';
+            const apiToken = configService.get('license_api_token') || '';
 
-                const rows = await resp.json();
-                
-                if (!Array.isArray(rows) || rows.length === 0) {
-                     return res.status(400).json({ error: 'License key not found in server.' });
-                }
-                
-                const license = rows[0];
-                
-                // Check if already used by another device (hardware_id)
-                if (license.hardware_id && license.hardware_id !== device.device_id) {
-                     return res.status(400).json({ error: 'License key already used by another device.' });
-                }
-                
-                // Bind license to hardware_id
-                const updateUrl = new URL(`${projectUrl}/rest/v1/sub_vendo_licenses?key=eq.${key}`);
-                await fetch(updateUrl, {
-                    method: 'PATCH',
-                    headers: {
-                        'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
-                        'Content-Type': 'application/json',
-                        'Prefer': 'return=minimal'
-                    },
-                    body: JSON.stringify({
-                        hardware_id: device.device_id,
-                        status: 'active',
-                        activated_at: new Date().toISOString()
-                    })
-                });
+            const resp = await fetch(baseUrl.toString(), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
+                },
+                body: JSON.stringify({
+                    key,
+                    hardware_id: device.device_id
+                })
+            });
 
-            } catch (supaError) {
-                console.error('Supabase SubVendo Activation Error:', supaError);
-                return res.status(500).json({ error: 'License server validation failed: ' + supaError.message });
+            const data = await resp.json().catch(() => ({}));
+            const allowed = resp.ok && (data.allowed === true || data.ok === true);
+            if (!allowed) {
+                return res.status(400).json({ error: data.message || data.error || 'License key validation failed.' });
             }
+        } catch (e) {
+            return res.status(500).json({ error: 'License server validation failed: ' + e.message });
         }
 
         // Local Update
