@@ -33,7 +33,13 @@ class LicenseService {
     }
 
     getBackend() {
-        return 'cloudflare';
+        try {
+            const raw = configService.get('license_backend', 'api');
+            const v = String(raw || 'api').trim().toLowerCase();
+            return v || 'api';
+        } catch (_) {
+            return 'api';
+        }
     }
 
     init() {

@@ -754,11 +754,18 @@ const initDb = () => {
       }
   } catch(e) {}
 
-  // Migration: Ensure licensing settings exist (Cloudflare-first, but backend is configurable)
+  // Migration: Ensure licensing settings exist
   try {
       const hasKey = (k) => db.prepare("SELECT 1 FROM settings WHERE key = ?").get(k);
       if (!hasKey('license_backend')) {
-          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('license_backend', 'cloudflare', 'string', 'system')").run();
+          db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('license_backend', 'api', 'string', 'system')").run();
+      } else {
+          try {
+              const r = db.prepare("SELECT value FROM settings WHERE key = 'license_backend'").get();
+              if (r && String(r.value || '').toLowerCase() === 'cloudflare') {
+                  db.prepare("UPDATE settings SET value = 'api', type = 'string', category = 'system', updated_at = CURRENT_TIMESTAMP WHERE key = 'license_backend'").run();
+              }
+          } catch (e) {}
       }
       if (!hasKey('license_activation_url')) {
           db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('license_activation_url', '', 'string', 'system')").run();

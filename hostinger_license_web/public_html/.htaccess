@@ -1,0 +1,9 @@
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteRule ^activate$ api/index.php?endpoint=activate [QSA,L]
+RewriteRule ^validate-license$ api/index.php?endpoint=validate-license [QSA,L]
+RewriteRule ^heartbeat$ api/index.php?endpoint=heartbeat [QSA,L]
+RewriteRule ^admin$ admin/index.php [QSA,L]
