@@ -2388,11 +2388,6 @@
             const m = document.getElementById(id);
             m.classList.remove('show');
             setTimeout(() => m.style.display = 'none', 200);
-            
-            if (id === 'coin-modal') {
-                isInserting = false;
-                stopCoinCountdown();
-            }
         }
 
         function showAnnouncement() {
@@ -2479,9 +2474,24 @@
         // Close outside click
         window.onclick = function(e) {
             if (e.target.classList.contains('modal')) {
-                closeModal(e.target.id);
+                if (e.target.id === 'coin-modal') {
+                    closeCoinModal();
+                } else {
+                    closeModal(e.target.id);
+                }
             }
         }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            const coin = document.getElementById('coin-modal');
+            if (coin && coin.classList.contains('show') && isInserting) {
+                closeCoinModal();
+                return;
+            }
+            const modals = document.querySelectorAll('.modal.show');
+            if (modals.length > 0) closeModal(modals[modals.length - 1].id);
+        });
     </script>
     <!-- Chat Widget -->
     <div id="chat-widget-btn" class="chat-widget-btn" onclick="toggleChat()">

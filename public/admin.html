@@ -56,7 +56,9 @@
                         <td>${uploadMbps} / ${downloadMbps}</td>
                         <td>${rate.is_pausable ? '<span class="badge bg-success">Pausable</span>' : '<span class="badge bg-secondary">Continuous</span>'}</td>
                         <td>
-                            <button class="btn btn-sm btn-danger" onclick="deleteRate(${rate.id})">Delete</button>
+                            <button class="btn btn-sm btn-danger icon-only" onclick="deleteRate(${rate.id})" title="Delete">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                            </button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -199,7 +201,9 @@
                         <td>${dev.hostname || dev.name || 'Unknown'}</td>
                         <td>${statusBadge}</td>
                         <td>
-                            <button class="btn btn-sm btn-danger" onclick="disconnectDevice(${dev.id})">Disconnect</button>
+                            <button class="btn btn-sm btn-danger icon-only" onclick="disconnectDevice(${dev.id})" title="Disconnect">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h3V5H7a4 4 0 0 0 0 8h3v-2H7a2 2 0 0 1 0-4zm7-2h3a4 4 0 0 1 0 8h-3v-2h3a2 2 0 0 0 0-4h-3V5zM8 11h8v2H8v-2z"/></svg>
+                            </button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -441,6 +445,11 @@
         let currentAdminInfo = null;
         let licenseCountdownInterval = null;
 
+        function isSuperAdmin() {
+            if (!currentAdminInfo) return false;
+            return !!currentAdminInfo.is_super_admin || currentAdminInfo.role === 'super_admin';
+        }
+
         async function loadAdminInfo() {
             try {
                 const res = await fetch('/api/auth/me', { credentials: 'include' });
@@ -464,14 +473,40 @@
                 const btnUpgrade = document.getElementById('btn-upgrade');
                 const btnVerify = document.getElementById('btn-verify');
                 const licenseBackend = document.getElementById('license-backend-wrapper');
+                const licenseServer = document.getElementById('license-server-section');
+                const licenseCustomApi = document.getElementById('license-custom-api-section');
+                const licenseDivider = document.getElementById('license-server-divider');
+                const customApiInput = document.getElementById('license-api-url-input');
+                const cfActInput = document.getElementById('license-activation-url-input');
+                const cfValInput = document.getElementById('license-validate-url-input');
+                const cfHbInput = document.getElementById('license-heartbeat-url-input');
+
+                const defaultUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+                const defaultVal = 'https://neofisystem.com/api/index.php?endpoint=validate-license';
+                const defaultHb = 'https://neofisystem.com/api/index.php?endpoint=heartbeat';
+
+                const fixUrls = () => {
+                    if (customApiInput && (!customApiInput.value || customApiInput.value.includes('localhost'))) customApiInput.value = defaultUrl;
+                    if (cfActInput && (!cfActInput.value || cfActInput.value.includes('localhost'))) cfActInput.value = defaultUrl;
+                    if (cfValInput && !cfValInput.value) cfValInput.value = defaultVal;
+                    if (cfHbInput && !cfHbInput.value) cfHbInput.value = defaultHb;
+                };
+                
+                fixUrls();
 
                 if (!isSuper) {
                     if (btnCreateUpdate) btnCreateUpdate.style.display = 'none';
                     if (btnUpgrade) btnUpgrade.style.display = 'none';
                     if (btnVerify) btnVerify.style.display = 'none';
                     if (licenseBackend) licenseBackend.style.display = 'none';
+                    if (licenseServer) licenseServer.style.display = 'none';
+                    if (licenseCustomApi) licenseCustomApi.style.display = 'none';
+                    if (licenseDivider) licenseDivider.style.display = 'none';
                 } else {
                     if (licenseBackend) licenseBackend.style.display = 'block';
+                    if (licenseServer) licenseServer.style.display = 'block';
+                    if (licenseCustomApi) licenseCustomApi.style.display = 'block';
+                    if (licenseDivider) licenseDivider.style.display = 'block';
                 }
             } catch (e) {
                 console.error('Failed to load admin info', e);
@@ -527,8 +562,12 @@
                         actionsHtml = '<span style="font-size:0.8rem; color:var(--text-muted);">Primary account</span>';
                     } else {
                         actionsHtml = `
-                            <button class="btn btn-sm btn-secondary" onclick="resetAdminPassword(${a.id})" style="margin-right:6px;">Reset Password</button>
-                            <button class="btn btn-sm btn-danger" onclick="deleteAdminAccount(${a.id})">Delete</button>
+                            <button class="btn btn-sm btn-secondary icon-only" onclick="resetAdminPassword(${a.id})" style="margin-right:6px;" title="Reset Password">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5zm-3 8V6a3 3 0 0 1 6 0v3H9zm3 4a2 2 0 0 1 1 3.732V18h-2v-1.268A2 2 0 0 1 12 13z"/></svg>
+                            </button>
+                            <button class="btn btn-sm btn-danger icon-only" onclick="deleteAdminAccount(${a.id})" title="Delete">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                            </button>
                         `;
                     }
                     tr.innerHTML = `
@@ -1030,6 +1069,18 @@
                     }
                 } catch (e) {}
             });
+
+            let lastSubVendoRefreshMs = 0;
+            chatSocket.on('subvendo_device_update', () => {
+                try {
+                    if (currentView !== 'subvendo') return;
+                    const now = Date.now();
+                    if ((now - lastSubVendoRefreshMs) < 1000) return;
+                    lastSubVendoRefreshMs = now;
+                    loadSubVendoDevices();
+                    loadSubVendoWaitingList();
+                } catch (e) {}
+            });
         }
 
 
@@ -1481,15 +1532,19 @@
                     <td style="font-family:monospace;">---</td>
                     <td style="font-family:monospace;">MAIN</td>
                     <td><span class="status-badge status-active">ACTIVE</span></td>
+                    <td style="font-family:monospace; color:var(--text-muted);">-</td>
                     <td><span style="color: var(--status-active); font-weight:600;">Online Now</span></td>
                     <td>br0</td>
                     <td style="color:var(--text-muted);">-</td>
                     <td style="color:var(--text-muted); font-family:monospace;">${new Date().toISOString().slice(0, 19)}</td>
-                    <td class="subvendo-info-cell" style="color:var(--text-muted);">Local device</td>
                     <td class="subvendo-actions-cell">
                         <div class="subvendo-actions">
-                            <button class="subvendo-action-btn" onclick="openMainVendoRatesConfig()">Rates</button>
-                            <button class="subvendo-action-btn" onclick="openMainVendoFreeTimeConfig()">Free Time</button>
+                            <button class="subvendo-action-btn" onclick="openMainVendoRatesConfig()" title="Rates">
+                                <svg viewBox="0 0 24 24"><path d="M3 3h18v2H3V3zm2 4h3v14H5V7zm5 6h3v8h-3v-8zm5-4h3v12h-3V9zm5 8h3v4h-3v-4z"/></svg>
+                            </button>
+                            <button class="subvendo-action-btn" onclick="openMainVendoFreeTimeConfig()" title="Free Time">
+                                <svg viewBox="0 0 24 24"><path d="M12 1a11 11 0 1011 11A11 11 0 0012 1zm1 11.6l3.2 1.9-.8 1.3L11 13V6h2z"/></svg>
+                            </button>
                         </div>
                     </td>
                 `;
@@ -1515,7 +1570,15 @@
                         const isPaid = device.license_type === 'PAID';
                         
                         if (isPaid) {
-                            licenseBadge = '<span class="status-badge status-active" style="background:#27ae60;">LICENSED</span>';
+                            if (String(device.remote_status || '').toUpperCase() === 'CHECKING') {
+                                licenseBadge = '<span class="status-badge" style="background:#34495e; color:white;">CHECKING</span>';
+                            } else if (String(device.remote_status || '').toUpperCase() === 'REVOKED' || String(device.remote_status || '').toUpperCase() === 'UNBOUND') {
+                                licenseBadge = '<span class="status-badge status-expired">EXPIRED</span>';
+                            } else if (String(device.remote_status || '').toUpperCase() === 'LICENSED' || String(device.remote_status || '') === '') {
+                                licenseBadge = '<span class="status-badge status-active" style="background:#27ae60;">LICENSED</span>';
+                            } else {
+                                licenseBadge = '<span class="status-badge status-expired">EXPIRED</span>';
+                            }
                         } else {
                             // Trial check
                             const now = Date.now();
@@ -1526,7 +1589,9 @@
                             } else {
                                 licenseBadge = '<span class="status-badge status-expired">EXPIRED</span>';
                             }
-                            activateBtn = `<button class="subvendo-action-btn" onclick="openActivateSubVendoModal(${device.id}, '${device.name || device.device_id}')">Activate</button>`;
+                            activateBtn = `<button class="subvendo-action-btn" onclick="openActivateSubVendoModal(${device.id}, '${device.name || device.device_id}')" title="Activate">
+                                <svg viewBox="0 0 24 24"><path d="M12 2l4 8h-8l4-8zm-7 9h14v11H5V11zm2 2v7h10v-7H7z"/></svg>
+                            </button>`;
                         }
 
                         const statusOnlineText = isOnline
@@ -1537,13 +1602,7 @@
                         const deviceIdText = device.id != null ? String(device.id) : '-';
                         const ifaceBadge = device.detected_interface ? '<span class="status-badge status-active">' + device.detected_interface + '</span>' : '<span style="color:var(--text-muted);">-</span>';
                         const versionText = device.version || device.firmware_version || device.fw_version || device.app_version || '-';
-                        const infoParts = [];
-                        if (device.ip_address) infoParts.push(`IP: ${device.ip_address}`);
-                        if (device.status) infoParts.push(`State: ${device.status}`);
-                        if (device.daily_sales != null) infoParts.push(`Today: ₱${Number(device.daily_sales || 0).toFixed(2)}`);
-                        if (device.total_sales != null) infoParts.push(`Total: ₱${Number(device.total_sales || 0).toFixed(2)}`);
-                        const infoText = infoParts.length ? infoParts.join(' • ') : '-';
-
+                        const licenseKeyText = (device.license_key && String(device.license_key).trim()) ? String(device.license_key).trim() : '-';
                         tr.innerHTML = `
                             <td class="subvendo-name-cell">
                                 <div class="subvendo-name-wrap">${statusDot}<span class="subvendo-name">${device.name || '-'}</span>${freeBadge}</div>
@@ -1551,17 +1610,26 @@
                             <td style="font-family:monospace;">${macText}</td>
                             <td style="font-family:monospace;">${deviceIdText}</td>
                             <td>${licenseBadge}</td>
+                            <td style="font-family:monospace;">${licenseKeyText}</td>
                             <td>${statusOnlineText}</td>
                             <td>${ifaceBadge}</td>
                             <td style="color:var(--text-muted);">${versionText}</td>
                             <td style="color:var(--text-muted); font-family:monospace;">${lastActiveStampText}</td>
-                            <td class="subvendo-info-cell" style="color:var(--text-muted);">${infoText}</td>
                             <td class="subvendo-actions-cell">
                                 <div class="subvendo-actions">
-                                    <button class="subvendo-action-btn" onclick="openSubVendoDeviceSettings(${device.id})">Rates</button>
-                                    <button class="subvendo-action-btn" onclick="openSubVendoFreeTimeConfig(${device.id})">Free Time</button>
+                                    <button class="subvendo-action-btn" onclick="openSubVendoDeviceSettings(${device.id})" title="Rates">
+                                        <svg viewBox="0 0 24 24"><path d="M3 3h18v2H3V3zm2 4h3v14H5V7zm5 6h3v8h-3v-8zm5-4h3v12h-3V9zm5 8h3v4h-3v-4z"/></svg>
+                                    </button>
+                                    <button class="subvendo-action-btn" onclick="openSubVendoFreeTimeConfig(${device.id})" title="Free Time">
+                                        <svg viewBox="0 0 24 24"><path d="M12 1a11 11 0 1011 11A11 11 0 0012 1zm1 11.6l3.2 1.9-.8 1.3L11 13V6h2z"/></svg>
+                                    </button>
+                                    <button class="subvendo-action-btn" onclick="openRebindSubVendoModal(${device.id}, '${(device.name||'').replace(/'/g, "\\'")}')" title="Rebind WiFi" style="color:#16a085;">
+                                        <svg viewBox="0 0 24 24"><path d="M12 3c4.1 0 7.8 2 10 5.2l-1.7 1.1C18.5 6.8 15.4 5 12 5S5.5 6.8 3.7 9.3L2 8.2C4.2 5 7.9 3 12 3zm0 6c2.7 0 5.2 1.3 6.7 3.4l-1.7 1.1C15.9 12 14 11 12 11s-3.9 1-5 2.5l-1.7-1.1C6.8 10.3 9.3 9 12 9zm0 6c1.2 0 2.3.6 3 1.6l-3 3-3-3c.7-1 1.8-1.6 3-1.6z"/></svg>
+                                    </button>
                                     ${activateBtn}
-                                    <button class="subvendo-action-btn" onclick="deleteSubVendoDevice(${device.id})" style="border-color: rgba(231, 76, 60, 0.45); color: var(--status-expired);">Delete</button>
+                                    <button class="subvendo-action-btn danger" onclick="deleteSubVendoDevice(${device.id})" title="Delete">
+                                        <svg viewBox="0 0 24 24"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                                    </button>
                                 </div>
                             </td>
                         `;
@@ -1598,8 +1666,12 @@
                                 <td>${device.name || 'New Device'}</td>
                                 <td>${new Date(device.created_at).toLocaleString()}</td>
                                 <td>
-                                    <button class="btn btn-sm btn-success" onclick="approveSubVendo(${device.id})">Approve</button>
-                                    <button class="btn btn-sm btn-danger" onclick="declineSubVendo(${device.id})">Decline</button>
+                                    <button class="btn btn-sm btn-success icon-only" onclick="approveSubVendo(${device.id})" title="Approve">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2l-3.5-3.5L4 14.2l5 5 12-12L19.5 5.7z"/></svg>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger icon-only" onclick="declineSubVendo(${device.id})" title="Decline">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg>
+                                    </button>
                                 </td>
                             `;
                             tbody.appendChild(tr);
@@ -1690,6 +1762,8 @@
             document.getElementById('subvendo-device-name').value = device.name || '';
             document.getElementById('subvendo-device-description').value = device.description || '';
             document.getElementById('subvendo-device-rate').value = device.peso_per_pulse != null ? device.peso_per_pulse : 1;
+            document.getElementById('subvendo-device-pulse-divisor').value = device.pulse_divisor != null ? device.pulse_divisor : 1;
+            document.getElementById('subvendo-device-coin-corrector').checked = !!device.coin_corrector_enabled;
             document.getElementById('subvendo-device-coin-pin').value = device.coin_pin != null ? device.coin_pin : 6;
             document.getElementById('subvendo-device-relay-pin').value = device.relay_pin != null ? device.relay_pin : 5;
             document.getElementById('subvendo-device-relay-active-state').value = device.relay_pin_active_state || 'LOW';
@@ -1729,6 +1803,8 @@
                 name: document.getElementById('subvendo-device-name').value,
                 description: document.getElementById('subvendo-device-description').value,
                 peso_per_pulse: Number(document.getElementById('subvendo-device-rate').value),
+                pulse_divisor: Number(document.getElementById('subvendo-device-pulse-divisor').value),
+                coin_corrector_enabled: document.getElementById('subvendo-device-coin-corrector').checked,
                 coin_pin: Number(document.getElementById('subvendo-device-coin-pin').value),
                 relay_pin: Number(document.getElementById('subvendo-device-relay-pin').value),
                 relay_pin_active_state: document.getElementById('subvendo-device-relay-active-state').value,
@@ -1811,7 +1887,7 @@
                 }).join('');
                 const addBtn = `
                     <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                        <button class="btn btn-sm btn-primary" onclick="if (typeof openRateModal === 'function') { openRateModal(); }">+ Add Rate</button>
+                        <button class="btn btn-sm btn-primary add-plus" onclick="if (typeof openRateModal === 'function') { openRateModal(); }" title="Add Rate">+</button>
                     </div>
                 `;
                 container.innerHTML = html + addBtn;
@@ -2372,13 +2448,13 @@
         }
 
         #view-subvendo .grid-subvendo {
-            width: 92%;
-            max-width: 1200px;
-            margin-left: auto;
-            margin-right: auto;
+            width: 100%;
+            max-width: none;
+            margin-left: 0;
+            margin-right: 0;
             justify-items: stretch;
             grid-template-columns: 1fr;
-            transform: translateX(-20px);
+            transform: none;
         }
 
         #view-subvendo .grid-subvendo > div {
@@ -2386,9 +2462,7 @@
             max-width: none;
         }
 
-        #view-subvendo {
-            overflow-x: hidden;
-        }
+        #view-subvendo { overflow-x: visible; }
 
         #view-subvendo .grid-subvendo > div,
         #view-subvendo .card {
@@ -2401,7 +2475,7 @@
             max-width: 100%;
             width: 100%;
             min-width: 0;
-            overflow-x: hidden;
+            overflow-x: visible;
         }
 
         #view-subvendo .subvendo-registered-header {
@@ -2424,6 +2498,13 @@
         #view-subvendo #subvendo-waiting-card .card-header {
             flex-wrap: wrap;
             gap: 10px;
+        }
+
+        #view-subvendo #subvendo-waiting-card .table-container {
+            overflow: auto !important;
+            max-width: 100%;
+            min-width: 0;
+            -webkit-overflow-scrolling: touch;
         }
 
         #view-subvendo .subvendo-registered-card .table-container {
@@ -2501,19 +2582,34 @@
         }
 
         .subvendo-action-btn {
+            width: 36px;
+            height: 36px;
+            padding: 0;
             background: rgba(0, 0, 0, 0.15);
             border: 1px solid var(--table-border);
             color: var(--text-main);
-            padding: 8px 14px;
             border-radius: 10px;
-            font-weight: 600;
-            font-size: 0.9rem;
             cursor: pointer;
             transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
         }
 
         .subvendo-action-btn:hover {
             background: rgba(255, 255, 255, 0.06);
+        }
+
+        .subvendo-action-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+
+        .subvendo-action-btn.danger {
+            color: var(--status-expired);
+            border-color: rgba(231, 76, 60, 0.45);
         }
         #active-codes-table th,
         #active-codes-table td {
@@ -2570,6 +2666,11 @@
         .btn-danger { background: rgba(231, 76, 60, 0.15); color: var(--status-expired); }
         .btn-danger:hover { background: var(--status-expired); color: white; }
         .btn-primary { background: var(--primary); color: white; }
+        .btn.icon-only { padding: 6px 10px; display: inline-flex; align-items: center; justify-content: center; gap: 0; }
+        .btn.btn-sm.icon-only { padding: 6px 10px; }
+        .btn.icon-only svg { width: 16px; height: 16px; fill: currentColor; }
+        .btn.add-plus { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; }
+        .btn.btn-sm.add-plus { width: 28px; height: 28px; font-size: 18px; }
 
         /* Login Screen */
         #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.25); display: flex; justify-content: center; align-items: center; z-index: 3000; }
@@ -2689,7 +2790,7 @@
             }
             #view-subvendo .grid-subvendo { width: 92%; }
             #view-subvendo .grid-subvendo > div { max-width: 100%; }
-            #view-subvendo .grid-subvendo { transform: translateX(-15px); }
+            #view-subvendo .grid-subvendo { transform: none; }
             .settings-wrapper {
                 grid-template-columns: 1fr;
             }
@@ -3857,7 +3958,9 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="loadInterfaces()">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadInterfaces()" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -3944,7 +4047,9 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="loadInterfaces()">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadInterfaces()" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -4069,7 +4174,9 @@
                                 </div>
                             </div>
                             <div style="display:flex; gap:10px; margin-top:10px;">
-                                <button class="btn btn-primary" onclick="savePppoeServerConfig()">Save & Restart Server</button>
+                                <button class="btn btn-primary icon-only" onclick="savePppoeServerConfig()" title="Save & Restart Server">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14l4-4h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-1 9H6V10h10v2zm0-3H6V7h10v2z"/></svg>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -4095,7 +4202,7 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="openPppoeProfileModal()">+ Add Plan</button>
+                                <button class="btn btn-sm btn-primary add-plus" onclick="openPppoeProfileModal()" title="Add Plan">+</button>
                             </div>
                         </div>
                         <div style="padding:0;">
@@ -4159,8 +4266,10 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-warning" onclick="checkPppoeExpiration()" style="margin-right:5px;" title="Check for expired users immediately">Check Expiration</button>
-                                <button class="btn btn-sm btn-primary" onclick="openPppoeUserModal()">+ Add User</button>
+                                <button class="btn btn-sm btn-warning icon-only" onclick="checkPppoeExpiration()" style="margin-right:5px;" title="Check Expiration">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
+                                <button class="btn btn-sm btn-primary add-plus" onclick="openPppoeUserModal()" title="Add User">+</button>
                             </div>
                         </div>
                         <div style="padding:0;">
@@ -4236,7 +4345,9 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="loadPppoeUsers(true)">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadPppoeUsers(true)" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div style="padding:0;">
@@ -4334,7 +4445,9 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="loadPppoeUsers(true)">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadPppoeUsers(true)" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div style="padding:0;">
@@ -4654,7 +4767,9 @@
                                     <option value="online">Show Online</option>
                                     <option value="offline_paused">Show Offline / Paused</option>
                                 </select>
-                                <button class="btn btn-sm btn-primary" onclick="loadActiveCodes()">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadActiveCodes()" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -4774,7 +4889,9 @@
                         <div class="card-header" id="expired-sessions-header">
                             <div class="card-title" id="expired-sessions-header-title">EXPIRED SESSION</div>
                             <div style="display:flex; align-items:center; gap:10px;">
-                                <button class="btn btn-sm btn-primary" onclick="loadExpiredSessions()">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadExpiredSessions()" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -5272,7 +5389,7 @@
                                                     <option value="all">ALL</option>
                                                 </select>
                                             </div>
-                                            <button class="btn btn-sm btn-success" onclick="addMultiWanRow()" style="padding: 2px 8px; font-size: 0.8rem;">+ Add WAN Interface</button>
+                                            <button class="btn btn-sm btn-success add-plus" onclick="addMultiWanRow()" title="Add WAN Interface">+</button>
                                         </div>
                                     </div>
                                     
@@ -5448,7 +5565,7 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="openVlanModal()">Add</button>
+                                <button class="btn btn-sm btn-primary add-plus" onclick="openVlanModal()" title="Add VLAN">+</button>
                                 <button class="btn btn-sm btn-danger" id="vlan-delete-btn" style="display:none;" onclick="deleteSelectedVlans()">Delete Selected</button>
                                 <button class="btn btn-sm btn-primary" onclick="applyVlanChanges()">Apply changes</button>
                             </div>
@@ -5513,7 +5630,7 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="openDhcpModal()">Add</button>
+                                <button class="btn btn-sm btn-primary add-plus" onclick="openDhcpModal()" title="Add DHCP Server">+</button>
                             </div>
                         </div>
                         <div class="card-body">
@@ -5589,7 +5706,7 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="document.getElementById('bridge-modal').style.display = 'flex'">+ Add Bridge</button>
+                                <button class="btn btn-sm btn-primary add-plus" onclick="document.getElementById('bridge-modal').style.display = 'flex'" title="Add Bridge">+</button>
                             </div>
                         </div>
 
@@ -5722,7 +5839,7 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="openWalledGardenModal()">+ Add Domain</button>
+                                <button class="btn btn-sm btn-primary add-plus" onclick="openWalledGardenModal()" title="Add Domain">+</button>
                             </div>
                         </div>
                         <div style="padding: 6px;">
@@ -5830,7 +5947,7 @@
                     <div class="card">
                         <div class="card-header">
                             <div class="card-title">AdBlocker & Firewall Rules</div>
-                            <button class="btn btn-sm btn-primary" onclick="showAddRuleModal()">+ Add Rule</button>
+                            <button class="btn btn-sm btn-primary add-plus" onclick="showAddRuleModal()" title="Add Rule">+</button>
                         </div>
                         <div class="table-responsive">
                             <table class="table" id="firewall-table">
@@ -6062,8 +6179,12 @@
                                     <div style="display:flex; gap:8px; align-items:center;">
                                         <select id="insert-coin-audio-select" class="login-input" style="flex:1; margin:0;"></select>
                                         <button class="btn btn-sm btn-secondary" onclick="applySelectedInsertCoinAudio()">Use</button>
-                                        <button class="btn btn-sm" onclick="loadInsertCoinAudioFiles()">Refresh</button>
-                                        <button class="btn btn-sm btn-danger" onclick="deleteSelectedInsertCoinAudio()">Delete</button>
+                                        <button class="btn btn-sm btn-primary icon-only" onclick="loadInsertCoinAudioFiles()" title="Refresh">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                        </button>
+                                        <button class="btn btn-sm btn-danger icon-only" onclick="deleteSelectedInsertCoinAudio()" title="Delete">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -6235,7 +6356,9 @@
                                         <option value="all">ALL</option>
                                     </select>
                                 </div>
-                                <button class="btn btn-sm btn-primary" onclick="loadDevicesData()">Refresh</button>
+                                <button class="btn btn-sm btn-primary icon-only" onclick="loadDevicesData()" title="Refresh">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                </button>
                             </div>
                         </div>
                         <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -6482,27 +6605,29 @@
                             
                             <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
                             
-                            <div id="custom-api-section">
+                            <div id="license-custom-api-section" style="display: none;">
                                 <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Activation Server (Custom API)</h3>
-                                <div style="display:flex; gap:10px; max-width: 600px;">
-                                    <input type="text" id="license-api-url-input" class="form-control" placeholder="http://localhost:8080/api/activate" style="flex:1 1 auto;">
-                                    <button onclick="saveLicenseServerUrl()" class="btn btn-primary">Save Server URL</button>
+                                <div style="display:flex; gap:10px; max-width: 600px; flex-wrap:wrap;">
+                                    <input type="text" id="license-api-url-input" class="form-control" value="https://neofisystem.com/api/index.php?endpoint=activate" style="flex:1 1 360px;">
+                                    <button onclick="saveLicenseServerUrl()" class="btn btn-primary" style="display:none;">Save Server URL</button>
                                 </div>
                             </div>
-
-                            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
-
-                            <div id="license-server-section">
-                                <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Licensing Server</h3>
+                            
+                            <hr id="license-server-divider" style="display: none; border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+                            
+                            <div id="license-server-section" style="display: none;">
+                                <h3 style="font-size: 1.1rem; margin-bottom: 10px;">Cloudflare Licensing</h3>
                                 <div style="display:flex; gap:10px; max-width: 900px; flex-wrap:wrap;">
-                                    <input type="text" id="license-activation-url-input" class="form-control" placeholder="https://<your-domain>/activate" style="flex:1 1 360px;">
-                                    <input type="text" id="license-validate-url-input" class="form-control" placeholder="https://<your-domain>/validate-license (optional)" style="flex:1 1 360px;">
-                                    <input type="text" id="license-heartbeat-url-input" class="form-control" placeholder="https://<your-domain>/heartbeat (optional)" style="flex:1 1 360px;">
-                                    <input type="password" id="license-api-token-input" class="form-control" placeholder="API Token (Bearer) (optional)" style="flex:1 1 240px;">
-                                    <button onclick="saveLicenseSettings()" class="btn btn-primary">Save License Settings</button>
+                                    <input type="text" id="license-activation-url-input" class="form-control" value="https://neofisystem.com/api/index.php?endpoint=activate" readonly style="flex:1 1 360px;">
+                                    <input type="text" id="license-validate-url-input" class="form-control" value="https://neofisystem.com/api/index.php?endpoint=validate-license" readonly style="flex:1 1 360px;">
+                                    <input type="text" id="license-heartbeat-url-input" class="form-control" value="https://neofisystem.com/api/index.php?endpoint=heartbeat" readonly style="flex:1 1 360px;">
+                                    <input type="password" id="license-api-token-input" class="form-control" placeholder="API Token (Bearer) (optional)" style="flex:1 1 240px; display:none;">
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <button class="btn btn-primary" style="display:none;">Save License Settings</button>
                                 </div>
                                 <div style="font-size:0.85rem; color:var(--text-muted); margin-top:10px; line-height:1.4;">
-                                    Notes: If Validate URL is empty, NeoFi auto-derives it from Activation URL.
+                                    Notes: If Validate URL is empty, NeoFi auto-derives it from Activation URL. API Token must match the Worker secret API_TOKEN.
                                 </div>
                             </div>
                             
@@ -6553,7 +6678,9 @@
                                             <option value="all">ALL</option>
                                         </select>
                                     </div>
-                                    <button class="btn btn-sm btn-primary" onclick="loadSubVendoWaitingList()">Refresh</button>
+                                    <button class="btn btn-sm btn-primary icon-only" onclick="loadSubVendoWaitingList()" title="Refresh">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
+                                    </button>
                                 </div>
                             </div>
                             <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -6615,7 +6742,7 @@
                                             <option value="all">ALL</option>
                                         </select>
                                     </div>
-                                    <button class="subvendo-action-btn" onclick="loadSubVendoDevices()">Refresh</button>
+                                    <button class="subvendo-action-btn" onclick="loadSubVendoDevices()" style="display:none;">Refresh</button>
                                 </div>
                             </div>
                             <div class="table-container subvendo-table-container">
@@ -6657,6 +6784,14 @@
                                                 <th>
                                                     <span style="display:inline-flex;align-items:center;gap:6px;">
                                                         <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                            <path fill="currentColor" d="M7 14a5 5 0 1 1 4.9 6H10v-2h1.9A3 3 0 1 0 9 15h3v2H9a2 2 0 0 1-2-2v-1zm7-10a5 5 0 0 1 0 10h-3v-2h3a3 3 0 1 0-2.9-4H14a2 2 0 0 1 2 2v1h-2V8h-3V6h3a5 5 0 0 1 0-2z"/>
+                                                        </svg>
+                                                        <span>Key</span>
+                                                    </span>
+                                                </th>
+                                                <th>
+                                                    <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
                                                             <path fill="currentColor" d="M3 5v14h18V5H3zm16 12H5V7h14v10zM7 9h5v2H7V9zm0 4h3v2H7v-2z"/>
                                                         </svg>
                                                         <span>Status</span>
@@ -6684,14 +6819,6 @@
                                                             <path fill="currentColor" d="M12 1a9 9 0 1 0 9 9a9 9 0 0 0-9-9zm0 16a7 7 0 1 1 7-7a7 7 0 0 1-7 7zm-.5-11h1.5v4.25l3.5 2.08-.75 1.23L11.5 11z"/>
                                                         </svg>
                                                         <span>Last Active</span>
-                                                    </span>
-                                                </th>
-                                                <th>
-                                                    <span style="display:inline-flex;align-items:center;gap:6px;">
-                                                        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                                                            <path fill="currentColor" d="M11 17h2v-2h-2v2zm0-4h2V7h-2v6zm1-11C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8z"/>
-                                                        </svg>
-                                                        <span>Info</span>
                                                     </span>
                                                 </th>
                                                 <th>
@@ -6969,6 +7096,16 @@
                     <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.85rem;">Rate/Pulse</label>
                     <input type="number" id="subvendo-device-rate" class="login-input" style="margin:0;" min="1" max="100" step="1" autocomplete="off">
                 </div>
+                <div>
+                    <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.85rem;">Pulse Divisor</label>
+                    <input type="number" id="subvendo-device-pulse-divisor" class="login-input" style="margin:0;" min="1" max="20" step="1" autocomplete="off">
+                </div>
+                <div class="form-col-span-2" style="margin-top:6px;">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:0.85rem;">
+                        <input type="checkbox" id="subvendo-device-coin-corrector">
+                        Coin Corrector (1→1, 2–5→5, 6–11→10, 12–20→20)
+                    </label>
+                </div>
 
                 <div class="form-col-span-2" style="margin-top:10px;">
                     <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.85rem;">Free Time To Give</label>
@@ -7200,7 +7337,7 @@
 
                 <div style="margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
                     <div style="font-weight:600;">Redemption Rates</div>
-                    <button class="btn btn-sm btn-primary" onclick="openPointRateModal()">Add New Rate</button>
+                    <button class="btn btn-sm btn-primary add-plus" onclick="openPointRateModal()" title="Add New Rate">+</button>
                 </div>
                 <div class="table-container">
                     <table id="point-rates-table" class="sales-grid-table">
@@ -7775,7 +7912,7 @@
                 el.textContent = `V${String(v).trim()}`;
             } catch (e) {
                 const el = document.getElementById('app-version');
-                if (el) el.textContent = 'V1.1';
+                if (el) el.textContent = 'V1.2';
             }
         }
 
@@ -8000,7 +8137,7 @@
                 IntervalManager.start('subvendo', () => {
                     loadSubVendoDevices();
                     loadSubVendoWaitingList();
-                }, 3000);
+                }, 60000);
             }
         }
 
@@ -10620,7 +10757,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         <td>${r.comment || '-'}</td>
                         <td style="font-size:0.85rem; color:var(--text-muted);">${new Date(r.created_at).toLocaleString()}</td>
                         <td>
-                            <button class="btn btn-sm btn-danger" onclick="deleteFirewallRule(${r.id})">Delete</button>
+                            <button class="btn btn-sm btn-danger icon-only" onclick="deleteFirewallRule(${r.id})" title="Delete">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                            </button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -10860,9 +10999,15 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 <td style="padding:10px;">₱${b.price || 0}</td>
                                 <td style="padding:10px;">${b.count}</td>
                                 <td style="padding:10px; text-align:center;">
-                                    <button class="btn btn-sm btn-primary" onclick="showBatchVoucherTicketsForId('${b.batch_id}')">Show / Print</button>
-                                    <button class="btn btn-sm btn-secondary" style="margin-left:5px;" onclick="exportVoucherBatch('${b.batch_id}')">CSV</button>
-                                    <button class="btn btn-sm btn-danger" style="margin-left:5px;" onclick="deleteVoucherBatch('${b.batch_id}')">Delete</button>
+                                    <button class="btn btn-sm btn-primary icon-only" onclick="showBatchVoucherTicketsForId('${b.batch_id}')" title="Show / Print">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V2h12v7H6zm10-2V4H8v3h8zm2 4h2v7h-4v4H8v-4H4v-7h2v-2h12v2zm-4 11v-4H8v4h8z"/></svg>
+                                    </button>
+                                    <button class="btn btn-sm btn-secondary icon-only" style="margin-left:5px;" onclick="exportVoucherBatch('${b.batch_id}')" title="Export CSV">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2zM12 2l4 4h-3v7h-2V6H8l4-4zm-7 7h2v6H5V9zm12 0h2v6h-2V9z"/></svg>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger icon-only" style="margin-left:5px;" onclick="deleteVoucherBatch('${b.batch_id}')" title="Delete">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                                    </button>
                                 </td>
                             `;
                             tableBody.appendChild(tr);
@@ -11516,7 +11661,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         <td><span class="badge ${badgeClass}">${item.type.toUpperCase()}</span></td>
                         <td>${item.address || '-'}</td>
                         <td>
-                            <button class="btn btn-sm btn-danger" onclick="deleteWalledGarden(${item.id})">Delete</button>
+                            <button class="btn btn-sm btn-danger icon-only" onclick="deleteWalledGarden(${item.id})" title="Delete">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                            </button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -11846,8 +11993,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     const ifaceList = Array.isArray(b.interfaces) ? b.interfaces : [];
                     const members = ifaceList.map(i => visualInterfaceMap[i] || i).join(', ') || '-';
                     
-                    let deleteBtn = `<button class="btn btn-sm btn-danger" onclick="removeBridge('${b.name}')">Delete</button>`;
-                    let editBtn = `<button class="btn btn-sm btn-primary" style="margin-right:5px;" onclick='editBridge(${JSON.stringify(b)})'>Edit</button>`;
+                    let deleteBtn = `<button class="btn btn-sm btn-danger icon-only" onclick="removeBridge('${b.name}')" title="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg></button>`;
+                    let editBtn = `<button class="btn btn-sm btn-primary icon-only" style="margin-right:5px;" onclick='editBridge(${JSON.stringify(b)})' title="Edit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg></button>`;
 
                     tr.innerHTML = `
                         <td style="font-weight:600;">${b.name}</td>
@@ -12028,7 +12175,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     </div>
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button>
+                    <button class="btn btn-sm btn-danger icon-only" onclick="this.closest('tr').remove()" title="Remove">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg>
+                    </button>
                 </td>
             `;
             
@@ -12727,8 +12876,12 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                      <td style="padding:10px; text-align:center;">${status}</td>
                      <td style="padding:10px; text-align:center;">
                          <div style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap;">
-                             <button class="btn btn-sm btn-primary" onclick="modifyCode('${u.id}', '${u.last_voucher_code || u.user_code || u.session_code || ''}', ${u.time_remaining}, ${u.download_speed || 5120}, ${u.upload_speed || 1024})">Edit</button>
-                             <button class="btn btn-sm btn-danger" onclick="deleteCode('${u.id}')">Delete</button>
+                             <button class="btn btn-sm btn-primary icon-only" onclick="modifyCode('${u.id}', '${u.last_voucher_code || u.user_code || u.session_code || ''}', ${u.time_remaining}, ${u.download_speed || 5120}, ${u.upload_speed || 1024})" title="Edit">
+                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg>
+                             </button>
+                             <button class="btn btn-sm btn-danger icon-only" onclick="deleteCode('${u.id}')" title="Delete">
+                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                             </button>
                          </div>
                      </td>
                  `;
@@ -12930,8 +13083,12 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         <td style="padding:10px;">${vlan.mac || 'Auto'}</td>
                         <td style="padding:10px;">${vlan.vlanId}</td>
                         <td style="padding:10px;">
-                            <button class="btn btn-sm btn-primary" style="margin-right:5px;" onclick="editVlan('${vlan.id}')">Edit</button>
-                            <button class="btn btn-sm btn-danger" onclick="deleteVlan('${vlan.id}')">Delete</button>
+                            <button class="btn btn-sm btn-primary icon-only" style="margin-right:5px;" onclick="editVlan('${vlan.id}')" title="Edit">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg>
+                            </button>
+                            <button class="btn btn-sm btn-danger icon-only" onclick="deleteVlan('${vlan.id}')" title="Delete">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                            </button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -13290,7 +13447,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                             <td style="padding:10px;">${s.lease || '12h'}</td>
                             <td style="padding:10px;">${dhcp.dns1}, ${dhcp.dns2}</td>
                             <td style="padding:10px;">
-                                <button class="btn btn-sm btn-danger" onclick="removeDhcpServer('${s.interface}')">Delete</button>
+                                <button class="btn btn-sm btn-danger icon-only" onclick="removeDhcpServer('${s.interface}')" title="Delete">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                                </button>
                             </td>
                         `;
                         tbody.appendChild(tr);
@@ -13568,7 +13727,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 promptReactivation();
                             }
                         } else {
-                            statusEl.textContent = 'Active';
+                            statusEl.textContent = 'Activated';
                             statusEl.style.color = 'green';
                         }
                     }
@@ -13586,14 +13745,36 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     }
 
                     if(expirationEl) {
-                        if (isTrial) {
-                            if (data.trial_end_ts) {
-                                expirationEl.textContent = new Date(data.trial_end_ts).toLocaleString();
+                        const durRaw = (license.license_duration != null ? String(license.license_duration) : (license.duration != null ? String(license.duration) : '')).trim().toLowerCase();
+                        const durMonths = Number.isFinite(Number(license.license_duration_months)) ? Number(license.license_duration_months) : (Number.isFinite(Number(durRaw)) ? Number(durRaw) : null);
+                        
+                        // Use server-provided plan name if available, otherwise fallback to local mapping
+                        let planLabel = license.license_plan ? String(license.license_plan) : '';
+                        
+                        if (!planLabel) {
+                            if (durRaw === 'lifetime') planLabel = 'lifetime access';
+                            else if (durMonths === 1) planLabel = '1 month trial';
+                            else if (durMonths === 3) planLabel = '3 months standard';
+                            else if (durMonths === 6) planLabel = '6 months premium';
+                            else if (durMonths === 12) planLabel = '1 year enterprise';
+                            else if (durMonths && durMonths > 0) planLabel = `${durMonths} months`;
+                        }
+
+                        const expiresRaw = (license.expires != null ? String(license.expires) : '').trim();
+                        const isNever = durRaw === 'lifetime' || /^never$/i.test(expiresRaw) || /^no expiration$/i.test(expiresRaw);
+                        if (isNever) {
+                            expirationEl.textContent = planLabel || 'No Expiration';
+                        } else if (isTrial && data.trial_end_ts) {
+                            expirationEl.textContent = new Date(data.trial_end_ts).toLocaleString() + (planLabel ? ` (${planLabel})` : '');
+                        } else if (expiresRaw) {
+                            const t = Date.parse(expiresRaw);
+                            if (!Number.isNaN(t)) {
+                                expirationEl.textContent = new Date(t).toLocaleString() + (planLabel ? ` (${planLabel})` : '');
                             } else {
-                                expirationEl.textContent = license.expires || 'Unknown';
+                                expirationEl.textContent = expiresRaw + (planLabel ? ` (${planLabel})` : '');
                             }
                         } else {
-                            expirationEl.textContent = 'No Expiration';
+                            expirationEl.textContent = planLabel || 'Unknown';
                         }
                     }
                     
@@ -13601,6 +13782,9 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     const input = document.getElementById('license-key-input');
                     const btn = document.querySelector('#activation-form button');
                     
+                    const licenseServerSection = document.getElementById('license-server-section');
+                    const licenseCustomApiSection = document.getElementById('license-custom-api-section');
+
                     if (!isTrial && !isRestricted) {
                         if(input) input.disabled = true;
                         if(btn) {
@@ -13612,12 +13796,40 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                             licenseCountdownInterval = null;
                         }
                         if (countdownContainerEl) countdownContainerEl.style.display = 'none';
+                        
+                        // Hide server sections ONLY for superadmin
+                        const licenseDivider = document.getElementById('license-server-divider');
+                        const isSuper = isSuperAdmin();
+                        if (licenseServerSection) licenseServerSection.style.display = isSuper ? 'block' : 'none';
+                        if (licenseCustomApiSection) licenseCustomApiSection.style.display = isSuper ? 'block' : 'none';
+                        if (licenseDivider) licenseDivider.style.display = isSuper ? 'block' : 'none';
                     } else {
                          if(input) input.disabled = false;
                          if(btn) {
                             btn.disabled = false;
                             btn.textContent = 'Activate';
                          }
+                         
+                         // Hide server sections ONLY for superadmin even if Trial or Restricted
+                         const licenseDivider = document.getElementById('license-server-divider');
+                         const isSuper = isSuperAdmin();
+                         if (licenseServerSection) licenseServerSection.style.display = isSuper ? 'block' : 'none';
+                         if (licenseCustomApiSection) licenseCustomApiSection.style.display = isSuper ? 'block' : 'none';
+                         if (licenseDivider) licenseDivider.style.display = isSuper ? 'block' : 'none';
+                         
+                         // Force default URLs if missing or localhost
+                         const customApiInput = document.getElementById('license-api-url-input');
+                         const cfActInput = document.getElementById('license-activation-url-input');
+                         const cfValInput = document.getElementById('license-validate-url-input');
+                         const cfHbInput = document.getElementById('license-heartbeat-url-input');
+                         const defaultUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+                         const defaultVal = 'https://neofisystem.com/api/index.php?endpoint=validate-license';
+                         const defaultHb = 'https://neofisystem.com/api/index.php?endpoint=heartbeat';
+                         if (customApiInput && (!customApiInput.value || customApiInput.value.includes('localhost'))) customApiInput.value = defaultUrl;
+                         if (cfActInput && (!cfActInput.value || cfActInput.value.includes('localhost'))) cfActInput.value = defaultUrl;
+                         if (cfValInput && !cfValInput.value) cfValInput.value = defaultVal;
+                         if (cfHbInput && !cfHbInput.value) cfHbInput.value = defaultHb;
+
                          const trialEnd = data.trial_end_ts;
                          const remainingMs = data.trial_remaining_ms;
                          if (trialEnd && remainingMs && remainingMs > 0 && countdownContainerEl && countdownEl) {
@@ -13686,6 +13898,29 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         statusEl.textContent = 'Inactive / Expired';
                         statusEl.style.color = 'red';
                     }
+                    
+                    // Show server sections ONLY for superadmin
+                    const licenseServerSection = document.getElementById('license-server-section');
+                    const licenseCustomApiSection = document.getElementById('license-custom-api-section');
+                    const licenseDivider = document.getElementById('license-server-divider');
+                    const isSuper = isSuperAdmin();
+                    if (licenseServerSection) licenseServerSection.style.display = isSuper ? 'block' : 'none';
+                    if (licenseCustomApiSection) licenseCustomApiSection.style.display = isSuper ? 'block' : 'none';
+                    if (licenseDivider) licenseDivider.style.display = isSuper ? 'block' : 'none';
+                    
+                    // Force default URLs if missing or localhost
+                    const customApiInput = document.getElementById('license-api-url-input');
+                    const cfActInput = document.getElementById('license-activation-url-input');
+                    const cfValInput = document.getElementById('license-validate-url-input');
+                    const cfHbInput = document.getElementById('license-heartbeat-url-input');
+                    const defaultUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+                    const defaultVal = 'https://neofisystem.com/api/index.php?endpoint=validate-license';
+                    const defaultHb = 'https://neofisystem.com/api/index.php?endpoint=heartbeat';
+                    if (customApiInput && (!customApiInput.value || customApiInput.value.includes('localhost'))) customApiInput.value = defaultUrl;
+                    if (cfActInput && (!cfActInput.value || cfActInput.value.includes('localhost'))) cfActInput.value = defaultUrl;
+                    if (cfValInput && !cfValInput.value) cfValInput.value = defaultVal;
+                    if (cfHbInput && !cfHbInput.value) cfHbInput.value = defaultHb;
+
                     if(keyEl) keyEl.textContent = '---';
                     if(activatedEl) activatedEl.textContent = '---';
                     if(expirationEl) expirationEl.textContent = 'Expired';
@@ -13925,6 +14160,15 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const keyInput = document.getElementById('license-key-input');
             const key = keyInput.value.trim();
             if (!key) return alert("Please enter a license key");
+
+            // Use embedded URL as primary fallback if input is hidden/empty/localhost
+            const defaultUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+            const customApiInput = document.getElementById('license-api-url-input');
+            let activationUrl = (customApiInput && customApiInput.value.trim()) || defaultUrl;
+            
+            if (/localhost|127\.0\.0\.1|::1|workers\.dev/i.test(activationUrl)) {
+                activationUrl = defaultUrl;
+            }
             
             try {
                 const btn = document.querySelector('#activation-form button');
@@ -13937,7 +14181,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 const res = await fetch('/api/license/activate', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ key })
+                    body: JSON.stringify({ key, activationUrl })
                 });
                 
                 const data = await res.json();
@@ -14084,7 +14328,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             </div>
             <div class="modal-footer" style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
                 <button class="btn btn-sm btn-secondary" onclick="document.getElementById('firewall-rule-modal').style.display='none'" style="background:var(--secondary); color:white; border:none; padding:8px 16px; border-radius:4px;">Cancel</button>
-                <button class="btn btn-sm btn-primary" onclick="addFirewallRule()" style="background:var(--primary); color:white; border:none; padding:8px 16px; border-radius:4px;">Add Rule</button>
+                <button class="btn btn-sm btn-primary add-plus" onclick="addFirewallRule()" title="Add Rule">+</button>
             </div>
         </div>
     </div>
@@ -14248,11 +14492,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         <td style="padding: 12px 15px; color:var(--text-muted);">&uarr; ${upMbps} Mbps / &darr; ${downMbps} Mbps</td>
                         <td style="padding: 12px 15px;">
                             <div style="display:flex; gap:5px; justify-content: center;">
-                                <button class="btn btn-sm btn-primary" onclick='openPppoeProfileModal(${JSON.stringify(p)})' title="Edit" style="min-width: 60px;">
-                                    <i class="fas fa-edit"></i> Edit
+                                <button class="btn btn-sm btn-primary icon-only" onclick='openPppoeProfileModal(${JSON.stringify(p)})' title="Edit">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg>
                                 </button>
-                                <button class="btn btn-sm btn-danger" onclick="deletePppoeProfile(${p.id})" title="Delete" style="min-width: 70px;">
-                                    <i class="fas fa-trash"></i> Delete
+                                <button class="btn btn-sm btn-danger icon-only" onclick="deletePppoeProfile(${p.id})" title="Delete">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
                                 </button>
                             </div>
                         </td>
@@ -14394,11 +14638,11 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         <td style="padding: 12px 15px;">${statusBadge}</td>
                         <td style="padding: 12px 15px;">
                             <div style="display:flex; gap:5px; justify-content: center;">
-                                <button class="btn btn-sm btn-primary" onclick='openPppoeUserModal(${JSON.stringify(u)})' title="Edit" style="min-width: 60px;">
-                                    <i class="fas fa-edit"></i> Edit
+                                <button class="btn btn-sm btn-primary icon-only" onclick='openPppoeUserModal(${JSON.stringify(u)})' title="Edit">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg>
                                 </button>
-                                <button class="btn btn-sm btn-danger" onclick="deletePppoeUser(${u.id})" title="Delete" style="min-width: 70px;">
-                                    <i class="fas fa-trash"></i> Delete
+                                <button class="btn btn-sm btn-danger icon-only" onclick="deletePppoeUser(${u.id})" title="Delete">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
                                 </button>
                             </div>
                         </td>
@@ -14492,12 +14736,12 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 <td style="padding: 12px 15px;" title="Total: ${txTotal}">${txSpeed}</td>
                                 <td style="padding: 12px 15px; text-align: center;">
                                     ${isExpired ? `
-                                        <button class="btn btn-sm btn-success" onclick="renewPppoeUser(${u.id}, '${u.username}')" title="Renew User" style="min-width: 60px; padding: 2px 8px; font-size: 0.8rem;">
-                                            <i class="fas fa-sync-alt"></i> Renew
+                                        <button class="btn btn-sm btn-success icon-only" onclick="renewPppoeUser(${u.id}, '${u.username}')" title="Renew User">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8a5 5 0 1 1-4.9 6H5a7 7 0 1 0 7-8z"/></svg>
                                         </button>
                                     ` : `
-                                        <button class="btn btn-sm btn-warning" onclick="kickPppoeUser(${u.id}, '${u.username}')" title="Kick User" style="min-width: 60px; padding: 2px 8px; font-size: 0.8rem;">
-                                            <i class="fas fa-power-off"></i> Kick
+                                        <button class="btn btn-sm btn-warning icon-only" onclick="kickPppoeUser(${u.id}, '${u.username}')" title="Kick User">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42A7 7 0 1 1 7.59 6.59L6.17 5.17A9 9 0 1 0 17.83 5.17z"/></svg>
                                         </button>
                                     `}
                                 </td>
@@ -14747,7 +14991,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             <h3 style="margin-top:0; margin-bottom:15px; border-bottom:1px solid var(--border); padding-bottom:10px;">Main Vendo Rates</h3>
             
             <div style="margin-bottom:15px; text-align:right;">
-                <button class="btn btn-sm btn-primary" onclick="openRateModal()">Add New Rate</button>
+                <button class="btn btn-sm btn-primary add-plus" onclick="openRateModal()" title="Add New Rate">+</button>
             </div>
 
             <div class="table-container">
@@ -14969,8 +15213,12 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     <td>${up} / ${down}</td>
                     <td>${rate.is_pausable ? '<span class="badge badge-success">Flex</span>' : '<span class="badge badge-warning">Continuous</span>'}</td>
                     <td>
-                        <button class="btn btn-sm btn-primary" onclick="openPointRateModal(${rate.id})">Edit</button>
-                        <button class="btn btn-sm btn-danger" onclick="deletePointRate(${rate.id})">Delete</button>
+                        <button class="btn btn-sm btn-primary icon-only" onclick="openPointRateModal(${rate.id})" title="Edit">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg>
+                        </button>
+                        <button class="btn btn-sm btn-danger icon-only" onclick="deletePointRate(${rate.id})" title="Delete">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                        </button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -15307,6 +15555,33 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         }
     </script>
     <script src="/js/admin-toast.js"></script>
+    <div id="rebind-subvendo-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:420px; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size:0.9rem;">
+            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); display:flex; justify-content:space-between; align-items:center;">
+                <span>Rebind WiFi</span>
+                <button onclick="closeRebindSubVendoModal()" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--text-main);">&times;</button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+                <input type="hidden" id="rebind-subvendo-id">
+                <div style="font-weight:600; color:var(--text-muted);">Device: <span id="rebind-subvendo-name" style="color:var(--text-main);"></span></div>
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">WiFi SSID</label>
+                    <div style="display:flex; gap:8px;">
+                        <select id="rebind-ssid" style="flex:1; padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-body); color:var(--text-main);"></select>
+                        <button class="btn btn-sm" onclick="scanRebindNetworks()" id="btn-scan-rebind">Scan</button>
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">WiFi Password</label>
+                    <input type="password" id="rebind-pass" class="form-control" placeholder="Leave empty if open network" style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-body); color:var(--text-main);">
+                </div>
+            </div>
+            <div style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn btn-sm btn-secondary" onclick="closeRebindSubVendoModal()">Cancel</button>
+                <button class="btn btn-sm btn-success" onclick="submitRebindSubVendo()">Rebind</button>
+            </div>
+        </div>
+    </div>
     <div id="activate-subvendo-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; justify-content:center; align-items:center;">
         <div style="background:var(--card-bg); width:95%; max-width:400px; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size:0.9rem;">
             <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); display:flex; justify-content:space-between; align-items:center;">
@@ -15334,6 +15609,70 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
     </div>
 
     <script>
+        function openRebindSubVendoModal(id, name) {
+            document.getElementById('rebind-subvendo-id').value = id;
+            document.getElementById('rebind-subvendo-name').textContent = name || id;
+            const sel = document.getElementById('rebind-ssid');
+            sel.innerHTML = '<option value="">Click Scan</option>';
+            document.getElementById('rebind-pass').value = '';
+            document.getElementById('rebind-subvendo-modal').style.display = 'flex';
+        }
+        function closeRebindSubVendoModal() {
+            document.getElementById('rebind-subvendo-modal').style.display = 'none';
+        }
+        async function scanRebindNetworks() {
+            const id = document.getElementById('rebind-subvendo-id').value;
+            const btn = document.getElementById('btn-scan-rebind');
+            const original = btn.textContent;
+            btn.textContent = 'Scanning...';
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/admin/subvendo/devices/${id}/scan-wifi`);
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    alert(data.error || 'Scan failed');
+                    return;
+                }
+                const sel = document.getElementById('rebind-ssid');
+                sel.innerHTML = '';
+                const networks = data.networks || [];
+                if (networks.length === 0) sel.innerHTML = '<option value="">No networks found</option>';
+                networks.forEach(n => {
+                    const opt = document.createElement('option');
+                    opt.value = n.ssid || '';
+                    opt.textContent = `${n.ssid || '(hidden)'} ${n.secure ? '🔒' : ''} (${n.rssi || ''})`;
+                    sel.appendChild(opt);
+                });
+            } catch (e) {
+                console.error(e);
+                alert('Scan error');
+            } finally {
+                btn.textContent = original;
+                btn.disabled = false;
+            }
+        }
+        async function submitRebindSubVendo() {
+            const id = document.getElementById('rebind-subvendo-id').value;
+            const ssid = document.getElementById('rebind-ssid').value.trim();
+            const password = document.getElementById('rebind-pass').value;
+            if (!ssid) return alert('Please choose SSID');
+            try {
+                const res = await fetch(`/api/admin/subvendo/devices/${id}/rebind-wifi`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid, password })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    alert(data.error || 'Failed to rebind WiFi');
+                    return;
+                }
+                alert('Rebind command sent. Device will reboot to the new WiFi.');
+                closeRebindSubVendoModal();
+            } catch (e) {
+                alert('Error sending rebind');
+            }
+        }
         function openActivateSubVendoModal(id, name) {
             document.getElementById('activate-subvendo-id').value = id;
             document.getElementById('activate-subvendo-name').textContent = name;

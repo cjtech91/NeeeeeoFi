@@ -1231,6 +1231,9 @@
                             <button class="btn-icon" onclick="openSubVendoFreeTimeConfig(${device.id})" title="Free Time Config" style="color:#2980b9;">
                                 <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                             </button>
+                            <button class="btn-icon" onclick="rebindSubVendoWifi(${device.id})" title="Rebind WiFi" style="color:#16a085;">
+                                <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C18.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.66-1.66-4.34-1.66-6 0zM5 13l2 2c2.76-2.76 7.24-2.76 10 0l2-2c-3.87-3.87-10.13-3.87-14 0z"/></svg>
+                            </button>
                             <button class="btn-icon delete" onclick="deleteSubVendoDevice(${device.id})">
                                 <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                             </button>
@@ -1257,6 +1260,7 @@
                             <div class="device-actions">
                                 <button class="btn btn-sm" onclick="openSubVendoDeviceSettings(${device.id})" style="background:#f39c12; color:white;">Settings</button>
                                 <button class="btn btn-sm" onclick="openSubVendoFreeTimeConfig(${device.id})" style="background:#3498db; color:white;">Free Time</button>
+                                <button class="btn btn-sm" onclick="rebindSubVendoWifi(${device.id})" style="background:#16a085; color:white;">Rebind WiFi</button>
                                 <button class="btn btn-sm btn-danger" onclick="deleteSubVendoDevice(${device.id})">Delete</button>
                             </div>
                         `;
@@ -1265,6 +1269,33 @@
                 });
             } catch (e) {
                 console.error("Failed to load sub vendo devices", e);
+            }
+        }
+
+        async function rebindSubVendoWifi(id) {
+            try {
+                const ssid = window.prompt('New WiFi SSID:', '');
+                if (ssid === null) return;
+                const ssidVal = String(ssid || '').trim();
+                if (!ssidVal) return;
+
+                const password = window.prompt('New WiFi Password (leave empty if none):', '');
+                if (password === null) return;
+
+                const res = await fetch(`/api/admin/subvendo/devices/${id}/rebind-wifi`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: ssidVal, password: String(password || '') })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    alert(data.error || 'Failed to rebind device WiFi');
+                    return;
+                }
+                alert('Rebind command sent. Device will reboot and reconnect to the new WiFi.');
+            } catch (e) {
+                console.error('Rebind WiFi error', e);
+                alert('Failed to rebind device WiFi');
             }
         }
 
@@ -6165,4 +6196,3 @@
     
 
 // --- END BLOCK ---
-

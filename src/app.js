@@ -93,7 +93,23 @@ app.get('/api/license/status', (req, res) => res.json(licenseService.getStatus()
 
 app.post('/api/license/activate', async (req, res) => {
     try {
-        const { key } = req.body;
+        const { key, activationUrl } = req.body;
+        const defaultActivationUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+        const defaultValidateUrl = 'https://neofisystem.com/api/index.php?endpoint=validate-license';
+        const defaultHeartbeatUrl = 'https://neofisystem.com/api/index.php?endpoint=heartbeat';
+        const raw = (typeof activationUrl === 'string') ? activationUrl.trim() : '';
+        const bad = /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(raw);
+        const sanitizedActivationUrl = (!raw || bad) ? defaultActivationUrl : raw;
+        configService.set('license_activation_url', sanitizedActivationUrl, 'system');
+        configService.set('license_api_url', sanitizedActivationUrl, 'system');
+        const currentValidate = String(configService.get('license_validate_url') || '').trim();
+        const currentHeartbeat = String(configService.get('license_heartbeat_url') || '').trim();
+        if (!currentValidate || /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(currentValidate)) {
+            configService.set('license_validate_url', defaultValidateUrl, 'system');
+        }
+        if (!currentHeartbeat || /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(currentHeartbeat)) {
+            configService.set('license_heartbeat_url', defaultHeartbeatUrl, 'system');
+        }
         const result = await licenseService.activateLicense(key);
         res.json(result);
     } catch (e) {
@@ -104,7 +120,13 @@ app.post('/api/license/activate', async (req, res) => {
 // Backward-compatible alias (plural) used by some clients/screenshots
 app.post('/api/licenses/activate', async (req, res) => {
     try {
-        const { key } = req.body;
+        const { key, activationUrl } = req.body;
+        const defaultActivationUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+        const raw = (typeof activationUrl === 'string') ? activationUrl.trim() : '';
+        const bad = /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(raw);
+        const sanitizedActivationUrl = (!raw || bad) ? defaultActivationUrl : raw;
+        configService.set('license_activation_url', sanitizedActivationUrl, 'system');
+        configService.set('license_api_url', sanitizedActivationUrl, 'system');
         const result = await licenseService.activateLicense(key);
         res.json(result);
     } catch (e) {
@@ -418,7 +440,7 @@ app.get('/admin', (req, res) => {
         networkConfigService.init();
         
         // App version metadata
-        configService.set('app_version', '1.1', 'system');
+        configService.set('app_version', '1.2', 'system');
         
         // Initialize License Service (after Config is loaded)
         licenseService.init();
@@ -669,6 +691,304 @@ setInterval(async () => {
         console.error('Error in firewall sync loop:', e);
     }
 }, 60000);
+
+const isBadRemoteUrl = (u) => /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(String(u || ''));
+const getHostingerApiUrl = (endpoint) => {
+    const raw = String(configService.get('license_activation_url') || configService.get('license_api_url') || '').trim();
+    const fallback = 'https://neofisystem.com/api/index.php?endpoint=' + encodeURIComponent(endpoint);
+    if (!raw || isBadRemoteUrl(raw)) return fallback;
+    let url;
+    try { url = new URL(raw); } catch (_) { return fallback; }
+    url.pathname = '/api/index.php';
+    const params = new URLSearchParams(url.search || '');
+    params.set('endpoint', endpoint);
+    url.search = '?' + params.toString();
+    return url.toString();
+};
+
+const classifySubVendoRemoteStatus = (respOk, data) => {
+    const allowed = respOk && ((typeof data.allowed === 'boolean') ? data.allowed : (data.valid !== false));
+    if (allowed) return { status: 'LICENSED', message: String(data.message || data.status || 'ok') };
+    const st = String(data.status || '').toLowerCase();
+    if (st === 'revoked' || st === 'expired') return { status: 'REVOKED', message: String(data.message || st) };
+    if (st === 'unbound' || st === 'bind_failed' || st === 'not_found') return { status: 'UNBOUND', message: String(data.message || st) };
+    return { status: 'TRIAL', message: String(data.message || st || 'not_allowed') };
+};
+
+const subVendoRemoteValidationTimers = new Map();
+const scheduleSubVendoRemoteValidation = (id, delayMs = 10000) => {
+    const key = String(id || '');
+    if (!key) return;
+    if (subVendoRemoteValidationTimers.has(key)) return;
+    const t = setTimeout(async () => {
+        subVendoRemoteValidationTimers.delete(key);
+        try {
+            const row = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
+            if (!row) return;
+            await validateSubVendoRemoteForDevice(row);
+            try { io.emit('subvendo_device_update', { id: row.id, device_id: row.device_id, at: new Date().toISOString(), event: 'remote_check' }); } catch (e) {}
+        } catch (e) {}
+    }, delayMs);
+    subVendoRemoteValidationTimers.set(key, t);
+};
+
+const validateSubVendoRemoteForDevice = async (deviceRow) => {
+    const id = deviceRow && deviceRow.id;
+    const deviceId = String(deviceRow && deviceRow.device_id || '').trim();
+    const licenseKey = String(deviceRow && deviceRow.license_key || '').trim();
+    if (!id || !deviceId || !licenseKey) return;
+
+    const apiToken = String(configService.get('license_api_token') || '').trim();
+    const url = getHostingerApiUrl('subvendo-validate-license');
+    const nowIso = new Date().toISOString();
+    try {
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
+            },
+            body: JSON.stringify({
+                key: licenseKey,
+                license_key: licenseKey,
+                system_serial: deviceId,
+                hwid: deviceId,
+                device_model: deviceRow.name || null
+            })
+        });
+        const data = await resp.json().catch(() => ({}));
+        const r = classifySubVendoRemoteStatus(resp.ok, data);
+        db.prepare(`
+            UPDATE sub_vendo_devices
+            SET remote_status = ?, last_remote_check_at = ?, last_remote_message = ?
+            WHERE id = ?
+        `).run(r.status, nowIso, r.message, id);
+
+        if (r.status === 'REVOKED' || r.status === 'UNBOUND') {
+            const st = String(data.status || '').toLowerCase();
+            if (st === 'revoked' || st === 'expired' || st === 'unbound' || st === 'bind_failed' || st === 'not_found') {
+                db.prepare(`
+                    UPDATE sub_vendo_devices
+                    SET license_type = ?, license_key = NULL, license_activated_at = NULL, trial_end_ts = NULL
+                    WHERE id = ?
+                `).run('EXPIRED', id);
+            }
+        }
+    } catch (e) {
+        db.prepare(`
+            UPDATE sub_vendo_devices
+            SET last_remote_check_at = ?, last_remote_message = ?
+            WHERE id = ?
+        `).run(nowIso, String(e.message || 'remote_error'), id);
+    }
+};
+
+const syncSubVendoLicenses = async () => {
+    try {
+        const rows = db.prepare(`
+            SELECT id, device_id, name, license_type, license_key
+            FROM sub_vendo_devices
+            WHERE license_key IS NOT NULL AND TRIM(license_key) <> '' AND license_type = 'PAID'
+        `).all();
+        if (!rows || rows.length === 0) return;
+
+        const apiToken = String(configService.get('license_api_token') || '').trim();
+        const url = getHostingerApiUrl('subvendo-validate-license');
+
+        for (const row of rows) {
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
+                    },
+                    body: JSON.stringify({
+                        key: row.license_key,
+                        license_key: row.license_key,
+                        system_serial: row.device_id,
+                        hwid: row.device_id,
+                        device_model: row.name || null
+                    })
+                });
+
+                const data = await resp.json().catch(() => ({}));
+                const remote = classifySubVendoRemoteStatus(resp.ok, data);
+                db.prepare(`
+                    UPDATE sub_vendo_devices
+                    SET remote_status = ?, last_remote_check_at = ?, last_remote_message = ?
+                    WHERE id = ?
+                `).run(remote.status, new Date().toISOString(), remote.message, row.id);
+                if (remote.status === 'LICENSED') continue;
+
+                const status = String(data.status || '').toLowerCase();
+                if (status === 'revoked' || status === 'expired' || status === 'unbound' || status === 'bind_failed' || status === 'not_found') {
+                    db.prepare(`
+                        UPDATE sub_vendo_devices
+                        SET license_type = ?, license_key = NULL, license_activated_at = NULL, trial_end_ts = NULL
+                        WHERE id = ?
+                    `).run('EXPIRED', row.id);
+                }
+            } catch (e) {
+                console.warn('SubVendo license sync error:', e.message);
+            }
+        }
+    } catch (e) {
+        console.warn('SubVendo license sync loop error:', e.message);
+    }
+};
+
+setInterval(() => {
+    syncSubVendoLicenses();
+}, 60000);
+
+const syncSubVendoHeartbeats = async () => {
+    try {
+        const rows = db.prepare(`
+            SELECT device_id, name, license_key, last_active_at, status
+            FROM sub_vendo_devices
+            WHERE license_key IS NOT NULL
+              AND TRIM(license_key) <> ''
+              AND license_type = 'PAID'
+              AND last_active_at IS NOT NULL
+              AND status = 'active'
+              AND last_active_at >= datetime('now', 'localtime', '-70 seconds')
+        `).all();
+        if (!rows || rows.length === 0) return;
+
+        const apiToken = String(configService.get('license_api_token') || '').trim();
+        const url = getHostingerApiUrl('subvendo-heartbeat');
+
+        for (const r of rows) {
+            try {
+                await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
+                    },
+                    body: JSON.stringify({
+                        key: r.license_key,
+                        license_key: r.license_key,
+                        system_serial: r.device_id,
+                        hwid: r.device_id,
+                        device_model: r.name || null,
+                        sentAt: new Date().toISOString(),
+                        lastActiveAt: r.last_active_at
+                    })
+                });
+            } catch (e) {
+                console.warn('SubVendo heartbeat sync error:', e.message);
+            }
+        }
+    } catch (e) {
+        console.warn('SubVendo heartbeat sync loop error:', e.message);
+    }
+};
+
+setInterval(() => {
+    syncSubVendoHeartbeats();
+}, 50000);
+
+const syncHostingerSubVendoCommands = async () => {
+    try {
+        const apiToken = String(configService.get('license_api_token') || '').trim();
+        if (!apiToken) return;
+        const url = getHostingerApiUrl('subvendo-commands-pull');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiToken}`
+            },
+            body: JSON.stringify({ limit: 50 })
+        });
+        const data = await res.json().catch(() => ({}));
+        const commands = Array.isArray(data.commands) ? data.commands : [];
+        if (commands.length === 0) return;
+
+        const doneIds = [];
+        const now = new Date().toISOString();
+        for (const cmd of commands) {
+            if (!cmd || typeof cmd !== 'object') continue;
+            const id = String(cmd.id || '').trim();
+            const type = String(cmd.type || '').trim();
+            const machineId = String(cmd.machineId || '').trim();
+            if (!id || !type) continue;
+
+            if (type === 'subvendo_expire' && machineId) {
+                const r = db.prepare('SELECT * FROM sub_vendo_devices WHERE device_id = ?').get(machineId);
+                if (r) {
+                    db.prepare(`
+                        UPDATE sub_vendo_devices
+                        SET license_type = ?,
+                            license_key = NULL,
+                            license_activated_at = NULL,
+                            trial_end_ts = NULL,
+                            remote_status = ?,
+                            last_remote_check_at = ?,
+                            last_remote_message = ?
+                        WHERE id = ?
+                    `).run('EXPIRED', 'REVOKED', now, 'revoked', r.id);
+                    try { io.emit('subvendo_device_update', { id: r.id, device_id: r.device_id, at: now, event: 'remote_expire' }); } catch (e) {}
+                }
+                doneIds.push(id);
+                continue;
+            }
+
+            doneIds.push(id);
+        }
+
+        if (doneIds.length > 0) {
+            const ackUrl = getHostingerApiUrl('subvendo-commands-ack');
+            await fetch(ackUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiToken}`
+                },
+                body: JSON.stringify({ ids: doneIds })
+            }).catch(() => {});
+        }
+    } catch (e) {
+        console.warn('SubVendo command sync error:', e.message);
+    }
+};
+
+setInterval(() => {
+    syncHostingerSubVendoCommands();
+}, 15000);
+
+const svHeartbeatLastSent = new Map();
+const sendSubVendoHeartbeatNow = async ({ device_id, name, license_key, last_active_at }) => {
+    const key = String(license_key || '').trim();
+    const did = String(device_id || '').trim();
+    if (!key || !did) return;
+
+    const now = Date.now();
+    const prev = svHeartbeatLastSent.get(did) || 0;
+    if ((now - prev) < 45000) return;
+    svHeartbeatLastSent.set(did, now);
+
+    const apiToken = String(configService.get('license_api_token') || '').trim();
+    const url = getHostingerApiUrl('subvendo-heartbeat');
+    await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
+        },
+        body: JSON.stringify({
+            key,
+            license_key: key,
+            system_serial: did,
+            hwid: did,
+            device_model: name || null,
+            sentAt: new Date().toISOString(),
+            lastActiveAt: last_active_at || null
+        })
+    });
+};
 
 // --- Coin Listener ---
 const coinSessions = new Map();
@@ -3321,6 +3641,93 @@ app.get('/api/admin/subvendo/devices', isAuthenticated, (req, res) => {
     }
 });
 
+app.post('/api/admin/subvendo/devices/:id/rebind-wifi', isAuthenticated, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'Invalid id' });
+
+    const body = req.body || {};
+    const ssid = typeof body.ssid === 'string' ? body.ssid.trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!ssid) return res.status(400).json({ success: false, error: 'SSID is required' });
+
+    try {
+        const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
+        if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+        const ip = String(device.ip_address || '').trim();
+        if (!ip) return res.status(400).json({ success: false, error: 'Device IP not available. Wait for it to come online first.' });
+
+        const key = String(configService.get('sub_vendo_key') || '').trim();
+        if (!key) return res.status(400).json({ success: false, error: 'Sub Vendo key not set' });
+
+        const ipToLong = (x) => String(x || '').split('.').reduce((acc, octet) => (acc << 8) + (parseInt(octet, 10) || 0), 0) >>> 0;
+        const resolveLocalIpForClient = (clientIp) => {
+            const cip = String(clientIp || '').trim();
+            if (!cip) return '';
+            try {
+                const ifaces = os.networkInterfaces();
+                const targetLong = ipToLong(cip);
+                for (const addrs of Object.values(ifaces)) {
+                    for (const addr of addrs || []) {
+                        if (!addr || addr.internal) continue;
+                        if (!(addr.family === 'IPv4' || addr.family === 4)) continue;
+                        const addrLong = ipToLong(addr.address);
+                        const maskLong = ipToLong(addr.netmask);
+                        if ((targetLong & maskLong) === (addrLong & maskLong)) return addr.address;
+                    }
+                }
+            } catch (e) {}
+            return '';
+        };
+        const serverHost = resolveLocalIpForClient(ip) || String(req.hostname || '').trim() || '';
+
+        const url = `http://${ip}/rebind`;
+        const controller = new AbortController();
+        const to = setTimeout(() => controller.abort(), 8000);
+        try {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key, ssid, password, server: serverHost }),
+                signal: controller.signal
+            });
+            const txt = await r.text().catch(() => '');
+            if (!r.ok) {
+                return res.status(502).json({ success: false, error: `Device rejected: ${txt || r.status}` });
+            }
+            return res.json({ success: true });
+        } finally {
+            clearTimeout(to);
+        }
+    } catch (e) {
+        return res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/subvendo/devices/:id/scan-wifi', isAuthenticated, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'Invalid id' });
+    try {
+        const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
+        if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+        const ip = String(device.ip_address || '').trim();
+        if (!ip) return res.status(400).json({ success: false, error: 'Device IP not available. Device must be online.' });
+
+        const url = `http://${ip}/scan?refresh=1`;
+        const controller = new AbortController();
+        const to = setTimeout(() => controller.abort(), 8000);
+        try {
+            const r = await fetch(url, { signal: controller.signal });
+            const data = await r.json().catch(() => null);
+            if (!r.ok || !data) return res.status(502).json({ success: false, error: 'Scan failed' });
+            return res.json({ success: true, networks: Array.isArray(data.networks) ? data.networks : [] });
+        } finally {
+            clearTimeout(to);
+        }
+    } catch (e) {
+        return res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // 3.1 Coins Out
 app.post('/api/admin/subvendo/devices/:id/coins-out', isAuthenticated, (req, res) => {
     try {
@@ -3331,6 +3738,16 @@ app.post('/api/admin/subvendo/devices/:id/coins-out', isAuthenticated, (req, res
         res.status(500).json({ error: e.message });
     }
 });
+
+const mapSubVendoCoinCorrector = (pulses) => {
+    const n = Math.trunc(Number(pulses));
+    if (!Number.isFinite(n) || n <= 0) return null;
+    if (n === 1) return 1;
+    if (n >= 2 && n <= 5) return 5;
+    if (n >= 6 && n <= 11) return 10;
+    if (n >= 12 && n <= 20) return 20;
+    return null;
+};
 
 // 4. Delete Device
 app.delete('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
@@ -3359,6 +3776,8 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
     const coinPin = asIntOrNull(body.coin_pin);
     const relayPin = asIntOrNull(body.relay_pin);
     const pesoPerPulse = asIntOrNull(body.peso_per_pulse);
+    const pulseDivisor = asIntOrNull(body.pulse_divisor);
+    const coinCorrectorEnabled = body.coin_corrector_enabled == null ? null : (body.coin_corrector_enabled ? 1 : 0);
     const downloadSpeed = asIntOrNull(body.download_speed);
     const uploadSpeed = asIntOrNull(body.upload_speed);
     const freeTimeSeconds = asIntOrNull(body.free_time_seconds);
@@ -3372,6 +3791,7 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
     if (coinPin != null && (coinPin < 0 || coinPin > 16)) return res.status(400).json({ error: 'Invalid coin pin' });
     if (relayPin != null && (relayPin < 0 || relayPin > 16)) return res.status(400).json({ error: 'Invalid relay pin' });
     if (pesoPerPulse != null && (pesoPerPulse < 1 || pesoPerPulse > 100)) return res.status(400).json({ error: 'Invalid vendo rate' });
+    if (pulseDivisor != null && (pulseDivisor < 1 || pulseDivisor > 20)) return res.status(400).json({ error: 'Invalid pulse divisor' });
     if (relayPinActiveState != null && !['HIGH', 'LOW'].includes(relayPinActiveState)) return res.status(400).json({ error: 'Invalid relay pin active state' });
 
     try {
@@ -3382,6 +3802,8 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
                 coin_pin = COALESCE(?, coin_pin),
                 relay_pin = COALESCE(?, relay_pin),
                 peso_per_pulse = COALESCE(?, peso_per_pulse),
+                pulse_divisor = COALESCE(?, pulse_divisor),
+                coin_corrector_enabled = COALESCE(?, coin_corrector_enabled),
                 download_speed = COALESCE(?, download_speed),
                 upload_speed = COALESCE(?, upload_speed),
                 free_time_seconds = COALESCE(?, free_time_seconds),
@@ -3398,6 +3820,8 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
             coinPin,
             relayPin,
             pesoPerPulse,
+            pulseDivisor,
+            coinCorrectorEnabled,
             downloadSpeed,
             uploadSpeed,
             freeTimeSeconds,
@@ -3544,9 +3968,17 @@ app.post('/api/admin/subvendo/activate', isAuthenticated, async (req, res) => {
         }
 
         try {
-            const baseUrl = new URL(activationUrlRaw);
-            baseUrl.pathname = '/subvendo/claim';
-            baseUrl.search = '';
+            const isBadUrl = (u) => /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(String(u || ''));
+            const defaultSubVendoActivationUrl = 'https://neofisystem.com/api/index.php?endpoint=subvendo-activate';
+            const raw = String(activationUrlRaw || '').trim();
+            const baseUrl = new URL(isBadUrl(raw) ? defaultSubVendoActivationUrl : raw);
+
+            // Force Hostinger PHP API endpoint for Sub Vendo activation
+            baseUrl.pathname = '/api/index.php';
+            const params = new URLSearchParams(baseUrl.search || '');
+            params.set('endpoint', 'subvendo-activate');
+            baseUrl.search = '?' + params.toString();
+
             const apiToken = configService.get('license_api_token') || '';
 
             const resp = await fetch(baseUrl.toString(), {
@@ -3557,12 +3989,15 @@ app.post('/api/admin/subvendo/activate', isAuthenticated, async (req, res) => {
                 },
                 body: JSON.stringify({
                     key,
-                    hardware_id: device.device_id
+                    license_key: key,
+                    system_serial: device.device_id,
+                    hwid: device.device_id,
+                    device_model: device.name || null
                 })
             });
 
             const data = await resp.json().catch(() => ({}));
-            const allowed = resp.ok && (data.allowed === true || data.ok === true);
+            const allowed = resp.ok && (data.allowed === true || data.success === true || data.valid === true || data.ok === true);
             if (!allowed) {
                 return res.status(400).json({ error: data.message || data.error || 'License key validation failed.' });
             }
@@ -3582,7 +4017,7 @@ app.post('/api/admin/subvendo/activate', isAuthenticated, async (req, res) => {
 
 // 5. Auth/Bind (Public Endpoint for ESP8266)
 app.post('/api/subvendo/auth', (req, res) => {
-    const { key, device_id, name } = req.body;
+    const { key, device_id, name, version } = req.body;
     
     // 1. Validate Key
     const masterKey = configService.get('sub_vendo_key');
@@ -3613,16 +4048,45 @@ app.post('/api/subvendo/auth', (req, res) => {
                 SET last_active_at = ?,
                     status = ?,
                     ip_address = ?,
+                    version = COALESCE(?, version),
                     name = CASE
                         WHEN name IS NULL OR name = '' OR name = 'Unknown Device' THEN COALESCE(?, name)
                         ELSE name
                     END
                 WHERE id = ?
-            `).run(now, 'active', ip, name, device.id);
+            `).run(now, 'active', ip, (typeof version === 'string' && version.trim() ? version.trim() : null), name, device.id);
             
             // Re-fetch to return latest
             device = db.prepare('SELECT * FROM sub_vendo_devices WHERE device_id = ?').get(device_id);
             console.log(`[SubVendo] Auth/Heartbeat from ${device_id} (${name}) at ${now}`);
+
+            try {
+                io.emit('subvendo_device_update', { device_id, id: device.id, at: now, event: 'auth' });
+            } catch (e) {}
+
+            if (device && device.license_type === 'PAID' && device.license_key) {
+                if (!device.remote_status) {
+                    db.prepare(`
+                        UPDATE sub_vendo_devices
+                        SET remote_status = ?, last_remote_check_at = ?, last_remote_message = ?
+                        WHERE id = ?
+                    `).run('CHECKING', now, 'pending', device.id);
+                    device.remote_status = 'CHECKING';
+                }
+                scheduleSubVendoRemoteValidation(device.id, 10000);
+                sendSubVendoHeartbeatNow({
+                    device_id: device.device_id,
+                    name: device.name,
+                    license_key: device.license_key,
+                    last_active_at: device.last_active_at
+                }).catch(() => {});
+            } else if (device) {
+                db.prepare(`
+                    UPDATE sub_vendo_devices
+                    SET remote_status = ?, last_remote_check_at = ?, last_remote_message = ?
+                    WHERE id = ?
+                `).run('TRIAL', now, 'trial', device.id);
+            }
 
             // Return only necessary config to keep payload small and reliable for ESP8266
             const deviceConfig = {
@@ -3632,7 +4096,8 @@ app.post('/api/subvendo/auth', (req, res) => {
                 coin_pin: device.coin_pin,
                 relay_pin: device.relay_pin,
                 peso_per_pulse: device.peso_per_pulse,
-                relay_pin_active_state: device.relay_pin_active_state || 'LOW'
+                relay_pin_active_state: device.relay_pin_active_state || 'LOW',
+                remote_status: device.remote_status || ''
             };
 
             return res.json({ success: true, message: 'Authenticated and binded successfully', device: deviceConfig });
@@ -3678,8 +4143,24 @@ app.post('/api/subvendo/pulse', (req, res) => {
         const now = new Date().toISOString();
         db.prepare('UPDATE sub_vendo_devices SET last_active_at = ? WHERE id = ?').run(now, device.id);
 
+        try {
+            io.emit('subvendo_device_update', { device_id: device.device_id, id: device.id, at: now, event: 'pulse' });
+        } catch (e) {}
+
+        if (device.license_type === 'PAID' && device.license_key) {
+            sendSubVendoHeartbeatNow({
+                device_id: device.device_id,
+                name: device.name,
+                license_key: device.license_key,
+                last_active_at: now
+            }).catch(() => {});
+        }
+
         const pesoPerPulse = Number(device.peso_per_pulse) > 0 ? Number(device.peso_per_pulse) : 1;
-        const amount = count * pesoPerPulse;
+        const pulseDivisor = Number(device.pulse_divisor) > 0 ? Number(device.pulse_divisor) : 1;
+        const useCorrector = Number(device.coin_corrector_enabled) === 1;
+        const corrected = useCorrector ? mapSubVendoCoinCorrector(count) : null;
+        const amount = corrected != null ? corrected : (Math.round(((count * pesoPerPulse) / pulseDivisor) * 100) / 100);
         handleCoinPulseEvent(amount, `subvendo:${device_id}`).catch(() => {});
 
         res.json({ success: true, pulses: count, amount });

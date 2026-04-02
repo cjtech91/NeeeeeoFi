@@ -22,7 +22,7 @@ class LicenseService {
         this.events = new EventEmitter();
         
         // Default activation server
-        this.apiUrl = configService.get('license_api_url') || 'http://localhost:8080/api/activate'; 
+        this.apiUrl = configService.get('license_api_url') || 'https://neofisystem.com/api/index.php?endpoint=activate'; 
         this.savedKey = null; // Store key for auto-recovery
         this.isAutoReactivating = false;
         this.autoReactivationAttempts = 0;
@@ -45,9 +45,6 @@ class LicenseService {
     init() {
         this.fetchDeviceModel();
         this.fetchSystemSerial();
-        // Strictly use System Serial as HWID
-        // If unknown, we still use 'Unknown' which will fail validation if not intended,
-        // but user explicitly asked to remove previous HWID logic.
         this.hwid = (this.systemSerial && this.systemSerial !== 'Unknown') ? this.systemSerial : 'Unknown';
         
         console.log(`LicenseService: Using HWID: ${this.hwid}`);
@@ -55,6 +52,17 @@ class LicenseService {
 
         if (!this.savedKey) {
             try { this.savedKey = configService.get('last_license_key') || this.savedKey; } catch (e) {}
+        }
+
+        // Re-run loadLicense once we are sure serial is fetched if it was loading
+        if (!this.isValid || this.licenseData.type === 'TRIAL') {
+            setTimeout(() => {
+                if (this.systemSerial === 'Loading...') {
+                    this.fetchSystemSerial();
+                    this.hwid = this.systemSerial;
+                }
+                this.loadLicense();
+            }, 2000);
         }
 
         // Do NOT validate immediately if local license is invalid; activation will run first.
@@ -100,13 +108,33 @@ class LicenseService {
     async validateRemoteLicense(keyParam) {
         const keyUse = (keyParam || (this.licenseData && this.licenseData.key) || this.savedKey);
         if (!keyUse) return;
+        if (!this.systemSerial || this.systemSerial === 'Loading...' || this.systemSerial === 'Unknown') {
+            console.warn('LicenseService: Skipping remote validation (system serial not ready).');
+            return;
+        }
 
         console.log('LicenseService: Validating license remotely...');
         try {
             const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
+            const isBadUrl = (u) => /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(String(u || ''));
             const apiToken = sanitize(configService.get('license_api_token'));
-            const explicitValidateUrl = sanitize(configService.get('license_validate_url'));
-            const activationUrlRaw = sanitize(configService.get('license_activation_url')) || sanitize(configService.get('license_api_url')) || this.apiUrl;
+            const defaultActivationUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+            const defaultValidateUrl = 'https://neofisystem.com/api/index.php?endpoint=validate-license';
+
+            let explicitValidateUrl = sanitize(configService.get('license_validate_url'));
+            if (explicitValidateUrl && isBadUrl(explicitValidateUrl)) {
+                explicitValidateUrl = '';
+                try { configService.set('license_validate_url', defaultValidateUrl, 'system'); } catch (e) {}
+            }
+
+            let activationUrlRaw = sanitize(configService.get('license_activation_url')) || sanitize(configService.get('license_api_url')) || this.apiUrl;
+            if (!activationUrlRaw || isBadUrl(activationUrlRaw)) {
+                activationUrlRaw = defaultActivationUrl;
+                try {
+                    configService.set('license_activation_url', defaultActivationUrl, 'system');
+                    configService.set('license_api_url', defaultActivationUrl, 'system');
+                } catch (e) {}
+            }
             
             // Resolve validation URL
             let targetUrl;
@@ -115,12 +143,22 @@ class LicenseService {
             } else {
                 if (!activationUrlRaw) return;
                 const actUrl = new URL(activationUrlRaw);
-                if (/\/activate\/?$/i.test(actUrl.pathname)) {
+                const params = new URLSearchParams(actUrl.search || '');
+                const ep = (params.get('endpoint') || '').toLowerCase();
+                if (ep === 'activate') {
+                    params.set('endpoint', 'validate-license');
+                    actUrl.search = '?' + params.toString();
+                } else if (/\/activate\/?$/i.test(actUrl.pathname)) {
                     actUrl.pathname = actUrl.pathname.replace(/\/activate\/?$/i, '/validate-license');
                 } else if (/\/api\/activate\/?$/i.test(actUrl.pathname)) {
                     actUrl.pathname = actUrl.pathname.replace(/\/api\/activate\/?$/i, '/validate-license');
-                } else {
-                    actUrl.pathname = '/validate-license';
+                } else if (!/validate/i.test(actUrl.pathname + actUrl.search)) {
+                    // Fallback default
+                    const fallback = new URL(defaultValidateUrl);
+                    actUrl.protocol = fallback.protocol;
+                    actUrl.host = fallback.host;
+                    actUrl.pathname = fallback.pathname;
+                    actUrl.search = fallback.search;
                 }
                 targetUrl = actUrl;
             }
@@ -157,15 +195,29 @@ class LicenseService {
                             const data = JSON.parse(body);
                             const allowed = (typeof data.allowed === 'boolean') ? data.allowed : (data.valid !== false);
                             if (!allowed) {
-                                const status = data.status || 'revoked';
-                                const msg = data.message || 'Remote Validation Failed';
+                                const status = String(data.status || 'unknown').toLowerCase();
+                                const msg = String(data.message || 'Remote Validation Failed');
                                 console.warn(`LicenseService: Validation denied (${status}).`);
                                 
-                                // Auto-bind fallback: if validation failed due to binding and we have a key, try one-time activation
-                                const looksLikeBindFail = /bind/i.test(String(status)) || /bind/i.test(String(msg));
-                                if (looksLikeBindFail && keyUse && !this.triedAutoBind) {
+                                // Handle explicit revocation
+                                if (status === 'revoked' || /revoke/i.test(msg)) {
+                                    console.warn('LicenseService: License explicitly revoked by server.');
+                                    this.revokeLicense('Revoked by Server');
+                                    return;
+                                }
+
+                                // Expired on server should force local revoke
+                                if (status === 'expired') {
+                                    this.revokeLicense('Expired');
+                                    return;
+                                }
+
+                                // Auto-bind fallback: if validation failed due to binding/unbound and we have a key, try one-time activation
+                                const looksLikeBindFail = /bind/i.test(status) || /bind/i.test(msg);
+                                const looksLikeUnbound = (status === 'unbound') || /unbound/i.test(msg) || /invalid/i.test(msg);
+                                if ((looksLikeBindFail || looksLikeUnbound) && keyUse && !this.triedAutoBind) {
                                     this.triedAutoBind = true;
-                                    console.log('LicenseService: Attempting auto-bind via activation after bind_failed...');
+                                    console.log('LicenseService: Attempting auto-bind via activation after validation denial...');
                                     this.activateLicense(keyUse)
                                         .then(() => {
                                             console.log('LicenseService: Auto-bind activation succeeded. Marking valid.');
@@ -174,11 +226,20 @@ class LicenseService {
                                         })
                                         .catch((e) => {
                                             console.warn('LicenseService: Auto-bind activation failed:', e && e.message ? e.message : String(e));
-                                            this.revokeLicense(`${status}: ${msg}`);
+                                            this.isValid = false;
+                                            try { configService.set('license_status', status || 'unbound', 'system'); } catch (e) {}
                                         });
                                     return;
                                 }
-                                
+
+                                // Do not delete local license file for transient/binding errors
+                                if (status === 'unbound' || looksLikeBindFail || status === 'not_found' || status === 'bad_request') {
+                                    console.warn(`LicenseService: Marking license invalid without deleting local file (${status}).`);
+                                    this.isValid = false;
+                                    try { configService.set('license_status', status, 'system'); } catch (e) {}
+                                    return;
+                                }
+
                                 console.warn(`LicenseService: Revoking due to validation denial: ${status}`);
                                 this.revokeLicense(`${status}: ${msg}`);
                             } else {
@@ -223,6 +284,8 @@ class LicenseService {
         const sendBeat = async () => {
             try {
                 const payload = JSON.stringify({
+                    key: this.savedKey || (this.licenseData && this.licenseData.key) || null,
+                    license_key: this.savedKey || (this.licenseData && this.licenseData.key) || null,
                     system_serial: this.systemSerial,
                     hwid: this.hwid || this.systemSerial || null,
                     device_model: this.deviceModel || null,
@@ -295,19 +358,29 @@ class LicenseService {
 
     normalizeId(s) {
         if (typeof s !== 'string') return s;
-        return s.trim();
+        return s.trim().toLowerCase();
     }
 
     fireHeartbeat() {
         const sanitize = (s) => (typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s);
-        const hbUrlRaw = sanitize(configService.get('license_heartbeat_url'));
-        if (!hbUrlRaw) return;
+        const isBadUrl = (u) => /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(String(u || ''));
+        const defaultHeartbeatUrl = 'https://neofisystem.com/api/index.php?endpoint=heartbeat';
+        if (!this.systemSerial || this.systemSerial === 'Loading...' || this.systemSerial === 'Unknown') {
+            return;
+        }
+        let hbUrlRaw = sanitize(configService.get('license_heartbeat_url')) || '';
+        if (!hbUrlRaw || isBadUrl(hbUrlRaw)) {
+            hbUrlRaw = defaultHeartbeatUrl;
+            try { configService.set('license_heartbeat_url', defaultHeartbeatUrl, 'system'); } catch (e) {}
+        }
         let targetUrl;
         try { targetUrl = new URL(hbUrlRaw); } catch (_) { return; }
         const token = sanitize(configService.get('license_api_token')) || '';
 
         try {
             const payload = JSON.stringify({
+            key: this.savedKey || (this.licenseData && this.licenseData.key) || null,
+            license_key: this.savedKey || (this.licenseData && this.licenseData.key) || null,
                 system_serial: this.systemSerial,
                 hwid: this.hwid || this.systemSerial || null,
                 device_model: this.deviceModel || null,
@@ -510,6 +583,11 @@ class LicenseService {
                 console.log('LicenseService: New installation detected. Trial starts now.');
             }
 
+            // Ensure systemSerial is fetched if it was not yet ready
+            if (!this.systemSerial || this.systemSerial === 'Loading...' || this.systemSerial === 'Unknown') {
+                this.fetchSystemSerial();
+            }
+
             // 2. Load License File
             if (fs.existsSync(this.licensePath)) {
                 try {
@@ -520,31 +598,26 @@ class LicenseService {
                     if (license.key) this.savedKey = license.key;
                     else if (license.token && license.token.key) this.savedKey = license.token.key;
 
-                const localId = this.normalizeId(this.systemSerial || this.hwid);
-                // Ensure localId is not Unknown or Loading
-                if (localId === 'Unknown' || localId === 'Loading...') {
-                    if (this.systemSerial && this.systemSerial !== 'Unknown' && this.systemSerial !== 'Loading...') {
-                         this.hwid = this.systemSerial;
-                    } else {
-                         this.fetchSystemSerial();
-                         this.hwid = this.systemSerial;
-                    }
-                }
                 const tokenId = this.normalizeId(license.token.system_serial || license.token.System_Serial || license.token.hardware_id || license.token.hwid);
+                const localId = this.normalizeId(this.systemSerial || this.hwid);
                 
-                console.log(`LicenseService: Verifying. TokenID: ${tokenId}, LocalID: ${this.normalizeId(this.systemSerial || this.hwid)}`);
+                const sigValid = this.verifySignature(license);
+                const idMatch = (tokenId && localId && tokenId === localId);
+
+                console.log(`LicenseService: Verifying. SigValid: ${sigValid}, IDMatch: ${idMatch}, TokenID: "${tokenId}", LocalID: "${localId}"`);
                 
-                if (this.verifySignature(license) && tokenId && this.normalizeId(this.systemSerial || this.hwid) && tokenId === this.normalizeId(this.systemSerial || this.hwid)) {
+                if (sigValid && idMatch) {
                     this.isValid = true;
                     this.licenseData = license.token;
                     // Add metadata
                     this.licenseData.key = license.key || 'Hidden';
                     this.licenseData.activated_date = license.activated_date || null;
                     
-                    console.log('LicenseService: License Validated Successfully');
+                    console.log('LicenseService: License Validated Successfully. Type:', this.licenseData.type);
                     return;
                 } else {
-                    console.warn('LicenseService: Invalid License or Identity Mismatch');
+                    if (!sigValid) console.warn('LicenseService: Signature Invalid. Check public/private key pair.');
+                    if (!idMatch) console.warn(`LicenseService: Identity Mismatch. TokenID: "${tokenId}", LocalID: "${localId}"`);
                 }
                 } catch(e) { 
                     console.error('License parse error:', e);
@@ -621,9 +694,24 @@ class LicenseService {
             }
             const publicKey = fs.readFileSync(this.publicKeyPath, 'utf8');
             const verify = crypto.createVerify('SHA256');
-            verify.update(JSON.stringify(license.token));
+            
+            // Priority: token_raw (exact bit-perfect string signed by server)
+            // Fallback: stable JSON stringification of token object
+            let payload = '';
+            if (license.token_raw && typeof license.token_raw === 'string') {
+                payload = license.token_raw;
+            } else {
+                // If token_raw is missing, we try to match the PHP json_encode behavior
+                payload = JSON.stringify(license.token);
+            }
+            
+            verify.update(payload);
             verify.end();
-            return verify.verify(publicKey, license.signature, 'base64');
+            const result = verify.verify(publicKey, license.signature, 'base64');
+            if (!result) {
+                console.warn('LicenseService: Signature verification failed. Payload length:', payload.length);
+            }
+            return result;
         } catch (e) {
             console.error('Verify Error:', e);
             return false;
@@ -657,8 +745,17 @@ class LicenseService {
 
         // Configuration
         const sanitize = (s) => typeof s === 'string' ? s.trim().replace(/^[`'"]+|[`'"]+$/g, '') : s;
+        const isBadUrl = (u) => /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(String(u || ''));
         const apiToken = sanitize(configService.get('license_api_token'));
-        const activationUrlRaw = sanitize(configService.get('license_activation_url')) || sanitize(configService.get('license_api_url')) || this.apiUrl;
+        const defaultActivationUrl = 'https://neofisystem.com/api/index.php?endpoint=activate';
+        let activationUrlRaw = sanitize(configService.get('license_activation_url')) || sanitize(configService.get('license_api_url')) || this.apiUrl;
+        if (!activationUrlRaw || isBadUrl(activationUrlRaw)) {
+            activationUrlRaw = defaultActivationUrl;
+            try {
+                configService.set('license_activation_url', defaultActivationUrl, 'system');
+                configService.set('license_api_url', defaultActivationUrl, 'system');
+            } catch (e) {}
+        }
 
         let url;
         if (!activationUrlRaw) {
@@ -720,6 +817,7 @@ class LicenseService {
         const tmpPath = this.licensePath + '.tmp';
         fs.writeFileSync(tmpPath, JSON.stringify({
             token: response.token || response, 
+            token_raw: response.token_raw || null,
             signature: response.signature,
             key: key,
             activated_date: Date.now()
@@ -729,6 +827,7 @@ class LicenseService {
         try { 
             configService.set('last_license_key', key, 'system'); 
             configService.set('license_last_verified_ts', Date.now(), 'system');
+            configService.set('license_status', 'activated', 'system');
         } catch (e) {}
         
         // Persist activation to local database for audit/resilience
@@ -739,7 +838,7 @@ class LicenseService {
               INSERT INTO license_activations
                 (license_key_hash, system_serial, device_model, token_json, signature, status, message, activated_at)
               VALUES
-                (?, ?, ?, ?, ?, 'success', NULL, datetime('now','localtime'))
+                (?, ?, ?, ?, ?, 'activated', NULL, datetime('now','localtime'))
             `).run(
               hash,
               this.systemSerial || null,
@@ -754,7 +853,7 @@ class LicenseService {
         this.loadLicense();
 
         try {
-            this.events.emit('license_state', { state: 'active', key });
+            this.events.emit('license_state', { state: 'activated', key });
         } catch (e) {}
         try { this.fireHeartbeat(); } catch (e) {}
     }
@@ -783,7 +882,13 @@ class LicenseService {
             saved_key_present: !!this.savedKey,
             last_verified_ts: lastVerifiedTs,
             auto_reactivation_attempts: this.autoReactivationAttempts,
-            auto_reactivation_error: this.lastAutoReactivationError
+            auto_reactivation_error: this.lastAutoReactivationError,
+            debug: {
+                license_file_exists: fs.existsSync(this.licensePath),
+                public_key_exists: fs.existsSync(this.publicKeyPath),
+                current_hwid: this.hwid,
+                current_serial: this.systemSerial
+            }
         };
     }
 }

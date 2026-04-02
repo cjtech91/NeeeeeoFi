@@ -21,6 +21,9 @@ fi
 
 echo "Configuring Hotspot rules for $IFACE ($PORTAL_IP/$CIDR)..."
 
+# Ensure IP forwarding is enabled (needed for NAT and captive portal flows)
+sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1 || true
+
 # 0. Ensure Interface has IP and is UP
 ip link set $IFACE up
 # Enable route_localnet to allow redirection to localhost
@@ -79,6 +82,9 @@ if ! iptables -C INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT 2>/dev/null; then
 fi
 if ! iptables -C INPUT -i $IFACE -p tcp --dport $PORTAL_PORT -j ACCEPT 2>/dev/null; then
     iptables -A INPUT -i $IFACE -p tcp --dport $PORTAL_PORT -j ACCEPT
+fi
+if ! iptables -C INPUT -i $IFACE -p tcp --dport 80 -j ACCEPT 2>/dev/null; then
+    iptables -A INPUT -i $IFACE -p tcp --dport 80 -j ACCEPT
 fi
 
 # 5. Drop Unauthorized Forwarding (Walled Garden Enforcement)

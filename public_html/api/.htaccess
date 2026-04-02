@@ -1,0 +1,15 @@
+<Files "db.json">
+  Require all denied
+</Files>
+
+<Files "private.pem">
+  Require all denied
+</Files>
+
+<Files "private.key">
+  Require all denied
+</Files>
+
+<Files "private.pem.example">
+  Require all denied
+</Files>

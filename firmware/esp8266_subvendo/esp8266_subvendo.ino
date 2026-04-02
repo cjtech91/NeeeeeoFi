@@ -4,6 +4,13 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
+#define FIRMWARE_VERSION "v1.2"
+
+static bool authOk = false;
+static unsigned long lastAuthAttemptMs = 0;
+static String cachedServerHost = "";
+static String cachedServerBase = "";
+
 // --- Configuration Structure ---
 struct Config {
   char ssid[32];
@@ -30,6 +37,8 @@ uint8_t currentRelayPin = 5;
 // --- Constants ---
 const int EEPROM_SIZE = 512;
 const int CONFIG_ADDR = 0;
+const int SERVER_HOST_ADDR = CONFIG_ADDR + (int)sizeof(Config);
+const int SERVER_HOST_MAX = 48;
 const int LED_PIN = 2; // Built-in LED (usually D4, active low)
 const int RESET_BUTTON_PIN = 0; // Flash Button (D3)
 
@@ -52,6 +61,10 @@ void IRAM_ATTR onCoinPulse();
 void sendCoinPulses(uint16_t pulses);
 int extractJsonInt(const String& payload, const String& key, int defaultVal);
 String extractJsonString(const String& payload, const String& key, String defaultVal);
+
+String getServerHost();
+void loadServerHost();
+void saveServerHost(const String& host);
 
 void setup() {
   Serial.begin(115200);
@@ -133,6 +146,9 @@ void checkFactoryReset() {
       config.configured = false;
       // Manually write to EEPROM to avoid saveConfig() overriding it to true
       EEPROM.put(CONFIG_ADDR, config);
+      for (int i = 0; i < SERVER_HOST_MAX; i++) {
+        EEPROM.write(SERVER_HOST_ADDR + i, 0);
+      }
       EEPROM.commit();
       
       Serial.println("Config cleared. Rebooting...");
@@ -186,7 +202,11 @@ void loop() {
       // Send heartbeat periodically to keep status "Online"
       static unsigned long lastHeartbeat = 0;
 
-      if ((millis() - lastHeartbeat) > 60000 && (millis() - lastCoinSendMs) > 1000) { 
+      if (!authOk && (millis() - lastAuthAttemptMs) > 5000 && (millis() - lastCoinSendMs) > 1000) {
+         bindDevice();
+      }
+
+      if ((millis() - lastHeartbeat) > 50000 && (millis() - lastCoinSendMs) > 1000) { 
          lastHeartbeat = millis();
          bindDevice(); 
       }
@@ -214,12 +234,75 @@ void loadConfig() {
   if (config.relayPin < 0 || config.relayPin > 16) config.relayPin = 5;
   if (config.pesoPerPulse < 1 || config.pesoPerPulse > 100) config.pesoPerPulse = 1;
   if (config.relayActiveState[0] == 0 || config.relayActiveState[0] == 0xFF) strcpy(config.relayActiveState, "LOW");
+  loadServerHost();
 }
 
 void saveConfig() {
   config.configured = true;
   EEPROM.put(CONFIG_ADDR, config);
   EEPROM.commit();
+}
+
+void loadServerHost() {
+  char buf[SERVER_HOST_MAX];
+  for (int i = 0; i < SERVER_HOST_MAX; i++) buf[i] = '\0';
+
+  bool invalid = false;
+  for (int i = 0; i < SERVER_HOST_MAX - 1; i++) {
+    uint8_t b = EEPROM.read(SERVER_HOST_ADDR + i);
+    if (b == 0xFF || b == 0x00) break;
+    if (b < 32 || b > 126) {
+      invalid = true;
+      break;
+    }
+    buf[i] = (char)b;
+  }
+
+  String s = String(buf);
+  s.trim();
+
+  if (!invalid && s.length() > 0) {
+    for (unsigned int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      const bool ok =
+        (c >= '0' && c <= '9') ||
+        (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        c == '.' || c == '-' ;
+      if (!ok) { invalid = true; break; }
+    }
+  }
+
+  if (invalid || s.length() == 0) {
+    cachedServerHost = "";
+    cachedServerBase = "";
+    for (int i = 0; i < SERVER_HOST_MAX; i++) {
+      EEPROM.write(SERVER_HOST_ADDR + i, 0);
+    }
+    EEPROM.commit();
+    return;
+  }
+
+  cachedServerHost = s;
+}
+
+void saveServerHost(const String& host) {
+  String h = host;
+  h.trim();
+  if (h.length() >= SERVER_HOST_MAX) h = h.substring(0, SERVER_HOST_MAX - 1);
+  for (int i = 0; i < SERVER_HOST_MAX; i++) {
+    uint8_t b = 0;
+    if (i < (int)h.length()) b = (uint8_t)h[i];
+    EEPROM.write(SERVER_HOST_ADDR + i, b);
+  }
+  EEPROM.commit();
+  cachedServerHost = h;
+  cachedServerBase = "";
+}
+
+String getServerHost() {
+  if (cachedServerHost.length() > 0) return cachedServerHost;
+  return WiFi.gatewayIP().toString();
 }
 
 void startAPMode() {
@@ -270,6 +353,8 @@ void startClientMode() {
     
     // Start Web Server for Relay Control
     server.on("/relay", HTTP_GET, handleRelay);
+    server.on("/scan", HTTP_GET, handleScan); // allow scanning while in client mode
+    server.on("/rebind", HTTP_POST, handleRebind);
     server.onNotFound([]() { server.send(404, "text/plain", "Not Found"); });
     server.begin();
     Serial.println("Web Server started for Remote Control");
@@ -324,6 +409,41 @@ void handleRelay() {
   }
 }
 
+void handleRebind() {
+  String body = server.arg("plain");
+  String key = extractJsonString(body, "key", "");
+  if (key.length() == 0 && server.hasArg("key")) key = server.arg("key");
+  if (key.length() == 0 || key != String(config.subVendoKey)) {
+    server.send(401, "text/plain", "Unauthorized");
+    return;
+  }
+
+  String ssid = extractJsonString(body, "ssid", "");
+  String password = extractJsonString(body, "password", "");
+  String serverHost = extractJsonString(body, "server", "");
+  if (ssid.length() == 0 && server.hasArg("ssid")) ssid = server.arg("ssid");
+  if (password.length() == 0 && server.hasArg("password")) password = server.arg("password");
+  if (serverHost.length() == 0 && server.hasArg("server")) serverHost = server.arg("server");
+
+  ssid.trim();
+  password.trim();
+  serverHost.trim();
+
+  if (ssid.length() == 0) {
+    server.send(400, "text/plain", "Missing ssid");
+    return;
+  }
+
+  ssid.toCharArray(config.ssid, 32);
+  password.toCharArray(config.password, 32);
+  if (serverHost.length() > 0) saveServerHost(serverHost);
+  saveConfig();
+
+  server.send(200, "application/json", "{\"success\":true}");
+  delay(300);
+  ESP.restart();
+}
+
 void handleRoot() {
   String html = R"rawliteral(
 <!DOCTYPE html>
@@ -356,6 +476,9 @@ void handleRoot() {
       
       <label>WiFi Password</label>
       <input type="password" name="password" placeholder="Enter WiFi Password">
+
+      <label>NeoFi Server (Optional)</label>
+      <input type="text" name="server" placeholder="e.g. 10.0.2.1 or 20.0.0.178">
       
       <label>Sub Vendo Key</label>
       <input type="text" name="key" placeholder="Get this from Admin Panel" required>
@@ -480,7 +603,7 @@ void handleSave() {
     String ssid = server.arg("ssid_manual");
     if (ssid.length() == 0) ssid = server.arg("ssid");
     String password = server.arg("password");
-    // String serverIp = server.arg("serverIp"); // Auto-detected now
+    String serverHost = server.arg("server");
     String key = server.arg("key");
     String name = server.arg("name");
 
@@ -488,7 +611,7 @@ void handleSave() {
 
     ssid.toCharArray(config.ssid, 32);
     password.toCharArray(config.password, 32);
-    // serverIp.toCharArray(config.serverIp, 16);
+    if (serverHost.length() > 0) saveServerHost(serverHost);
     key.toCharArray(config.subVendoKey, 32);
     name.toCharArray(config.deviceName, 32);
     config.coinPin = 6;
@@ -520,82 +643,115 @@ void handleSave() {
 }
 
 void bindDevice() {
-  WiFiClient client;
-  HTTPClient http;
-  
-  // Construct URL: http://<GatewayIP>:3000/api/subvendo/auth
-  // Auto-detect server IP from gateway
-  String gateway = WiFi.gatewayIP().toString();
-  String url = "http://" + gateway + ":3000/api/subvendo/auth";
-  
-  Serial.print("Gateway/Server IP: ");
-  Serial.println(gateway);
-  
-  Serial.print("Sending Auth Request to: ");
-  Serial.println(url);
+  lastAuthAttemptMs = millis();
+  String host = getServerHost();
+  if (host.length() == 0) {
+    authOk = false;
+    cachedServerBase = "";
+    return;
+  }
 
-  if (http.begin(client, url)) {
-    http.addHeader("Content-Type", "application/json");
-    
-    // Manual JSON construction to avoid dependency
-    String json = "{";
-    json += "\"key\":\"" + String(config.subVendoKey) + "\",";
-    json += "\"device_id\":\"" + getMacAddress() + "\",";
-    json += "\"name\":\"" + String(config.deviceName) + "\"";
-    json += "}";
+  Serial.print("NeoFi Server Host: ");
+  Serial.println(host);
+  if (cachedServerBase.length() > 0) {
+    Serial.print("Cached Server Base: ");
+    Serial.println(cachedServerBase);
+  }
 
+  String json = "{";
+  json += "\"key\":\"" + String(config.subVendoKey) + "\",";
+  json += "\"device_id\":\"" + getMacAddress() + "\",";
+  json += "\"name\":\"" + String(config.deviceName) + "\",";
+  json += "\"version\":\"" + String(FIRMWARE_VERSION) + "\"";
+  json += "}";
+
+  String bases[2];
+  int baseCount = 0;
+  if (cachedServerBase.length() > 0) {
+    bases[baseCount++] = cachedServerBase;
+  } else {
+    bases[baseCount++] = "http://" + host + ":3000";
+    bases[baseCount++] = "http://" + host;
+  }
+
+  authOk = false;
+  String workingBase = "";
+
+  for (int i = 0; i < baseCount; i++) {
+    String base = bases[i];
+    String url = base + "/api/subvendo/auth";
+
+    Serial.print("Sending Auth Request to: ");
+    Serial.println(url);
     Serial.println("Payload: " + json);
-    
+
+    WiFiClient client;
+    HTTPClient http;
+    if (!http.begin(client, url)) {
+      Serial.println("[AUTH] http.begin failed");
+      continue;
+    }
+    http.addHeader("Content-Type", "application/json");
     int httpCode = http.POST(json);
-    
-    if (httpCode > 0) {
-      Serial.printf("[HTTP] POST code: %d\n", httpCode);
-      if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        Serial.println("Response: " + payload);
-        Serial.println(">> Device successfully bound/authenticated!");
-
-        int coinPin = extractJsonInt(payload, "coin_pin", config.coinPin);
-        int relayPin = extractJsonInt(payload, "relay_pin", config.relayPin);
-        int pesoPerPulse = extractJsonInt(payload, "peso_per_pulse", config.pesoPerPulse);
-        String activeState = extractJsonString(payload, "relay_pin_active_state", String(config.relayActiveState));
-        
-        // Validate activeState to prevent corruption
-        if (activeState != "HIGH" && activeState != "LOW") {
-             Serial.println("Invalid activeState received: " + activeState + ". Keeping: " + String(config.relayActiveState));
-             activeState = String(config.relayActiveState);
-        }
-
-        bool changed = false;
-        if (coinPin != config.coinPin) {
-          config.coinPin = coinPin;
-          changed = true;
-        }
-        if (relayPin != config.relayPin) {
-          config.relayPin = relayPin;
-          changed = true;
-        }
-        if (pesoPerPulse != config.pesoPerPulse) {
-          config.pesoPerPulse = pesoPerPulse;
-          changed = true;
-        }
-        if (activeState != String(config.relayActiveState)) {
-          activeState.toCharArray(config.relayActiveState, 8);
-          changed = true;
-        }
-
-        if (changed) saveConfig();
-        applyHardwareConfig();
-      } else {
-         String payload = http.getString();
-         Serial.printf(">> Auth Failed! Response: %s\n", payload.c_str());
-      }
+    String payload = httpCode > 0 ? http.getString() : "";
+    if (httpCode <= 0) {
+      Serial.print("[AUTH] POST failed: ");
+      Serial.println(http.errorToString(httpCode));
     } else {
-      Serial.printf("[HTTP] POST failed, error: %s\n", http.errorToString(httpCode).c_str());
+      Serial.print("[AUTH] HTTP code: ");
+      Serial.println(httpCode);
+      if (payload.length() > 0) {
+        Serial.print("[AUTH] Response (first 180): ");
+        String p = payload;
+        if (p.length() > 180) p = p.substring(0, 180);
+        Serial.println(p);
+      }
     }
     http.end();
+
+    if (httpCode == HTTP_CODE_OK && payload.indexOf("\"success\":true") >= 0) {
+      authOk = true;
+      workingBase = base;
+
+      int coinPin = extractJsonInt(payload, "coin_pin", config.coinPin);
+      int relayPin = extractJsonInt(payload, "relay_pin", config.relayPin);
+      int pesoPerPulse = extractJsonInt(payload, "peso_per_pulse", config.pesoPerPulse);
+      String activeState = extractJsonString(payload, "relay_pin_active_state", String(config.relayActiveState));
+
+      if (activeState != "HIGH" && activeState != "LOW") {
+        activeState = String(config.relayActiveState);
+      }
+
+      bool changed = false;
+      if (coinPin != config.coinPin) {
+        config.coinPin = coinPin;
+        changed = true;
+      }
+      if (relayPin != config.relayPin) {
+        config.relayPin = relayPin;
+        changed = true;
+      }
+      if (pesoPerPulse != config.pesoPerPulse) {
+        config.pesoPerPulse = pesoPerPulse;
+        changed = true;
+      }
+      if (activeState != String(config.relayActiveState)) {
+        activeState.toCharArray(config.relayActiveState, 8);
+        changed = true;
+      }
+
+      if (changed) saveConfig();
+      applyHardwareConfig();
+      break;
+    }
+  }
+
+  if (authOk) {
+    cachedServerBase = workingBase;
+    Serial.println(">> Device successfully bound/authenticated!");
   } else {
-    Serial.println("Unable to connect to server");
+    cachedServerBase = "";
+    Serial.println(">> Auth failed (no working server base).");
   }
 }
 
@@ -659,29 +815,38 @@ void IRAM_ATTR onCoinPulse() {
 
 void sendCoinPulses(uint16_t pulses) {
   if (pulses == 0) return;
-  WiFiClient client;
-  HTTPClient http;
+  String host = getServerHost();
+  if (host.length() == 0) return;
 
-  String gateway = WiFi.gatewayIP().toString();
-  String url = "http://" + gateway + ":3000/api/subvendo/pulse";
+  String bases[2];
+  int baseCount = 0;
+  if (cachedServerBase.length() > 0) {
+    bases[baseCount++] = cachedServerBase;
+  } else {
+    bases[baseCount++] = "http://" + host + ":3000";
+    bases[baseCount++] = "http://" + host;
+  }
 
-  if (http.begin(client, url)) {
+  String json = "{";
+  json += "\"key\":\"" + String(config.subVendoKey) + "\",";
+  json += "\"device_id\":\"" + getMacAddress() + "\",";
+  json += "\"pulses\":" + String((int)pulses);
+  json += "}";
+
+  for (int i = 0; i < baseCount; i++) {
+    String base = bases[i];
+    String url = base + "/api/subvendo/pulse";
+    WiFiClient client;
+    HTTPClient http;
+    if (!http.begin(client, url)) continue;
     http.addHeader("Content-Type", "application/json");
-    String json = "{";
-    json += "\"key\":\"" + String(config.subVendoKey) + "\",";
-    json += "\"device_id\":\"" + getMacAddress() + "\",";
-    json += "\"pulses\":" + String((int)pulses);
-    json += "}";
-
     int httpCode = http.POST(json);
-    if (httpCode > 0) {
-      Serial.printf("[PULSE] POST code: %d\n", httpCode);
-      if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        Serial.println("[PULSE] Response: " + payload);
-      }
-    } else {
-      Serial.printf("[PULSE] POST failed, error: %s\n", http.errorToString(httpCode).c_str());
+    if (httpCode == HTTP_CODE_OK) {
+      cachedServerBase = base;
+      String payload = http.getString();
+      Serial.println("[PULSE] Response: " + payload);
+      http.end();
+      break;
     }
     http.end();
   }

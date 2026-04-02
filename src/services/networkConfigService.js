@@ -549,8 +549,51 @@ class NetworkConfigService {
         const util = require('util');
         const execAsync = util.promisify(require('child_process').exec);
 
+        const vlanCandidates = (this.config.vlans || [])
+            .filter(v => v && v.parent && v.vlanId)
+            .map(v => `${v.parent}.${v.vlanId}`);
+
+        const ifaceExists = async (iface) => {
+            if (!iface) return false;
+            try {
+                await execAsync(`ip link show ${iface}`);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        };
+
+        const resolveDhcpInterface = async (s) => {
+            const original = s.interface;
+            if (await ifaceExists(original)) return original;
+
+            const raw = String(original || '').trim();
+            let vlanId = '';
+            const dotMatch = raw.match(/\.([0-9]+)$/);
+            if (dotMatch) vlanId = dotMatch[1];
+            if (!vlanId) {
+                const tailDigits = raw.match(/([0-9]+)$/);
+                if (tailDigits) vlanId = tailDigits[1];
+            }
+            if (!vlanId) return original;
+
+            const candidate = vlanCandidates.find(i => i.endsWith(`.${vlanId}`));
+            if (candidate && await ifaceExists(candidate)) return candidate;
+
+            return original;
+        };
+
         // Loop through servers
         for (const s of dhcp.servers) {
+            if (process.platform === 'linux') {
+                const resolved = await resolveDhcpInterface(s);
+                if (resolved && resolved !== s.interface) {
+                    console.warn(`DHCP interface "${s.interface}" not found. Using "${resolved}" instead.`);
+                    s.interface = resolved;
+                    this.saveConfig(this.config);
+                }
+            }
+
             const tag = s.interface.replace(/[^a-zA-Z0-9]/g, '_');
             
             // interface=vlan.10
@@ -559,7 +602,10 @@ class NetworkConfigService {
             // Use set:<tag> to identify clients on this subnet for specific options
             content += `dhcp-range=set:${tag},${s.pool_start},${s.pool_end},${s.netmask},12h\n`;
             content += `dhcp-option=tag:${tag},3,${s.gateway}\n`; // Option 3: Router
-            content += `dhcp-option=tag:${tag},6,${dhcp.dns1},${dhcp.dns2}\n`; // Option 6: DNS
+            const dns1 = (s.gateway || dhcp.dns1 || '').trim();
+            const dns2 = (dhcp.dns2 || '').trim();
+            if (dns1 && dns2) content += `dhcp-option=tag:${tag},6,${dns1},${dns2}\n`; // Option 6: DNS
+            else if (dns1) content += `dhcp-option=tag:${tag},6,${dns1}\n`;
             
             // Ensure Interface IP is set
             try {

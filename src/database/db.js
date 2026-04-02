@@ -39,6 +39,21 @@ const initDb = () => {
     )
   `);
 
+  // Table for tracking license activations
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS license_activations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      license_key_hash TEXT,
+      system_serial TEXT,
+      device_model TEXT,
+      token_json TEXT,
+      signature TEXT,
+      status TEXT,
+      message TEXT,
+      activated_at DATETIME
+    )
+  `);
+
   try {
     const settingsInfoEarly = db.prepare('PRAGMA table_info(settings)').all();
     if (!settingsInfoEarly.some(col => col.name === 'category')) {
@@ -507,12 +522,18 @@ const initDb = () => {
       name TEXT,
       device_id TEXT UNIQUE NOT NULL,
       status TEXT DEFAULT 'active',
+      version TEXT DEFAULT '',
+      remote_status TEXT DEFAULT '',
+      last_remote_check_at DATETIME,
+      last_remote_message TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_active_at DATETIME,
       description TEXT DEFAULT '',
       coin_pin INTEGER DEFAULT 6,
       relay_pin INTEGER DEFAULT 5,
       peso_per_pulse INTEGER DEFAULT 1,
+      pulse_divisor INTEGER DEFAULT 1,
+      coin_corrector_enabled INTEGER DEFAULT 0,
       last_coins_out_at DATETIME,
       download_speed INTEGER,
       upload_speed INTEGER,
@@ -532,10 +553,16 @@ const initDb = () => {
   try {
     const info = db.prepare('PRAGMA table_info(sub_vendo_devices)').all();
     const has = (col) => info.some(c => c.name === col);
+    if (!has('version')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN version TEXT DEFAULT ''").run();
+    if (!has('remote_status')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN remote_status TEXT DEFAULT ''").run();
+    if (!has('last_remote_check_at')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN last_remote_check_at DATETIME").run();
+    if (!has('last_remote_message')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN last_remote_message TEXT DEFAULT ''").run();
     if (!has('description')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN description TEXT DEFAULT ''").run();
     if (!has('coin_pin')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN coin_pin INTEGER DEFAULT 6").run();
     if (!has('relay_pin')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN relay_pin INTEGER DEFAULT 5").run();
     if (!has('peso_per_pulse')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN peso_per_pulse INTEGER DEFAULT 1").run();
+    if (!has('pulse_divisor')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN pulse_divisor INTEGER DEFAULT 1").run();
+    if (!has('coin_corrector_enabled')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN coin_corrector_enabled INTEGER DEFAULT 0").run();
     if (!has('last_active_at')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN last_active_at DATETIME").run();
     if (!has('last_coins_out_at')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN last_coins_out_at DATETIME").run();
     if (!has('download_speed')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN download_speed INTEGER").run();
@@ -779,6 +806,30 @@ const initDb = () => {
       if (!hasKey('license_api_token')) {
           db.prepare("INSERT INTO settings (key, value, type, category) VALUES ('license_api_token', '', 'string', 'system')").run();
       }
+      try {
+          const act = db.prepare("SELECT value FROM settings WHERE key = 'license_activation_url'").get();
+          const actVal = act ? String(act.value || '').trim() : '';
+          if (!actVal || /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(actVal)) {
+              db.prepare("UPDATE settings SET value = 'https://neofisystem.com/api/index.php?endpoint=activate' WHERE key = 'license_activation_url'").run();
+          }
+          const val = db.prepare("SELECT value FROM settings WHERE key = 'license_validate_url'").get();
+          const valVal = val ? String(val.value || '').trim() : '';
+          if (!valVal || /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(valVal)) {
+              db.prepare("UPDATE settings SET value = 'https://neofisystem.com/api/index.php?endpoint=validate-license' WHERE key = 'license_validate_url'").run();
+          }
+          const hb = db.prepare("SELECT value FROM settings WHERE key = 'license_heartbeat_url'").get();
+          const hbVal = hb ? String(hb.value || '').trim() : '';
+          if (!hbVal || /localhost|127\.0\.0\.1|::1|workers\.dev/i.test(hbVal)) {
+              db.prepare("UPDATE settings SET value = 'https://neofisystem.com/api/index.php?endpoint=heartbeat' WHERE key = 'license_heartbeat_url'").run();
+          }
+          const tok = db.prepare("SELECT value FROM settings WHERE key = 'license_api_token'").get();
+          if (!tok || !String(tok.value || '').trim()) {
+              const envTok = (process.env.LICENSE_API_TOKEN_DEFAULT || '').trim();
+              if (envTok) {
+                  db.prepare("UPDATE settings SET value = ? WHERE key = 'license_api_token'").run(envTok);
+              }
+          }
+      } catch (e) {}
   } catch(e) {}
 
   // Migrations for existing tables
