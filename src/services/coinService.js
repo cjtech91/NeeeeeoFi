@@ -92,10 +92,14 @@ class CoinService extends EventEmitter {
             return;
         }
 
-        this.debounceTime = Math.max(0, parseInt(configService.get('coin_debounce', this.debounceTime)));
-        this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time', this.commitTimeBase)));
+        // Improved default timing for better pulse detection:
+        // - debounce: 15ms to filter electrical noise while catching rapid pulses
+        // - commit_time_base: 500ms to wait for all pulses from a single coin
+        // - commit_time_large: 1500ms for larger denominations (10, 20 peso)
+        this.debounceTime = Math.max(0, parseInt(configService.get('coin_debounce', 15))); // Changed default from 0 to 15ms
+        this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time', 500))); // Changed from 400 to 500ms
         this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time_base', this.commitTimeBase)));
-        this.commitTimeLarge = Math.max(this.commitTimeBase, parseInt(configService.get('coin_commit_time_large', this.commitTimeLarge)));
+        this.commitTimeLarge = Math.max(this.commitTimeBase, parseInt(configService.get('coin_commit_time_large', 1500))); // Changed from 1200 to 1500ms
 
         // --- Coin Settings ---
         const pin = parseInt(configService.get('coin_pin', 12)); // Default 12 (PA12)
@@ -349,14 +353,20 @@ class CoinService extends EventEmitter {
                             const maxGapAllowedMs = Math.max(0, parseInt(configService.get('coin_single_coin_max_gap_ms', 800)));
                             const allowSnap = maxGapMs <= maxGapAllowedMs;
                             if (allowSnap) {
-                                if (rawPulses >= 11 && rawPulses <= 20) amount = 20;
-                                else if (rawPulses >= 6 && rawPulses <= 10) amount = 10;
-                                else if (rawPulses >= 2 && rawPulses <= 5) amount = 5;
+                                // Improved pulse snapping with wider tolerance ranges
+                                // This helps catch coins even when some pulses are missed
+                                // Typical pulse counts: 1 peso = 1 pulse, 5 peso = 5 pulses, 10 peso = 10 pulses, 20 peso = 20 pulses
+                                if (rawPulses >= 17) amount = 20;        // 17-20+ -> 20 peso (wider tolerance)
+                                else if (rawPulses >= 8 && rawPulses <= 16) amount = 10;  // 8-16 -> 10 peso (wider tolerance)
+                                else if (rawPulses >= 3 && rawPulses <= 7) amount = 5;    // 3-7 -> 5 peso (wider tolerance)
+                                else if (rawPulses >= 1 && rawPulses <= 2) amount = rawPulses; // 1-2 -> exact (1 or 2 peso)
                             }
                         } else {
-                            if (rawPulses >= 11 && rawPulses <= 20) amount = 20;
-                            else if (rawPulses >= 6 && rawPulses <= 10) amount = 10;
-                            else if (rawPulses >= 2 && rawPulses <= 5) amount = 5;
+                            // Multi-coin mode: More aggressive snapping
+                            if (rawPulses >= 17) amount = 20;
+                            else if (rawPulses >= 8 && rawPulses <= 16) amount = 10;
+                            else if (rawPulses >= 3 && rawPulses <= 7) amount = 5;
+                            else if (rawPulses >= 1 && rawPulses <= 2) amount = rawPulses;
                         }
                     }
                 }

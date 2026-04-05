@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
-#define FIRMWARE_VERSION "v1.2"
+#define FIRMWARE_VERSION "v1.3"
 
 static bool authOk = false;
 static unsigned long lastAuthAttemptMs = 0;
@@ -190,7 +190,11 @@ void loop() {
          digitalWrite(LED_PIN, HIGH); // LED OFF
       }
 
-      if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 300 && (millis() - lastCoinSendMs) > 250) {
+      // Improved pulse accumulation timing:
+      // Wait 500ms after last pulse before sending (was 300ms)
+      // This gives more time for rapid successive coins to be counted together
+      // Also wait 400ms between sends to prevent duplicate sends
+      if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 500 && (millis() - lastCoinSendMs) > 400) {
         noInterrupts();
         uint16_t pulses = coinPulseCount;
         coinPulseCount = 0;
@@ -799,14 +803,28 @@ void applyHardwareConfig() {
   digitalWrite(LED_PIN, HIGH); // Default LED OFF
 }
 
+// Improved pulse detection with better debouncing for coin acceptors
+// Most coin acceptors output pulses ~25-100ms wide with ~50-100ms gaps
+// We use 15ms debounce (15000 microseconds) to filter electrical noise while catching all valid pulses
 void IRAM_ATTR onCoinPulse() {
   static unsigned long lastUs = 0;
   const unsigned long nowUs = micros();
-  if (nowUs - lastUs - 3000 > 0) { // Fix for rollover and signed arithmetic safety
-      // But simple subtraction is usually fine for unsigned long delta
-      // if (nowUs - lastUs < 3000) return; 
+  
+  // Debounce: Ignore pulses within 15ms (15000 microseconds) of each other
+  // This filters electrical noise while still catching rapid coin insertions
+  // Most coin acceptors have pulse widths of 25-100ms, so 15ms is safe
+  const unsigned long debounceUs = 15000; // 15ms debounce
+  
+  // Handle micros() rollover (happens every ~70 minutes)
+  unsigned long deltaUs;
+  if (nowUs >= lastUs) {
+    deltaUs = nowUs - lastUs;
+  } else {
+    // Rollover occurred
+    deltaUs = (0xFFFFFFFF - lastUs) + nowUs + 1;
   }
-  if (nowUs - lastUs < 3000) return;
+  
+  if (deltaUs < debounceUs) return;
 
   lastUs = nowUs;
   coinPulseCount++;

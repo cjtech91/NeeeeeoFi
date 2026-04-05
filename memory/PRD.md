@@ -10,6 +10,12 @@ User Choices:
 - Relay Control: GPIO via ESP8266 firmware API
 - Countdown Duration: 60 seconds
 
+## Second Issue: Pulse Detection Problems
+User reported that coin pulse detection is inconsistent on both main device and sub-vendo ESP8266:
+- Sometimes reads fewer pulses than actual coins inserted (5, 10, 20 peso)
+- Rapid successive coin insertions cause missed pulses
+- Coin corrector already set but still has issues
+
 ## Architecture
 - **Backend**: Node.js/Express server (`/app/src/app.js`)
 - **Frontend**: Vanilla JS portal (`/app/public/portal.html`)
@@ -20,31 +26,56 @@ User Choices:
 1. Countdown timer must be synced with relay state
 2. Relay ON = Countdown active
 3. Relay OFF only when: Done Payment clicked, Modal closed, or 60s timeout without coins
+4. Accurate pulse detection for all coin denominations
 
 ## What's Been Implemented
 
-### January 2026
+### January 2026 - Session 1
 - **Fixed**: Countdown timer sync with relay
   - Added `startCoinCountdown(60, 60)` call in `coin_pulse` socket event handler
   - Ensures countdown resets every time a coin is inserted
-  - Keeps relay ON while user is actively inserting coins
-  - File modified: `/app/public/portal.html` (around line 1649)
+  - Applied to ALL 7 portal themes
+
+### January 2026 - Session 2: Pulse Detection Improvements
+- **ESP8266 Firmware (v1.3)**:
+  - Improved debounce from 3ms to 15ms (15000 microseconds)
+  - Better micros() rollover handling
+  - Increased pulse accumulation wait time from 300ms to 500ms
+  - Increased send interval from 250ms to 400ms
+  - File: `/app/firmware/esp8266_subvendo/esp8266_subvendo.ino`
+
+- **Main Device coinService.js**:
+  - Default debounce changed from 0ms to 15ms
+  - commit_time_base changed from 400ms to 500ms
+  - commit_time_large changed from 1200ms to 1500ms
+  - Improved pulse snapping with wider tolerance ranges:
+    - 17+ pulses → 20 peso (was 11-20)
+    - 8-16 pulses → 10 peso (was 6-10)
+    - 3-7 pulses → 5 peso (was 2-5)
+  - File: `/app/src/services/coinService.js`
+
+## Config Options for Fine-Tuning
+Admins can adjust these in the config if needed:
+- `coin_debounce`: Debounce time in ms (default: 15)
+- `coin_commit_time_base`: Wait time for small coins (default: 500ms)
+- `coin_commit_time_large`: Wait time for large coins (default: 1500ms)
+- `coin_pulse_snap_enabled`: Enable/disable pulse snapping (default: true)
+- `coin_single_coin_mode`: Single coin detection mode (default: true)
+- `coin_single_coin_max_gap_ms`: Max gap between pulses (default: 800ms)
+- `coin_pulse_map`: Custom pulse-to-peso mapping object
 
 ## User Personas
 1. **End Users (Clients)**: WiFi customers who insert coins to get internet time
 2. **Admin**: Manages vendo machines, rates, and system settings
 
-## Technical Flow
-1. User clicks "Insert Coins" -> `/api/coin/start` called -> Relay ON -> 60s countdown starts
-2. Coin inserted -> Backend emits `coin_pulse` event -> Frontend resets countdown to 60s -> Backend resets timeout
-3. No coin for 60s -> Countdown reaches 0 -> `closeCoinModal()` called -> `/api/coin/done` -> Relay OFF
-4. User clicks "I'm Done" or closes modal -> `closeCoinModal()` -> `/api/coin/done` -> Relay OFF
-
 ## Prioritized Backlog
 - P0: (Completed) Countdown timer sync with relay
-- P1: None
-- P2: Minor timing issue (countdown shows 59s briefly after 60s)
+- P0: (Completed) Improved pulse detection accuracy
+- P1: Hardware testing on actual devices
+- P2: Add diagnostic logging for pulse detection issues
 
 ## Next Tasks
-- Monitor for any edge cases in coin insertion flow
-- Consider adding visual feedback when relay state changes
+- Flash updated firmware (v1.3) to all ESP8266 sub-vendo devices
+- Test pulse detection with 5, 10, and 20 peso coins
+- Monitor and adjust timing values if needed
+- Consider adding pulse detection diagnostic mode in admin panel
