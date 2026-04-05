@@ -2,3 +2,7 @@ node_modules
 *.sqlite
 *.log
 .env
+-e 
+# Environment files
+*.env
+*.env.*
