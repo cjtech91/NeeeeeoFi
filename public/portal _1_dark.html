@@ -1576,6 +1576,9 @@
             const points = Math.max(pendingCoinPoints || 0, localPoints);
             const minutes = lastPendingCoinMinutes || calcMinutesFromRates(coinAmount);
             setCoinMeta(minutes, points);
+            // SYNC: Reset countdown timer when coin is inserted - keeps relay ON while inserting
+            startCoinCountdown(60, 60);
+            // Beep once per pulse (throttled by small gaps)
             let remaining = pulses;
             const beepEach = () => {
                 if (!isInserting || remaining <= 0) return;
