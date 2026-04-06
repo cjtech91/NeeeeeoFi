@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
-#define FIRMWARE_VERSION "v2.0"
+#define FIRMWARE_VERSION "v2.1"
 
 static bool authOk = false;
 static unsigned long lastAuthAttemptMs = 0;
@@ -402,6 +402,13 @@ void handleRelay() {
   
   String state = server.arg("state");
   
+  // Check for force parameter - only force=true can turn off relay in coin mode
+  bool forceOff = false;
+  if (server.hasArg("force")) {
+    String forceVal = server.arg("force");
+    forceOff = (forceVal == "true" || forceVal == "1");
+  }
+  
   // Sync activeState if provided
   if (server.hasArg("activeState")) {
       String newActiveState = server.arg("activeState");
@@ -412,7 +419,7 @@ void handleRelay() {
       }
   }
 
-  Serial.println("[RELAY] Request: " + state + " (Active: " + String(config.relayActiveState) + ", CoinMode: " + String(relayInCoinMode) + ")");
+  Serial.println("[RELAY] Request: " + state + " (CoinMode: " + String(relayInCoinMode) + ", Force: " + String(forceOff) + ")");
   
   bool activeHigh = (strcmp(config.relayActiveState, "HIGH") == 0);
 
@@ -423,9 +430,19 @@ void handleRelay() {
     digitalWrite(currentRelayPin, activeHigh ? HIGH : LOW);
     digitalWrite(LED_PIN, LOW); // LED ON
     Serial.println("[RELAY] ON - Coin mode ACTIVATED");
-    server.send(200, "text/plain", "Relay ON");
+    server.send(200, "text/plain", "Relay ON - Coin Mode Active");
   } else if (state == "off") {
-    // OFF = Inactive State - Exit coin mode
+    // ============================================
+    // CRITICAL: BLOCK OFF commands while in coin mode
+    // Unless force=true is sent (user closed modal)
+    // ============================================
+    if (relayInCoinMode && !forceOff) {
+      Serial.println("[RELAY] *** BLOCKED *** OFF command ignored - Coin mode active. Send force=true to override.");
+      server.send(200, "text/plain", "Relay OFF BLOCKED - Coin Mode Active");
+      return; // DO NOT turn off relay
+    }
+    
+    // OK to turn off - either not in coin mode or force=true
     relayInCoinMode = false;
     relayCoinModeStart = 0;
     digitalWrite(currentRelayPin, activeHigh ? LOW : HIGH);

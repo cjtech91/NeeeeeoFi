@@ -1493,14 +1493,23 @@ async function controlSubVendoRelay(ip, state, activeState = 'LOW', deviceKey = 
         const command = state;
         const finalActiveState = activeState || 'LOW';
         
-        const req = http.get(`http://${ip}/relay?state=${command}&activeState=${finalActiveState}`, (res) => {
-            if (res.statusCode === 200) {
-                console.log(`[SubVendo] Relay ${state} for ${ip} SUCCESS`);
-                resolve(true);
-            } else {
-                console.error(`[SubVendo] Relay ${state} for ${ip} FAILED: ${res.statusCode}`);
-                reject(new Error(`Status ${res.statusCode}`));
-            }
+        // Add force parameter for ESP8266 - only force=true can turn off relay in coin mode
+        const forceParam = (state === 'off' && forceOff) ? '&force=true' : '';
+        const url = `http://${ip}/relay?state=${command}&activeState=${finalActiveState}${forceParam}`;
+        
+        console.log(`[SubVendo] Sending: ${url}`);
+        
+        const req = http.get(url, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                console.log(`[SubVendo] Response: ${res.statusCode} - ${data}`);
+                if (res.statusCode === 200) {
+                    resolve(true);
+                } else {
+                    reject(new Error(`Status ${res.statusCode}`));
+                }
+            });
         });
         req.on('error', (e) => {
             console.error(`[SubVendo] Relay ${state} for ${ip} ERROR:`, e.message);
