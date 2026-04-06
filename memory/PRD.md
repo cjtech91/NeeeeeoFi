@@ -37,27 +37,24 @@ User reported that coin pulse detection is inconsistent on both main device and 
   - Applied to ALL 7 portal themes
 
 ### January 2026 - Session 2: Pulse Detection Improvements
-- **ESP8266 Firmware (v1.4)**:
-  - Improved debounce from 3ms to **50ms** (50000 microseconds) - filters mechanical bounce
-  - Better micros() rollover handling
-  - Increased pulse accumulation wait time from 300ms to **800ms**
-  - Increased send interval from 250ms to **500ms**
+- **ESP8266 Firmware (v1.5)**:
+  - Debounce: **50ms** (50000 microseconds) - filters mechanical bounce
+  - Pulse accumulation wait: **350ms** (reduced from 800ms for faster response)
+  - Send interval: **300ms** (reduced from 500ms)
   - File: `/app/firmware/esp8266_subvendo/esp8266_subvendo.ino`
 
 - **Main Device coinService.js**:
-  - Default debounce changed from 0ms to **50ms**
-  - commit_time_base changed from 400ms to **800ms**
-  - commit_time_large changed from 1200ms to **2000ms**
-  - Improved pulse snapping with wider tolerance ranges:
-    - 17+ pulses → 20 peso (was 11-20)
-    - 8-16 pulses → 10 peso (was 6-10)
-    - 3-7 pulses → 5 peso (was 2-5)
+  - Default debounce: **50ms**
+  - commit_time_base: **400ms** (reduced from 800ms)
+  - commit_time_large: **600ms** (reduced from 2000ms)
+  - Improved pulse snapping with wider tolerance ranges
   - File: `/app/src/services/coinService.js`
 
 - **Backend app.js - Relay Control Fix**:
-  - Added check for other active sessions before turning off relay
-  - Prevents relay from turning off when there are multiple coin sessions
-  - Added logging for relay state changes
+  - Added comprehensive session tracking with `relayOwner` flag
+  - Added detailed logging for pulse events and session creation
+  - Improved check for other active sessions before turning off relay
+  - Added debug logs to trace relay state changes
   - File: `/app/src/app.js`
 
 ## Config Options for Fine-Tuning

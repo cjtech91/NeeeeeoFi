@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
-#define FIRMWARE_VERSION "v1.4"
+#define FIRMWARE_VERSION "v1.5"
 
 static bool authOk = false;
 static unsigned long lastAuthAttemptMs = 0;
@@ -190,11 +190,11 @@ void loop() {
          digitalWrite(LED_PIN, HIGH); // LED OFF
       }
 
-      // Improved pulse accumulation timing:
-      // Wait 800ms after last pulse before sending (was 500ms)
-      // This gives more time for all pulses from a single coin to be counted
-      // Also wait 500ms between sends to prevent duplicate sends
-      if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 800 && (millis() - lastCoinSendMs) > 500) {
+      // Faster pulse accumulation timing (reduced for quicker response):
+      // Wait 350ms after last pulse before sending (was 800ms)
+      // Debounce is 50ms so this gives enough time for pulse train to complete
+      // Also wait 300ms between sends to prevent duplicate sends
+      if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 350 && (millis() - lastCoinSendMs) > 300) {
         noInterrupts();
         uint16_t pulses = coinPulseCount;
         coinPulseCount = 0;

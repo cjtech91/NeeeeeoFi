@@ -1081,49 +1081,61 @@ async function finalizeCoinSession(sessionKey, reason) {
     if (session.timeout) clearTimeout(session.timeout);
     session.timeout = null;
 
-    // Delete the session FIRST before turning off relay
-    // This prevents race conditions where another session check might see this session as still active
+    // Extract device info BEFORE deleting the session
+    const deviceId = sessionKey.startsWith('subvendo:') ? sessionKey.slice('subvendo:'.length) : null;
+    const isHardware = sessionKey === 'hardware';
+
+    // Delete the session
     coinSessions.delete(sessionKey);
 
     // Check if there are any OTHER active sessions for the same device before turning off relay
-    // This prevents relay from turning off when there are still active coin insertions
+    // This prevents relay from turning off when user is still actively inserting coins
     let hasOtherActiveSessions = false;
-    if (sessionKey === 'hardware') {
-        // Check if any other session is using hardware
-        for (const [key, sess] of coinSessions.entries()) {
-            if (key === 'hardware' || sess.targetDeviceId === 'hardware' || sess.lastSource === 'hardware') {
+    
+    for (const [key, sess] of coinSessions.entries()) {
+        if (isHardware) {
+            // Check if any session is targeting hardware
+            if (key === 'hardware' || sess.targetDeviceId === 'hardware') {
                 hasOtherActiveSessions = true;
+                console.log(`[Coin] Found other hardware session: ${key}`);
+                break;
+            }
+        } else if (deviceId) {
+            // Check if any session is targeting this sub-vendo device
+            const targetDevice = sess.targetDeviceId ? sess.targetDeviceId.replace('subvendo:', '') : null;
+            if (key === sessionKey || 
+                key === `subvendo:${deviceId}` || 
+                targetDevice === deviceId ||
+                sess.lastSource === sessionKey ||
+                sess.lastSource === `subvendo:${deviceId}`) {
+                hasOtherActiveSessions = true;
+                console.log(`[Coin] Found other subvendo session for ${deviceId}: ${key}`);
                 break;
             }
         }
+    }
+
+    // Only turn off relay if NO other sessions are using this device
+    if (isHardware) {
         if (!hasOtherActiveSessions) {
             hardwareService.setRelay(false);
-            console.log(`[Coin] Hardware relay OFF (reason: ${reason})`);
+            console.log(`[Coin] Hardware relay OFF (reason: ${reason}, amount: ${amount})`);
         } else {
-            console.log(`[Coin] Hardware relay kept ON (other active sessions exist)`);
+            console.log(`[Coin] Hardware relay kept ON - other active sessions exist`);
         }
-    } else if (sessionKey.startsWith('subvendo:')) {
-        const deviceIdStr = sessionKey.slice('subvendo:'.length);
-        // Check if any other session is using this sub-vendo device
-        for (const [key, sess] of coinSessions.entries()) {
-            if (key === sessionKey) continue; // Skip the session we're closing
-            if (key === `subvendo:${deviceIdStr}` || sess.targetDeviceId === `subvendo:${deviceIdStr}` || sess.lastSource === `subvendo:${deviceIdStr}`) {
-                hasOtherActiveSessions = true;
-                break;
-            }
-        }
+    } else if (deviceId) {
         if (!hasOtherActiveSessions) {
             try {
-                const svDevice = db.prepare('SELECT id, ip_address, relay_pin_active_state FROM sub_vendo_devices WHERE device_id = ?').get(deviceIdStr);
+                const svDevice = db.prepare('SELECT id, ip_address, relay_pin_active_state FROM sub_vendo_devices WHERE device_id = ?').get(deviceId);
                 if (svDevice && svDevice.ip_address) {
                     await controlSubVendoRelay(svDevice.ip_address, 'off', svDevice.relay_pin_active_state);
-                    console.log(`[Coin] SubVendo ${deviceIdStr} relay OFF (reason: ${reason})`);
+                    console.log(`[Coin] SubVendo ${deviceId} relay OFF (reason: ${reason}, amount: ${amount})`);
                 }
             } catch (e) {
                 console.error('[Coin] Error turning off sub-vendo relay:', e);
             }
         } else {
-            console.log(`[Coin] SubVendo ${deviceIdStr} relay kept ON (other active sessions exist)`);
+            console.log(`[Coin] SubVendo ${deviceId} relay kept ON - other active sessions exist`);
         }
     }
 
@@ -1463,6 +1475,8 @@ async function handleCoinPulseEvent(pulseCount, source) {
 
     const sessionKey = source || 'hardware';
     const session = coinSessions.get(sessionKey);
+
+    console.log(`[Coin] Pulse received: ${pulses} from ${source}, session exists: ${!!session}, active sessions: ${coinSessions.size}`);
 
     if (session) {
         try {
@@ -5104,7 +5118,9 @@ app.post('/api/coin/start', async (req, res) => {
         targetDeviceId,
         selectionMode: mode,
         lastSource: existing ? existing.lastSource : null,
-        timeout: null
+        timeout: null,
+        relayActivatedAt: Date.now(), // Track when relay was activated for this session
+        relayOwner: true // This session owns the relay and can turn it off
     };
 
     if (pending > 0) {
@@ -5112,8 +5128,11 @@ app.post('/api/coin/start', async (req, res) => {
         if (!session.sourceAmounts['hardware']) session.sourceAmounts['hardware'] = pending;
     }
 
+    console.log(`[Coin] Session created: ${sessionKey} for MAC: ${mac}, mode: ${mode}`);
+
     if (sessionKey === 'hardware') {
         hardwareService.setRelay(true);
+        console.log(`[Coin] Hardware relay ON for ${mac}`);
     } else if (sessionKey.startsWith('subvendo:')) {
         try {
             const deviceIdStr = sessionKey.slice('subvendo:'.length);
