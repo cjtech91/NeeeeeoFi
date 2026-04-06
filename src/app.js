@@ -992,51 +992,52 @@ const sendSubVendoHeartbeatNow = async ({ device_id, name, license_key, last_act
 
 // --- Coin Listener ---
 const coinSessions = new Map();
-// Relay lock map - prevents relay from turning off while user is actively inserting coins
-// Key: deviceKey (e.g., 'hardware' or 'subvendo:ABC123'), Value: { mac, lockedAt, lockedUntil }
-const relayLocks = new Map();
+
+// ===========================================
+// RELAY PROTECTION SYSTEM
+// When user opens Insert Coin modal, relay is PROTECTED
+// NO relay OFF commands will be sent while protected
+// Only /api/coin/done can unprotect and turn off relay
+// ===========================================
+const protectedRelays = new Map(); // Key: deviceKey, Value: { mac, protectedAt }
 
 function formatMac(mac) {
     return typeof mac === 'string' ? mac.toLowerCase() : mac;
 }
 
-// Lock relay for a device - prevents it from turning off
-function lockRelay(deviceKey, mac, durationMs = 65000) {
-    const now = Date.now();
-    relayLocks.set(deviceKey, {
+// Protect relay - ALL OFF commands will be BLOCKED until unprotected
+function protectRelay(deviceKey, mac) {
+    protectedRelays.set(deviceKey, {
         mac: formatMac(mac),
-        lockedAt: now,
-        lockedUntil: now + durationMs
+        protectedAt: Date.now()
     });
-    console.log(`[Relay] Locked ${deviceKey} for ${mac} until ${new Date(now + durationMs).toISOString()}`);
+    console.log(`[Relay] PROTECTED: ${deviceKey} for ${mac} - ALL OFF commands will be BLOCKED`);
 }
 
-// Unlock relay for a device
-function unlockRelay(deviceKey) {
-    if (relayLocks.has(deviceKey)) {
-        console.log(`[Relay] Unlocked ${deviceKey}`);
-        relayLocks.delete(deviceKey);
+// Unprotect relay - allows OFF commands
+function unprotectRelay(deviceKey) {
+    if (protectedRelays.has(deviceKey)) {
+        const info = protectedRelays.get(deviceKey);
+        const duration = Date.now() - info.protectedAt;
+        console.log(`[Relay] UNPROTECTED: ${deviceKey} after ${duration}ms`);
+        protectedRelays.delete(deviceKey);
+        return true;
     }
+    return false;
 }
 
-// Check if relay is locked
-function isRelayLocked(deviceKey) {
-    const lock = relayLocks.get(deviceKey);
-    if (!lock) return false;
-    if (Date.now() > lock.lockedUntil) {
-        relayLocks.delete(deviceKey);
-        return false;
-    }
-    return true;
+// Check if relay is protected
+function isRelayProtected(deviceKey) {
+    return protectedRelays.has(deviceKey);
 }
 
-// Extend relay lock (called when coin is inserted)
-function extendRelayLock(deviceKey, durationMs = 65000) {
-    const lock = relayLocks.get(deviceKey);
-    if (lock) {
-        lock.lockedUntil = Date.now() + durationMs;
-        console.log(`[Relay] Extended lock for ${deviceKey} until ${new Date(lock.lockedUntil).toISOString()}`);
-    }
+// Get all protected relays (for debugging)
+function getProtectedRelays() {
+    return Array.from(protectedRelays.entries()).map(([key, val]) => ({
+        device: key,
+        mac: val.mac,
+        protectedFor: Date.now() - val.protectedAt
+    }));
 }
 
 function computeBestRateForAmount(totalAmount) {
@@ -1134,22 +1135,21 @@ async function finalizeCoinSession(sessionKey, reason) {
 
     // ==========================================
     // STRICT RELAY SYNC WITH MODAL
-    // Relay turns OFF **ONLY** when:
-    // 1. User clicks "Done Payment" (reason='done')
-    // 2. User closes modal (reason='done' or 'manual')
-    // 
-    // Relay stays ON when:
-    // - Session times out (reason='timeout') - user might still be inserting coins
+    // Relay turns OFF **ONLY** when user closes modal
+    // reason='done' means user clicked "I'm Done" or closed modal
     // ==========================================
     
-    const shouldTurnOffRelay = (reason === 'done' || reason === 'manual');
+    const userClosedModal = (reason === 'done' || reason === 'manual');
     
-    if (!shouldTurnOffRelay) {
-        console.log(`[Coin] Session finalized but relay KEPT ON (reason: ${reason}) - waiting for modal close`);
-        // Still process the payment if there's an amount
+    if (!userClosedModal) {
+        // Session timed out but user hasn't closed modal yet
+        // DO NOT turn off relay - keep it ON
+        console.log(`[Coin] Session finalized but relay PROTECTED (reason: ${reason}) - waiting for user to close modal`);
+        // Don't unprotect - relay stays protected until modal closes
     } else {
-        // User explicitly closed modal - turn off relay
-        unlockRelay(sessionKey);
+        // User explicitly closed modal - UNPROTECT and turn off relay
+        console.log(`[Coin] User closed modal - UNPROTECTING relay and turning OFF`);
+        unprotectRelay(sessionKey);
         
         if (isHardware) {
             hardwareService.setRelay(false);
@@ -1158,7 +1158,8 @@ async function finalizeCoinSession(sessionKey, reason) {
             try {
                 const svDevice = db.prepare('SELECT id, ip_address, relay_pin_active_state FROM sub_vendo_devices WHERE device_id = ?').get(deviceId);
                 if (svDevice && svDevice.ip_address) {
-                    await controlSubVendoRelay(svDevice.ip_address, 'off', svDevice.relay_pin_active_state);
+                    // Use forceOff=true to bypass protection (user explicitly closed modal)
+                    await controlSubVendoRelay(svDevice.ip_address, 'off', svDevice.relay_pin_active_state, sessionKey, true);
                     console.log(`[Coin] SubVendo ${deviceId} relay OFF (user closed modal, amount: ${amount})`);
                 }
             } catch (e) {
@@ -1465,25 +1466,36 @@ function calculateTimeFromPointRates(points) {
     }
 }
 
-async function controlSubVendoRelay(ip, state, activeState = 'LOW') {
+async function controlSubVendoRelay(ip, state, activeState = 'LOW', deviceKey = null, forceOff = false) {
     // Log every relay control attempt for debugging
-    console.log(`[SubVendo] RELAY CONTROL CALLED: ip=${ip}, state=${state}, activeState=${activeState}`);
-    console.log(`[SubVendo] Call stack:`, new Error().stack.split('\n').slice(1, 5).join('\n'));
+    console.log(`[SubVendo] RELAY CONTROL: ip=${ip}, state=${state}, deviceKey=${deviceKey}, forceOff=${forceOff}`);
+    
+    // ============================================
+    // PROTECTION CHECK - BLOCK ALL OFF COMMANDS
+    // Unless forceOff=true (only from /api/coin/done)
+    // ============================================
+    if (state === 'off' && !forceOff) {
+        // Check if this device is protected
+        if (deviceKey && isRelayProtected(deviceKey)) {
+            console.log(`[SubVendo] *** BLOCKED *** Relay OFF for ${deviceKey} - device is PROTECTED (modal open)`);
+            return Promise.resolve(false); // Silently block
+        }
+        // Also check by scanning all protected relays
+        for (const [key, info] of protectedRelays.entries()) {
+            if (key.includes(ip) || (deviceKey && key === deviceKey)) {
+                console.log(`[SubVendo] *** BLOCKED *** Relay OFF - found protection for ${key}`);
+                return Promise.resolve(false);
+            }
+        }
+    }
     
     return new Promise((resolve, reject) => {
-        // ESP8266 Logic (Fixed Firmware):
-        // The firmware now handles Active HIGH/LOW logic internally.
-        // We just send 'on' or 'off' command, and the firmware translates it based on config.
-        
         const command = state;
-        // Ensure activeState is valid (default to LOW if null/undefined/empty)
         const finalActiveState = activeState || 'LOW';
-        
-        // We also send activeState to ensure firmware is in sync immediately.
         
         const req = http.get(`http://${ip}/relay?state=${command}&activeState=${finalActiveState}`, (res) => {
             if (res.statusCode === 200) {
-                console.log(`[SubVendo] Relay ${state} (Active: ${finalActiveState}, Cmd: ${command}) for ${ip} SUCCESS`);
+                console.log(`[SubVendo] Relay ${state} for ${ip} SUCCESS`);
                 resolve(true);
             } else {
                 console.error(`[SubVendo] Relay ${state} for ${ip} FAILED: ${res.statusCode}`);
@@ -1550,7 +1562,7 @@ async function handleCoinPulseEvent(pulseCount, source) {
         });
 
         // Extend relay lock when coin is inserted - keeps relay ON
-        extendRelayLock(sessionKey, 65000);
+        // extendRelayLock(sessionKey, 65000);
 
         if (session.timeout) clearTimeout(session.timeout);
         session.timeout = setTimeout(() => {
@@ -3916,20 +3928,20 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
         const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
 
         // Immediately apply relay state based on current session status
-        // BUT respect relay lock - don't turn off if user is inserting coins
+        // BUT respect relay PROTECTION - don't turn off if user has modal open
         if (device && device.ip_address) {
             const sessionKey = `subvendo:${device.device_id}`;
             const isActive = coinSessions.has(sessionKey);
-            const locked = isRelayLocked(sessionKey);
+            const isProtected = isRelayProtected(sessionKey);
             
-            // Only change relay if not locked, or if turning ON
-            if (isActive || !locked) {
-                const targetState = isActive ? 'on' : (locked ? 'on' : 'off');
-                controlSubVendoRelay(device.ip_address, targetState, device.relay_pin_active_state)
-                    .then(() => console.log(`[SubVendo] Immediate relay update for ${device.name} (${device.ip_address}) -> ${targetState} (Active: ${device.relay_pin_active_state})`))
-                    .catch(err => console.error(`[SubVendo] Failed immediate relay update for ${device.name}:`, err.message));
+            if (isProtected) {
+                console.log(`[SubVendo] Admin relay update BLOCKED for ${device.name} - relay is PROTECTED (modal open)`);
             } else {
-                console.log(`[SubVendo] Relay update skipped for ${device.name} - relay is locked`);
+                const targetState = isActive ? 'on' : 'off';
+                // Pass deviceKey so controlSubVendoRelay can check protection
+                controlSubVendoRelay(device.ip_address, targetState, device.relay_pin_active_state, sessionKey)
+                    .then(() => console.log(`[SubVendo] Immediate relay update for ${device.name} -> ${targetState}`))
+                    .catch(err => console.error(`[SubVendo] Failed relay update for ${device.name}:`, err.message));
             }
         }
 
@@ -5172,7 +5184,7 @@ app.post('/api/coin/start', async (req, res) => {
     console.log(`[Coin] Session created: ${sessionKey} for MAC: ${mac}, mode: ${mode}`);
 
     // LOCK the relay - prevents any timeout from turning it off until user clicks "Done" or closes modal
-    lockRelay(sessionKey, mac, 65000); // Lock for 65 seconds (slightly more than countdown)
+    protectRelay(sessionKey, mac); // PROTECT relay - blocks ALL OFF commands until modal closes
 
     if (sessionKey === 'hardware') {
         hardwareService.setRelay(true);
@@ -5186,7 +5198,7 @@ app.post('/api/coin/start', async (req, res) => {
                 if (svDevice.license_type !== 'PAID') {
                     const trialEnd = Number(svDevice.trial_end_ts || 0);
                     if (Date.now() > trialEnd) {
-                        unlockRelay(sessionKey); // Unlock if license expired
+                        unprotectRelay(sessionKey); // Unlock if license expired
                         return res.json({ success: false, error: 'Device License Expired' });
                     }
                 }
@@ -5197,12 +5209,12 @@ app.post('/api/coin/start', async (req, res) => {
                     console.log(`[Coin] SubVendo ${deviceIdStr} relay ON for ${mac}`);
                 }
             } else {
-                unlockRelay(sessionKey); // Unlock if device not found
+                unprotectRelay(sessionKey); // Unlock if device not found
                  return res.json({ success: false, error: 'Device not found' });
             }
         } catch (e) {
             console.error('[Coin] Error turning on sub-vendo relay:', e);
-            unlockRelay(sessionKey); // Unlock on error
+            unprotectRelay(sessionKey); // Unlock on error
             return res.json({ success: false, error: 'Device Error' });
         }
     }
@@ -5235,6 +5247,22 @@ app.post('/api/coin/done', async (req, res) => {
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
+});
+
+// Debug endpoint to check relay protection status
+app.get('/api/debug/relay-status', (req, res) => {
+    const protectedList = getProtectedRelays();
+    const sessions = Array.from(coinSessions.entries()).map(([key, sess]) => ({
+        key,
+        mac: sess.mac,
+        amount: sess.pendingAmount,
+        start: new Date(sess.start).toISOString()
+    }));
+    res.json({
+        protected_relays: protectedList,
+        active_sessions: sessions,
+        timestamp: new Date().toISOString()
+    });
 });
 
 app.post('/api/claim-free-time', async (req, res) => {
