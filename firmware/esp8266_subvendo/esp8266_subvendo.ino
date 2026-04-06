@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
-#define FIRMWARE_VERSION "v1.5"
+#define FIRMWARE_VERSION "v1.6"
 
 static bool authOk = false;
 static unsigned long lastAuthAttemptMs = 0;

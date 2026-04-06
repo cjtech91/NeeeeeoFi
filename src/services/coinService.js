@@ -353,20 +353,22 @@ class CoinService extends EventEmitter {
                             const maxGapAllowedMs = Math.max(0, parseInt(configService.get('coin_single_coin_max_gap_ms', 800)));
                             const allowSnap = maxGapMs <= maxGapAllowedMs;
                             if (allowSnap) {
-                                // Improved pulse snapping with wider tolerance ranges
-                                // This helps catch coins even when some pulses are missed
-                                // Typical pulse counts: 1 peso = 1 pulse, 5 peso = 5 pulses, 10 peso = 10 pulses, 20 peso = 20 pulses
-                                if (rawPulses >= 17) amount = 20;        // 17-20+ -> 20 peso (wider tolerance)
-                                else if (rawPulses >= 8 && rawPulses <= 16) amount = 10;  // 8-16 -> 10 peso (wider tolerance)
-                                else if (rawPulses >= 3 && rawPulses <= 7) amount = 5;    // 3-7 -> 5 peso (wider tolerance)
-                                else if (rawPulses >= 1 && rawPulses <= 2) amount = rawPulses; // 1-2 -> exact (1 or 2 peso)
+                                // Improved pulse snapping with user-defined tolerance ranges
+                                // 12+ pulses → 20 peso
+                                // 7-11 pulses → 10 peso  
+                                // 2-6 pulses → 5 peso
+                                // 1 pulse → 1 peso
+                                if (rawPulses >= 12) amount = 20;
+                                else if (rawPulses >= 7 && rawPulses <= 11) amount = 10;
+                                else if (rawPulses >= 2 && rawPulses <= 6) amount = 5;
+                                else if (rawPulses === 1) amount = 1;
                             }
                         } else {
-                            // Multi-coin mode: More aggressive snapping
-                            if (rawPulses >= 17) amount = 20;
-                            else if (rawPulses >= 8 && rawPulses <= 16) amount = 10;
-                            else if (rawPulses >= 3 && rawPulses <= 7) amount = 5;
-                            else if (rawPulses >= 1 && rawPulses <= 2) amount = rawPulses;
+                            // Multi-coin mode: Same snapping logic
+                            if (rawPulses >= 12) amount = 20;
+                            else if (rawPulses >= 7 && rawPulses <= 11) amount = 10;
+                            else if (rawPulses >= 2 && rawPulses <= 6) amount = 5;
+                            else if (rawPulses === 1) amount = 1;
                         }
                     }
                 }
