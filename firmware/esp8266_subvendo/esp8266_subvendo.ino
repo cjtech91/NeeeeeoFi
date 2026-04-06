@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
-#define FIRMWARE_VERSION "v1.3"
+#define FIRMWARE_VERSION "v1.4"
 
 static bool authOk = false;
 static unsigned long lastAuthAttemptMs = 0;
@@ -191,10 +191,10 @@ void loop() {
       }
 
       // Improved pulse accumulation timing:
-      // Wait 500ms after last pulse before sending (was 300ms)
-      // This gives more time for rapid successive coins to be counted together
-      // Also wait 400ms between sends to prevent duplicate sends
-      if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 500 && (millis() - lastCoinSendMs) > 400) {
+      // Wait 800ms after last pulse before sending (was 500ms)
+      // This gives more time for all pulses from a single coin to be counted
+      // Also wait 500ms between sends to prevent duplicate sends
+      if (coinPulseCount > 0 && (millis() - lastCoinPulseMs) > 800 && (millis() - lastCoinSendMs) > 500) {
         noInterrupts();
         uint16_t pulses = coinPulseCount;
         coinPulseCount = 0;
@@ -803,17 +803,18 @@ void applyHardwareConfig() {
   digitalWrite(LED_PIN, HIGH); // Default LED OFF
 }
 
-// Improved pulse detection with better debouncing for coin acceptors
-// Most coin acceptors output pulses ~25-100ms wide with ~50-100ms gaps
-// We use 15ms debounce (15000 microseconds) to filter electrical noise while catching all valid pulses
+// Improved pulse detection with stronger debouncing for coin acceptors
+// Most coin acceptors have mechanical bounce that can last 30-50ms
+// We use 50ms debounce (50000 microseconds) to filter all bouncing while catching valid pulses
+// Coin acceptor pulse widths are typically 25-100ms with gaps of 50-100ms between pulses
 void IRAM_ATTR onCoinPulse() {
   static unsigned long lastUs = 0;
   const unsigned long nowUs = micros();
   
-  // Debounce: Ignore pulses within 15ms (15000 microseconds) of each other
-  // This filters electrical noise while still catching rapid coin insertions
-  // Most coin acceptors have pulse widths of 25-100ms, so 15ms is safe
-  const unsigned long debounceUs = 15000; // 15ms debounce
+  // Debounce: Ignore pulses within 50ms (50000 microseconds) of each other
+  // This is aggressive but necessary to filter mechanical bounce and electrical noise
+  // A valid coin pulse train will have gaps of 50-100ms, so this won't miss real pulses
+  const unsigned long debounceUs = 50000; // 50ms debounce (increased from 15ms)
   
   // Handle micros() rollover (happens every ~70 minutes)
   unsigned long deltaUs;

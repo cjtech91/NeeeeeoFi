@@ -93,13 +93,13 @@ class CoinService extends EventEmitter {
         }
 
         // Improved default timing for better pulse detection:
-        // - debounce: 15ms to filter electrical noise while catching rapid pulses
-        // - commit_time_base: 500ms to wait for all pulses from a single coin
-        // - commit_time_large: 1500ms for larger denominations (10, 20 peso)
-        this.debounceTime = Math.max(0, parseInt(configService.get('coin_debounce', 15))); // Changed default from 0 to 15ms
-        this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time', 500))); // Changed from 400 to 500ms
+        // - debounce: 50ms to filter mechanical bounce and electrical noise
+        // - commit_time_base: 800ms to wait for all pulses from a single coin
+        // - commit_time_large: 2000ms for larger denominations (10, 20 peso coins have more pulses)
+        this.debounceTime = Math.max(0, parseInt(configService.get('coin_debounce', 50))); // Changed to 50ms
+        this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time', 800))); // Changed to 800ms
         this.commitTimeBase = Math.max(50, parseInt(configService.get('coin_commit_time_base', this.commitTimeBase)));
-        this.commitTimeLarge = Math.max(this.commitTimeBase, parseInt(configService.get('coin_commit_time_large', 1500))); // Changed from 1200 to 1500ms
+        this.commitTimeLarge = Math.max(this.commitTimeBase, parseInt(configService.get('coin_commit_time_large', 2000))); // Changed to 2000ms
 
         // --- Coin Settings ---
         const pin = parseInt(configService.get('coin_pin', 12)); // Default 12 (PA12)
