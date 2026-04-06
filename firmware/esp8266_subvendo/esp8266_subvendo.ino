@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #include <ESP8266HTTPClient.h>
 
-#define FIRMWARE_VERSION "v1.8"
+#define FIRMWARE_VERSION "v2.0"
 
 static bool authOk = false;
 static unsigned long lastAuthAttemptMs = 0;
@@ -190,6 +190,23 @@ void loop() {
          digitalWrite(LED_PIN, HIGH); // LED OFF
       }
 
+      // COIN MODE SAFETY: Auto-exit coin mode after 5 minutes of no coin pulses
+      // This prevents relay from getting stuck ON if backend loses connection
+      if (relayInCoinMode && relayCoinModeStart > 0) {
+        unsigned long coinModeAge = millis() - relayCoinModeStart;
+        unsigned long lastPulseAge = millis() - lastCoinPulseMs;
+        // If coin mode has been active for 5 minutes AND no pulse in last 2 minutes
+        if (coinModeAge > 300000 && lastPulseAge > 120000) {
+          Serial.println("[RELAY] SAFETY: Auto-exiting coin mode after 5 min timeout");
+          relayInCoinMode = false;
+          relayCoinModeStart = 0;
+          // Turn off relay
+          bool activeHigh = (strcmp(config.relayActiveState, "HIGH") == 0);
+          digitalWrite(currentRelayPin, activeHigh ? LOW : HIGH);
+          digitalWrite(LED_PIN, HIGH);
+        }
+      }
+
       // Faster pulse accumulation timing (reduced for quicker response):
       // Wait 350ms after last pulse before sending (was 800ms)
       // Debounce is 50ms so this gives enough time for pulse train to complete
@@ -201,6 +218,11 @@ void loop() {
         interrupts();
         lastCoinSendMs = millis();
         sendCoinPulses(pulses);
+        
+        // Extend coin mode when pulses are detected
+        if (relayInCoinMode) {
+          relayCoinModeStart = millis(); // Reset the timeout
+        }
       }
       
       // Send heartbeat periodically to keep status "Online"
@@ -390,23 +412,25 @@ void handleRelay() {
       }
   }
 
-  Serial.println("[RELAY] Request: " + state + " (Active: " + String(config.relayActiveState) + ")");
+  Serial.println("[RELAY] Request: " + state + " (Active: " + String(config.relayActiveState) + ", CoinMode: " + String(relayInCoinMode) + ")");
   
   bool activeHigh = (strcmp(config.relayActiveState, "HIGH") == 0);
 
   if (state == "on") {
-    // ON = Active State
-    // If Active High: HIGH
-    // If Active Low: LOW
+    // ON = Active State - Enter coin mode
+    relayInCoinMode = true;
+    relayCoinModeStart = millis();
     digitalWrite(currentRelayPin, activeHigh ? HIGH : LOW);
     digitalWrite(LED_PIN, LOW); // LED ON
+    Serial.println("[RELAY] ON - Coin mode ACTIVATED");
     server.send(200, "text/plain", "Relay ON");
   } else if (state == "off") {
-    // OFF = Inactive State
-    // If Active High: LOW
-    // If Active Low: HIGH
+    // OFF = Inactive State - Exit coin mode
+    relayInCoinMode = false;
+    relayCoinModeStart = 0;
     digitalWrite(currentRelayPin, activeHigh ? LOW : HIGH);
     digitalWrite(LED_PIN, HIGH); // LED OFF
+    Serial.println("[RELAY] OFF - Coin mode DEACTIVATED");
     server.send(200, "text/plain", "Relay OFF");
   } else {
     server.send(400, "text/plain", "Invalid state");
@@ -784,6 +808,10 @@ uint8_t resolvePin(int configuredPin, uint8_t defaultPin) {
   return defaultPin;
 }
 
+// Track if relay is in "coin mode" (should stay ON regardless of config updates)
+bool relayInCoinMode = false;
+unsigned long relayCoinModeStart = 0;
+
 void applyHardwareConfig() {
   currentCoinPin = resolvePin(config.coinPin, 12);
   currentRelayPin = resolvePin(config.relayPin, 14);
@@ -794,11 +822,18 @@ void applyHardwareConfig() {
 
   pinMode(currentRelayPin, OUTPUT);
   
-  // Set default state based on Active Config
-  // If Active HIGH -> OFF is LOW
-  // If Active LOW -> OFF is HIGH
-  bool activeHigh = (strcmp(config.relayActiveState, "HIGH") == 0);
-  digitalWrite(currentRelayPin, activeHigh ? LOW : HIGH); 
+  // IMPORTANT: Do NOT reset relay state if in coin mode
+  // This prevents heartbeat/bind from turning off relay during coin insertion
+  if (relayInCoinMode) {
+    Serial.println("[Relay] Config applied but relay kept ON (coin mode active)");
+    // Keep relay in current ON state - don't change it
+  } else {
+    // Set default state based on Active Config (relay OFF)
+    // If Active HIGH -> OFF is LOW
+    // If Active LOW -> OFF is HIGH
+    bool activeHigh = (strcmp(config.relayActiveState, "HIGH") == 0);
+    digitalWrite(currentRelayPin, activeHigh ? LOW : HIGH); 
+  }
   
   digitalWrite(LED_PIN, HIGH); // Default LED OFF
 }
