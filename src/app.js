@@ -2942,7 +2942,8 @@ app.post('/api/admin/sales/coins-out', isAuthenticated, (req, res) => {
     try {
         const { source, amount, base, percent } = req.body || {};
         if (!source) return res.status(400).json({ error: 'source required' });
-        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        const dt = new Date();
+        const now = new Date(dt.getTime() - (dt.getTimezoneOffset() * 60000)).toISOString().slice(0, 19).replace('T', ' ');
 
         let lastOut = null;
         if (source === 'hardware') {
@@ -3009,6 +3010,27 @@ app.get('/api/admin/sales/coins-out/logs', isAuthenticated, (req, res) => {
         res.json(rows);
     } catch (e) {
         console.error('[API] Coins Out Logs Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
+    try {
+        const source = String(req.query.source || '').trim();
+        if (!source) return res.status(400).json({ error: 'source required' });
+
+        if (source === 'hardware') {
+            return res.status(400).json({ error: 'Cannot delete Main Vendo source' });
+        }
+        if (source.startsWith('subvendo:')) {
+            return res.status(400).json({ error: 'Cannot delete registered Sub Vendo source' });
+        }
+
+        const del = db.prepare('DELETE FROM sales WHERE COALESCE(source, \'hardware\') = ?');
+        const info = del.run(source);
+        try { configService.set(`coins_out_at_${source}`, null); } catch (e) {}
+        res.json({ success: true, deleted: info.changes || 0 });
+    } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
