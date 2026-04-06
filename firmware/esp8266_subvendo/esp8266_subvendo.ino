@@ -34,6 +34,10 @@ unsigned long lastCoinSendMs = 0;
 uint8_t currentCoinPin = 6;
 uint8_t currentRelayPin = 5;
 
+// Coin mode tracking - prevents relay from turning off during coin insertion
+bool relayInCoinMode = false;
+unsigned long relayCoinModeStart = 0;
+
 // --- Constants ---
 const int EEPROM_SIZE = 512;
 const int CONFIG_ADDR = 0;
@@ -824,10 +828,6 @@ uint8_t resolvePin(int configuredPin, uint8_t defaultPin) {
   if (configuredPin >= 0 && configuredPin <= 16) return (uint8_t)configuredPin;
   return defaultPin;
 }
-
-// Track if relay is in "coin mode" (should stay ON regardless of config updates)
-bool relayInCoinMode = false;
-unsigned long relayCoinModeStart = 0;
 
 void applyHardwareConfig() {
   currentCoinPin = resolvePin(config.coinPin, 12);
