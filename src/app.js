@@ -1126,90 +1126,44 @@ async function finalizeCoinSession(sessionKey, reason) {
     // Extract device info BEFORE deleting the session
     const deviceId = sessionKey.startsWith('subvendo:') ? sessionKey.slice('subvendo:'.length) : null;
     const isHardware = sessionKey === 'hardware';
-    const sessionAge = Date.now() - (session.start || 0);
-    const isUserInitiated = session.relayOwner === true; // User clicked "Insert Coin"
 
-    console.log(`[Coin] Finalizing session ${sessionKey}: reason=${reason}, amount=${amount}, age=${sessionAge}ms, userInitiated=${isUserInitiated}`);
+    console.log(`[Coin] Finalizing session ${sessionKey}: reason=${reason}, amount=${amount}`);
 
     // Delete the session
     coinSessions.delete(sessionKey);
 
-    // CHECK RELAY LOCK - If relay is locked by user, DON'T turn it off (unless user clicked "done")
-    const relayLocked = isRelayLocked(sessionKey);
-    if (relayLocked && reason === 'timeout') {
-        console.log(`[Coin] Relay locked for ${sessionKey} - ignoring timeout, relay stays ON`);
-        return { success: true, amount, secondsAdded: 0, relayKeptOn: true };
-    }
-
-    // If user is done or closing modal, unlock the relay
-    if (reason === 'done' || reason === 'manual') {
-        unlockRelay(sessionKey);
-    }
-
-    // Check if there are any OTHER active sessions for the same device before turning off relay
-    let hasOtherActiveSessions = false;
+    // ==========================================
+    // STRICT RELAY SYNC WITH MODAL
+    // Relay turns OFF **ONLY** when:
+    // 1. User clicks "Done Payment" (reason='done')
+    // 2. User closes modal (reason='done' or 'manual')
+    // 
+    // Relay stays ON when:
+    // - Session times out (reason='timeout') - user might still be inserting coins
+    // ==========================================
     
-    for (const [key, sess] of coinSessions.entries()) {
+    const shouldTurnOffRelay = (reason === 'done' || reason === 'manual');
+    
+    if (!shouldTurnOffRelay) {
+        console.log(`[Coin] Session finalized but relay KEPT ON (reason: ${reason}) - waiting for modal close`);
+        // Still process the payment if there's an amount
+    } else {
+        // User explicitly closed modal - turn off relay
+        unlockRelay(sessionKey);
+        
         if (isHardware) {
-            if (key === 'hardware' || sess.targetDeviceId === 'hardware') {
-                hasOtherActiveSessions = true;
-                console.log(`[Coin] Found other hardware session: ${key}`);
-                break;
-            }
-        } else if (deviceId) {
-            const targetDevice = sess.targetDeviceId ? sess.targetDeviceId.replace('subvendo:', '') : null;
-            const lastSourceDevice = sess.lastSource ? sess.lastSource.replace('subvendo:', '') : null;
-            if (key === `subvendo:${deviceId}` || 
-                targetDevice === deviceId ||
-                lastSourceDevice === deviceId) {
-                hasOtherActiveSessions = true;
-                console.log(`[Coin] Found other subvendo session for ${deviceId}: ${key} (target: ${sess.targetDeviceId}, lastSource: ${sess.lastSource})`);
-                break;
-            }
-        }
-    }
-
-    // SAFETY: If this was an auto-session (not user-initiated) that's timing out,
-    // but there's a user-initiated session still active, DON'T turn off relay
-    if (reason === 'timeout' && !isUserInitiated) {
-        // This is an auto-session timing out - check if user has an active session
-        for (const [key, sess] of coinSessions.entries()) {
-            if (sess.relayOwner === true) {
-                // User has an active session somewhere
-                const sessDevice = sess.targetDeviceId ? sess.targetDeviceId.replace('subvendo:', '') : null;
-                if ((isHardware && (key === 'hardware' || sess.targetDeviceId === 'hardware')) ||
-                    (deviceId && sessDevice === deviceId)) {
-                    console.log(`[Coin] Auto-session timeout ignored - user has active session: ${key}`);
-                    hasOtherActiveSessions = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    // Only turn off relay if NO other sessions are using this device AND relay is not locked
-    if (isHardware) {
-        if (!hasOtherActiveSessions && !relayLocked) {
-            unlockRelay('hardware');
             hardwareService.setRelay(false);
-            console.log(`[Coin] Hardware relay OFF (reason: ${reason}, amount: ${amount})`);
-        } else {
-            console.log(`[Coin] Hardware relay kept ON - ${hasOtherActiveSessions ? 'other sessions exist' : 'relay locked'}`);
-        }
-    } else if (deviceId) {
-        if (!hasOtherActiveSessions && !relayLocked) {
-            unlockRelay(sessionKey);
+            console.log(`[Coin] Hardware relay OFF (user closed modal, amount: ${amount})`);
+        } else if (deviceId) {
             try {
                 const svDevice = db.prepare('SELECT id, ip_address, relay_pin_active_state FROM sub_vendo_devices WHERE device_id = ?').get(deviceId);
                 if (svDevice && svDevice.ip_address) {
                     await controlSubVendoRelay(svDevice.ip_address, 'off', svDevice.relay_pin_active_state);
-                    console.log(`[Coin] SubVendo ${deviceId} relay OFF (reason: ${reason}, amount: ${amount})`);
+                    console.log(`[Coin] SubVendo ${deviceId} relay OFF (user closed modal, amount: ${amount})`);
                 }
             } catch (e) {
                 console.error('[Coin] Error turning off sub-vendo relay:', e);
             }
-        } else {
-            console.log(`[Coin] SubVendo ${deviceId} relay kept ON - ${hasOtherActiveSessions ? 'other sessions exist' : 'relay locked'}`);
         }
     }
 
@@ -1512,6 +1466,10 @@ function calculateTimeFromPointRates(points) {
 }
 
 async function controlSubVendoRelay(ip, state, activeState = 'LOW') {
+    // Log every relay control attempt for debugging
+    console.log(`[SubVendo] RELAY CONTROL CALLED: ip=${ip}, state=${state}, activeState=${activeState}`);
+    console.log(`[SubVendo] Call stack:`, new Error().stack.split('\n').slice(1, 5).join('\n'));
+    
     return new Promise((resolve, reject) => {
         // ESP8266 Logic (Fixed Firmware):
         // The firmware now handles Active HIGH/LOW logic internally.
@@ -1525,15 +1483,15 @@ async function controlSubVendoRelay(ip, state, activeState = 'LOW') {
         
         const req = http.get(`http://${ip}/relay?state=${command}&activeState=${finalActiveState}`, (res) => {
             if (res.statusCode === 200) {
-                console.log(`[SubVendo] Relay ${state} (Active: ${finalActiveState}, Cmd: ${command}) for ${ip} success`);
+                console.log(`[SubVendo] Relay ${state} (Active: ${finalActiveState}, Cmd: ${command}) for ${ip} SUCCESS`);
                 resolve(true);
             } else {
-                console.error(`[SubVendo] Relay ${state} for ${ip} failed: ${res.statusCode}`);
+                console.error(`[SubVendo] Relay ${state} for ${ip} FAILED: ${res.statusCode}`);
                 reject(new Error(`Status ${res.statusCode}`));
             }
         });
         req.on('error', (e) => {
-            console.error(`[SubVendo] Relay ${state} for ${ip} error:`, e.message);
+            console.error(`[SubVendo] Relay ${state} for ${ip} ERROR:`, e.message);
             reject(e);
         });
         req.setTimeout(5000, () => {
@@ -3958,15 +3916,21 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
         const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
 
         // Immediately apply relay state based on current session status
+        // BUT respect relay lock - don't turn off if user is inserting coins
         if (device && device.ip_address) {
             const sessionKey = `subvendo:${device.device_id}`;
             const isActive = coinSessions.has(sessionKey);
-            const targetState = isActive ? 'on' : 'off';
+            const locked = isRelayLocked(sessionKey);
             
-            // Fire and forget - attempt to update relay immediately
-            controlSubVendoRelay(device.ip_address, targetState, device.relay_pin_active_state)
-                .then(() => console.log(`[SubVendo] Immediate relay update for ${device.name} (${device.ip_address}) -> ${targetState} (Active: ${device.relay_pin_active_state})`))
-                .catch(err => console.error(`[SubVendo] Failed immediate relay update for ${device.name}:`, err.message));
+            // Only change relay if not locked, or if turning ON
+            if (isActive || !locked) {
+                const targetState = isActive ? 'on' : (locked ? 'on' : 'off');
+                controlSubVendoRelay(device.ip_address, targetState, device.relay_pin_active_state)
+                    .then(() => console.log(`[SubVendo] Immediate relay update for ${device.name} (${device.ip_address}) -> ${targetState} (Active: ${device.relay_pin_active_state})`))
+                    .catch(err => console.error(`[SubVendo] Failed immediate relay update for ${device.name}:`, err.message));
+            } else {
+                console.log(`[SubVendo] Relay update skipped for ${device.name} - relay is locked`);
+            }
         }
 
         res.json({ success: true, device });
