@@ -23,6 +23,7 @@ echo "Configuring Hotspot rules for $IFACE ($PORTAL_IP/$CIDR)..."
 
 # Ensure IP forwarding is enabled (needed for NAT and captive portal flows)
 sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1 || true
+echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
 
 # 0. Ensure Interface has IP and is UP
 ip link set $IFACE up
@@ -37,14 +38,43 @@ fi
 # Check if IP is already assigned
 if ! ip addr show $IFACE | grep -q "$PORTAL_IP"; then
     echo "Assigning IP $PORTAL_IP/$CIDR to $IFACE..."
-    ip addr add $PORTAL_IP/$CIDR dev $IFACE
+    ip addr add $PORTAL_IP/$CIDR dev $IFACE 2>/dev/null || true
 else
     echo "IP $PORTAL_IP already assigned to $IFACE."
+fi
+
+# ============================================
+# CRITICAL: Ensure internet_users chain exists
+# This chain is normally created by init_firewall.sh
+# But for VLANs added later, we need to ensure it exists
+# ============================================
+if ! iptables -t mangle -L internet_users -n 2>/dev/null; then
+    echo "Creating internet_users chain in mangle table..."
+    iptables -t mangle -N internet_users 2>/dev/null || true
+fi
+
+# ============================================
+# CRITICAL: Ensure FORWARD allows mark 99 traffic
+# Without this, authorized clients can't access internet
+# ============================================
+if ! iptables -C FORWARD -m mark --mark 99 -j ACCEPT 2>/dev/null; then
+    echo "Adding FORWARD ACCEPT rule for authorized users (mark 99)..."
+    iptables -A FORWARD -m mark --mark 99 -j ACCEPT
+fi
+
+# ============================================
+# CRITICAL: Ensure ESTABLISHED/RELATED traffic is allowed
+# This allows return traffic for active connections
+# ============================================
+if ! iptables -C FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+    echo "Adding FORWARD rule for ESTABLISHED/RELATED traffic..."
+    iptables -I FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 fi
 
 # 1. Add to Internet Users Chain (Packet Marking check)
 # Check if rule already exists to avoid duplicates
 if ! iptables -t mangle -C PREROUTING -i $IFACE -j internet_users 2>/dev/null; then
+    echo "Adding $IFACE to internet_users chain..."
     iptables -t mangle -A PREROUTING -i $IFACE -j internet_users
 fi
 
@@ -65,12 +95,20 @@ fi
 # 3. HTTP Redirection (Captive Portal)
 # Redirect HTTP requests from unauthorized users (no mark 99) to Portal
 if ! iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
+    echo "Adding HTTP redirect rule for $IFACE..."
     iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
 fi
 
 # Redirect explicit requests to the Gateway IP to Portal Port
 if ! iptables -t nat -C PREROUTING -i $IFACE -d $PORTAL_IP -p tcp --dport 80 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
     iptables -t nat -A PREROUTING -i $IFACE -d $PORTAL_IP -p tcp --dport 80 -j REDIRECT --to-port $PORTAL_PORT
+fi
+
+# 3.1 HTTPS Redirection for captive portal detection
+# Many modern browsers/devices check HTTPS first - redirect to portal
+if ! iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
+    echo "Adding HTTPS redirect rule for $IFACE..."
+    iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
 fi
 
 # 4. Input Access (Allow DNS and Portal)
@@ -86,10 +124,20 @@ fi
 if ! iptables -C INPUT -i $IFACE -p tcp --dport 80 -j ACCEPT 2>/dev/null; then
     iptables -A INPUT -i $IFACE -p tcp --dport 80 -j ACCEPT
 fi
+if ! iptables -C INPUT -i $IFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
+    iptables -A INPUT -i $IFACE -p tcp --dport 443 -j ACCEPT
+fi
 
 # 5. Drop Unauthorized Forwarding (Walled Garden Enforcement)
+# This MUST be at the end to ensure other rules are processed first
 if ! iptables -C FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null; then
+    echo "Adding walled garden DROP rule for $IFACE..."
     iptables -A FORWARD -i $IFACE -m mark ! --mark 99 -j DROP
 fi
 
 echo "Hotspot rules applied for $IFACE."
+echo "  - DNS interception: YES"
+echo "  - HTTP redirect: YES"
+echo "  - HTTPS redirect: YES"
+echo "  - NAT/Masquerade: YES"
+echo "  - Walled Garden: YES"

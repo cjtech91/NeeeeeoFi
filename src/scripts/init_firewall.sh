@@ -33,12 +33,12 @@ iptables -P OUTPUT ACCEPT
 iptables -P FORWARD DROP
 
 # 3. Create a chain for authorized users
-iptables -t mangle -N internet_users
+iptables -t mangle -N internet_users 2>/dev/null || true
 
 # 3.1 Create a chain for traffic accounting
 # We use the FILTER table's FORWARD chain for this, as it sees packets in both directions after routing decision
-iptables -N traffic_acct
-iptables -I FORWARD -j traffic_acct
+iptables -N traffic_acct 2>/dev/null || true
+iptables -I FORWARD -j traffic_acct 2>/dev/null || true
 
 # 4. Allow authorized users (MARK packets with 99)
 # Users added to this chain will be marked as "Authorized"
@@ -51,6 +51,12 @@ iptables -t nat -A POSTROUTING -s $SUBNET ! -d $SUBNET -j MASQUERADE
 
 # Backup rule: Masquerade anything going out the WAN interface (just in case)
 iptables -t nat -A POSTROUTING -o $WAN_IF -j MASQUERADE
+
+# 5.0 NAT for common private subnets (VLANs often use different subnets)
+# This ensures VLANs with different IP ranges can also access internet
+iptables -t nat -A POSTROUTING -s 10.0.0.0/8 ! -d 10.0.0.0/8 -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -s 172.16.0.0/12 ! -d 172.16.0.0/12 -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -s 192.168.0.0/16 ! -d 192.168.0.0/16 -j MASQUERADE 2>/dev/null || true
 
 # 5.1 Ensure Established connections are always allowed (Performance + Reliability)
 iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
