@@ -3023,13 +3023,19 @@ app.delete('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
             return res.status(400).json({ error: 'Cannot delete Main Vendo source' });
         }
         if (source.startsWith('subvendo:')) {
-            return res.status(400).json({ error: 'Cannot delete registered Sub Vendo source' });
+            const deviceId = source.slice('subvendo:'.length);
+            const exists = db.prepare('SELECT 1 FROM sub_vendo_devices WHERE device_id = ? LIMIT 1').get(deviceId);
+            if (exists) {
+                return res.status(400).json({ error: 'Cannot delete registered Sub Vendo source' });
+            }
         }
 
-        const del = db.prepare('DELETE FROM sales WHERE COALESCE(source, \'hardware\') = ?');
-        const info = del.run(source);
+        const delSales = db.prepare('DELETE FROM sales WHERE COALESCE(source, \'hardware\') = ?');
+        const delLogs = db.prepare('DELETE FROM coins_out_logs WHERE source = ?');
+        const salesInfo = delSales.run(source);
+        const logsInfo = delLogs.run(source);
         try { configService.set(`coins_out_at_${source}`, null); } catch (e) {}
-        res.json({ success: true, deleted: info.changes || 0 });
+        res.json({ success: true, deleted_sales: salesInfo.changes || 0, deleted_coinsout_logs: logsInfo.changes || 0 });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
