@@ -561,6 +561,74 @@ if ($method === 'GET' && $endpoint === 'downloads-download') {
     exit;
 }
 
+if ($method === 'GET' && $endpoint === 'devices-used') {
+    require_admin_session();
+    $licenses = loadDB();
+    $devices = [];
+    $groups = [];
+    foreach ($licenses as $l) {
+        if (!is_array($l)) continue;
+        $machineId = normalize_str($l['machineId'] ?? '');
+        if ($machineId === '') continue;
+
+        $deviceModel = normalize_str($l['device_model'] ?? '');
+        if ($deviceModel === '') {
+            $deviceInfo = (is_array($l['deviceInfo'] ?? null)) ? $l['deviceInfo'] : null;
+            $deviceModel = normalize_str($deviceInfo['device_model'] ?? ($deviceInfo['model'] ?? ''));
+        }
+        if ($deviceModel === '') $deviceModel = normalize_str($l['name'] ?? '') ?: 'Unknown';
+
+        $appVersion = normalize_str($l['app_version'] ?? '');
+        if ($appVersion === '') {
+            $meta = (is_array($l['metadata'] ?? null)) ? $l['metadata'] : null;
+            $appVersion = normalize_str($meta['app_version'] ?? '');
+        }
+        if ($appVersion === '') $appVersion = '-';
+
+        $status = normalize_str($l['status'] ?? '');
+        $key = strtolower($deviceModel) . '|' . strtolower($appVersion);
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'device_model' => $deviceModel,
+                'app_version' => $appVersion,
+                'total' => 0,
+                'active' => 0,
+                'expired' => 0,
+                'revoked' => 0
+            ];
+        }
+        $groups[$key]['total']++;
+        if ($status === 'active') $groups[$key]['active']++;
+        if ($status === 'expired') $groups[$key]['expired']++;
+        if ($status === 'revoked') $groups[$key]['revoked']++;
+
+        $devices[] = [
+            'machineId' => $machineId,
+            'license' => (string)($l['license'] ?? ''),
+            'owner' => (string)($l['owner'] ?? ''),
+            'status' => $status,
+            'device_model' => $deviceModel,
+            'app_version' => $appVersion,
+            'activatedAt' => (string)($l['activatedAt'] ?? ''),
+            'lastHeartbeatAt' => (string)($l['lastHeartbeatAt'] ?? ''),
+            'expiry' => (string)($l['expiry'] ?? '')
+        ];
+    }
+
+    $groupList = array_values($groups);
+    usort($groupList, function($a, $b) {
+        $aT = (int)($a['total'] ?? 0);
+        $bT = (int)($b['total'] ?? 0);
+        if ($aT !== $bT) return $bT <=> $aT;
+        return strcmp((string)$a['device_model'], (string)$b['device_model']);
+    });
+    usort($devices, function($a, $b) {
+        return strcmp((string)$b['lastHeartbeatAt'], (string)$a['lastHeartbeatAt']);
+    });
+
+    json_response(['success' => true, 'groups' => $groupList, 'devices' => $devices], 200);
+}
+
 if ($method === 'POST' && $endpoint === 'logout') {
     $_SESSION = [];
     if (session_id() !== '') {
@@ -1799,6 +1867,10 @@ if ($method === 'POST') {
             json_response(['allowed' => false, 'success' => false, 'message' => 'License has expired', 'status' => 'expired'], 200);
         }
 
+        $meta = is_array($data['metadata'] ?? null) ? $data['metadata'] : null;
+        $appVersion = normalize_str($data['app_version'] ?? ($meta['app_version'] ?? ''));
+        $platform = normalize_str($data['platform'] ?? ($meta['platform'] ?? ''));
+
         // Force update status and machineId
         $licenses[$foundIndex]['machineId'] = $machineId;
         $licenses[$foundIndex]['status'] = 'active';
@@ -1807,6 +1879,8 @@ if ($method === 'POST') {
             $licenses[$foundIndex]['activatedAt'] = date('c');
         }
         $licenses[$foundIndex]['deviceInfo'] = $deviceInfo;
+        if ($appVersion !== '') $licenses[$foundIndex]['app_version'] = $appVersion;
+        if ($platform !== '') $licenses[$foundIndex]['platform'] = $platform;
         saveDB($licenses);
 
         $expiryIso = null;
@@ -1852,6 +1926,10 @@ if ($method === 'POST') {
         $licenseKey = normalize_str($data['key'] ?? ($data['license_key'] ?? ($data['licenseKey'] ?? '')));
         $machineId = normalize_str($data['system_serial'] ?? ($data['System_Serial'] ?? ($data['machineId'] ?? ($data['hwid'] ?? ($data['serial'] ?? '')))));
         
+        $meta = is_array($data['metadata'] ?? null) ? $data['metadata'] : null;
+        $appVersion = normalize_str($data['app_version'] ?? ($meta['app_version'] ?? ''));
+        $platform = normalize_str($data['platform'] ?? ($meta['platform'] ?? ''));
+
         $licenses = loadDB();
         $license = null;
         
@@ -1895,6 +1973,8 @@ if ($method === 'POST') {
                         $licenses[$idx]['activatedAt'] = date('c');
                     }
                     $licenses[$idx]['deviceInfo'] = $data['deviceInfo'] ?? ($licenses[$idx]['deviceInfo'] ?? null);
+                    if ($appVersion !== '') $licenses[$idx]['app_version'] = $appVersion;
+                    if ($platform !== '') $licenses[$idx]['platform'] = $platform;
                     if (!empty($licenses[$idx]['revokedMachineId'])) $licenses[$idx]['revokedMachineId'] = null;
                     saveDB($licenses);
                     $license = $licenses[$idx];
@@ -1914,6 +1994,8 @@ if ($method === 'POST') {
                     if (empty($licenses[$idx]['activatedAt'])) {
                         $licenses[$idx]['activatedAt'] = date('c');
                     }
+                    if ($appVersion !== '') $licenses[$idx]['app_version'] = $appVersion;
+                    if ($platform !== '') $licenses[$idx]['platform'] = $platform;
                     if (!empty($licenses[$idx]['revokedMachineId'])) $licenses[$idx]['revokedMachineId'] = null;
                     saveDB($licenses);
                     break;
@@ -1965,6 +2047,9 @@ if ($method === 'POST') {
         $machineId = normalize_str($data['system_serial'] ?? ($data['System_Serial'] ?? ($data['machineId'] ?? ($data['hwid'] ?? ($data['serial'] ?? '')))));
 
         if ($licenseKey !== '' && $machineId !== '') {
+            $meta = is_array($data['metadata'] ?? null) ? $data['metadata'] : null;
+            $appVersion = normalize_str($data['app_version'] ?? ($meta['app_version'] ?? ''));
+            $platform = normalize_str($data['platform'] ?? ($meta['platform'] ?? ''));
             $licenses = loadDB();
             foreach ($licenses as $idx => $l) {
                 if ($l['license'] !== $licenseKey) continue;
@@ -1985,6 +2070,8 @@ if ($method === 'POST') {
                     $licenses[$idx]['activatedAt'] = date('c');
                 }
                 if (!empty($licenses[$idx]['revokedMachineId'])) $licenses[$idx]['revokedMachineId'] = null;
+                if ($appVersion !== '') $licenses[$idx]['app_version'] = $appVersion;
+                if ($platform !== '') $licenses[$idx]['platform'] = $platform;
                 saveDB($licenses);
                 break;
             }

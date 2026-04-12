@@ -7546,9 +7546,11 @@
             if (!Array.isArray(cores) || cores.length === 0) return;
 
             const avg = cores.reduce((a, b) => a + b, 0) / cores.length;
+            const coreScale = cores.length > 0 ? (1 / cores.length) : 1;
+            const totalScaled = avg * coreScale;
 
-            const labels = ['AVG', ...cores.map((_, i) => `CPU ${i + 1}`)];
-            const data = [avg, ...cores].map(v => {
+            const labels = ['TOTAL', ...cores.map((_, i) => `CPU ${i + 1}`)];
+            const data = [totalScaled, ...cores.map(v => (Number(v) || 0) * coreScale)].map(v => {
                 const n = Number(v) || 0;
                 return Math.max(0, Math.min(100, n));
             });
@@ -8267,13 +8269,15 @@
 
                 // Ensure avgCpu is a valid number
                 avgCpu = Number(avgCpu) || 0;
+                const coreScaleForDisplay = (Array.isArray(cores) && cores.length > 0) ? (1 / cores.length) : 1;
+                const totalCpuForDisplay = avgCpu * coreScaleForDisplay;
 
                 // Update text elements immediately (before charts to prevent blocking on chart errors)
                 const cpuTextEl = document.getElementById('cpu-text');
-                if (cpuTextEl) cpuTextEl.textContent = Math.min(100, avgCpu).toFixed(1) + '%';
+                if (cpuTextEl) cpuTextEl.textContent = Math.min(100, totalCpuForDisplay).toFixed(1) + '%';
 
                 const cpuLoadEl = document.getElementById('cpu-load');
-                if (cpuLoadEl) cpuLoadEl.textContent = Math.min(100, avgCpu).toFixed(1) + '%';
+                if (cpuLoadEl) cpuLoadEl.textContent = Math.min(100, totalCpuForDisplay).toFixed(1) + '%';
 
                 if (chartsEnabled && cpuDoughnut) {
                     try {

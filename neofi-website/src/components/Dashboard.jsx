@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { Wifi, CheckCircle, RefreshCw, X, Key, User, Settings, LayoutDashboard, ShieldCheck, Search, ArrowRightLeft, Download, Upload, FileText, Trash2 } from 'lucide-react';
+import { Wifi, CheckCircle, RefreshCw, X, Key, User, Settings, LayoutDashboard, ShieldCheck, Search, ArrowRightLeft, Download, Upload, FileText, Trash2, Monitor } from 'lucide-react';
 
 const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, users = [] }) => {
   const licenseListRef = useRef(null);
@@ -67,6 +67,11 @@ const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, u
   const uploadCategoryInputRef = useRef(null);
   const [uploadSubmitting, setUploadSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [devicesUsedGroups, setDevicesUsedGroups] = useState([]);
+  const [devicesUsedRows, setDevicesUsedRows] = useState([]);
+  const [devicesUsedLoading, setDevicesUsedLoading] = useState(false);
+  const [devicesUsedErr, setDevicesUsedErr] = useState('');
+  const lastDevicesUsedSigRef = useRef('');
 
   const formatLastSeen = (device) => {
     const raw = device.lastHeartbeatAt || device.activatedAt || device.createdAt;
@@ -145,6 +150,38 @@ const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, u
     }
   }, [downloads.length]);
 
+  const fetchDevicesUsed = useCallback(async () => {
+    if (!isAdmin) return;
+    setDevicesUsedErr('');
+    if (devicesUsedRows.length === 0) setDevicesUsedLoading(true);
+    try {
+      const res = await fetch('./api/index.php?endpoint=devices-used', { credentials: 'include' });
+      if (res.status === 401 || res.status === 403) {
+        setDevicesUsedErr('Unauthorized');
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      const groups = (data && Array.isArray(data.groups)) ? data.groups : [];
+      const rows = (data && Array.isArray(data.devices)) ? data.devices : [];
+      const sig = groups
+        .map((g) => [g.device_model, g.app_version, g.total, g.active, g.expired, g.revoked].map((v) => String(v ?? '')).join('|'))
+        .join('||') + '::' +
+        rows.slice(0, 200)
+          .map((r) => [r.machineId, r.license, r.device_model, r.app_version, r.status, r.lastHeartbeatAt].map((v) => String(v ?? '')).join('|'))
+          .join('||');
+      if (sig !== lastDevicesUsedSigRef.current) {
+        lastDevicesUsedSigRef.current = sig;
+        setDevicesUsedGroups(groups);
+        setDevicesUsedRows(rows);
+      }
+    } catch (e) {
+      console.error(e);
+      setDevicesUsedErr('Failed to load devices');
+    } finally {
+      setDevicesUsedLoading(false);
+    }
+  }, [isAdmin, devicesUsedRows.length]);
+
   useEffect(() => {
     if (activeTab !== 'subvendo' && activeTab !== 'users') return;
     if (isAdmin) {
@@ -161,6 +198,14 @@ const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, u
     const id = setInterval(fetchDownloads, 60000);
     return () => clearInterval(id);
   }, [activeTab, fetchDownloads]);
+
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    if (activeTab !== 'devices') return undefined;
+    fetchDevicesUsed();
+    const id = setInterval(fetchDevicesUsed, 60000);
+    return () => clearInterval(id);
+  }, [activeTab, isAdmin, fetchDevicesUsed]);
 
   const fetchTransferLog = useCallback(async () => {
     if (!isAdmin) return;
@@ -1108,6 +1153,120 @@ const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, u
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const DevicesTab = () => {
+    const formatIso = (raw) => {
+      if (!raw) return '--';
+      const t = Date.parse(String(raw));
+      if (Number.isNaN(t)) return String(raw);
+      return new Date(t).toLocaleString();
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
+            <h2 className="text-xl font-bold text-white flex items-center">
+              <Monitor className="h-5 w-5 mr-2 text-indigo-400" />
+              Devices Used
+            </h2>
+            <button
+              onClick={fetchDevicesUsed}
+              className="text-slate-400 hover:text-white flex items-center"
+              title="Refresh"
+              type="button"
+            >
+              <RefreshCw className={`h-4 w-4 ${devicesUsedLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+
+          {devicesUsedErr && (
+            <div className="p-6 text-rose-300 text-sm">{devicesUsedErr}</div>
+          )}
+
+          {!devicesUsedErr && (
+            <div className="p-6 space-y-8">
+              <div className="bg-slate-900/30 rounded-xl border border-slate-700 overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-700 flex items-center justify-between">
+                  <div className="text-white font-semibold">By Model & Version</div>
+                  <div className="text-slate-500 text-xs">{devicesUsedGroups.length} group(s)</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-700">
+                    <thead className="bg-slate-900/40">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Device Model</th>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">NeoFi Version</th>
+                        <th className="px-5 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Total</th>
+                        <th className="px-5 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Active</th>
+                        <th className="px-5 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Expired</th>
+                        <th className="px-5 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Revoked</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700">
+                      {devicesUsedGroups.map((g) => (
+                        <tr key={`${g.device_model}::${g.app_version}`} className="hover:bg-slate-700/30 transition-colors">
+                          <td className="px-5 py-4 text-white">{g.device_model || 'Unknown'}</td>
+                          <td className="px-5 py-4 text-slate-300">{g.app_version || '-'}</td>
+                          <td className="px-5 py-4 text-right text-white font-semibold">{Number(g.total || 0)}</td>
+                          <td className="px-5 py-4 text-right text-emerald-300">{Number(g.active || 0)}</td>
+                          <td className="px-5 py-4 text-right text-amber-300">{Number(g.expired || 0)}</td>
+                          <td className="px-5 py-4 text-right text-rose-300">{Number(g.revoked || 0)}</td>
+                        </tr>
+                      ))}
+                      {devicesUsedGroups.length === 0 && (
+                        <tr>
+                          <td className="px-5 py-6 text-center text-slate-400" colSpan={6}>No devices found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/30 rounded-xl border border-slate-700 overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-700 flex items-center justify-between">
+                  <div className="text-white font-semibold">Active Machines</div>
+                  <div className="text-slate-500 text-xs">{devicesUsedRows.length} device(s)</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-700">
+                    <thead className="bg-slate-900/40">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Machine ID</th>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Device Model</th>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">NeoFi Version</th>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">License</th>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Owner</th>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Last Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700">
+                      {devicesUsedRows.map((r) => (
+                        <tr key={r.machineId} className="hover:bg-slate-700/30 transition-colors">
+                          <td className="px-5 py-4 text-white font-mono">{r.machineId}</td>
+                          <td className="px-5 py-4 text-slate-200">{r.device_model || 'Unknown'}</td>
+                          <td className="px-5 py-4 text-slate-300">{r.app_version || '-'}</td>
+                          <td className="px-5 py-4 text-blue-300 font-mono">{r.license || '--'}</td>
+                          <td className="px-5 py-4 text-slate-300">{r.owner || '--'}</td>
+                          <td className="px-5 py-4 text-slate-300">{formatIso(r.lastHeartbeatAt || r.activatedAt)}</td>
+                        </tr>
+                      ))}
+                      {devicesUsedRows.length === 0 && (
+                        <tr>
+                          <td className="px-5 py-6 text-center text-slate-400" colSpan={6}>No devices found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -2543,6 +2702,19 @@ const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, u
         </button>
         {isAdmin && (
           <button
+            onClick={() => setActiveTab('devices')}
+            className={`flex items-center px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'devices'
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+            }`}
+          >
+            <Monitor className="h-4 w-4 mr-2" />
+            Devices
+          </button>
+        )}
+        {isAdmin && (
+          <button
             onClick={() => setActiveTab('users')}
             className={`flex items-center px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
               activeTab === 'users' 
@@ -2587,6 +2759,7 @@ const Dashboard = ({ user, adminProfile, setAdminProfile, devices, setDevices, u
         {activeTab === 'list' && isAdmin && <LicenseListTab />}
         {activeTab === 'subvendo' && (isAdmin ? <SubVendoKeysTab /> : <MySubVendoTab />)}
         {activeTab === 'downloads' && <DownloadsTab />}
+        {activeTab === 'devices' && isAdmin && <DevicesTab />}
         {activeTab === 'users' && isAdmin && <UserListTab />}
         {activeTab === 'history' && isAdmin && <TransferHistoryTab />}
         {activeTab === 'settings' && <SettingsTab />}
