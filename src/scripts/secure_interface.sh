@@ -28,6 +28,20 @@ ensure_rule() {
 
 echo "Securing Interface: $IFACE"
 
+# Insert rule only if it doesn't exist (used when ordering matters)
+ensure_rule_insert() {
+    local table=$1
+    local chain=$2
+    local pos=$3
+    shift 3
+    local rule="$@"
+
+    iptables -t $table -C $chain $rule 2>/dev/null
+    if [ $? -ne 0 ]; then
+        iptables -t $table -I $chain $pos $rule
+    fi
+}
+
 # 1. Mangle - Capture traffic for accounting & authorization
 ensure_rule mangle PREROUTING -i $IFACE -j internet_users
 
@@ -48,6 +62,13 @@ ensure_rule filter INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
 ensure_rule filter INPUT -i $IFACE -p tcp --dport $PORTAL_PORT -j ACCEPT
 
 # 5. Filter - Drop unauthorized traffic (Walled Garden)
-ensure_rule filter FORWARD -i $IFACE -m mark ! --mark 99 -j DROP
+DROP_POS=1
+if [ "$IFACE" = "br0" ]; then
+    DROP_POS=2
+fi
+while iptables -t filter -C FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null; do
+    iptables -t filter -D FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null || break
+done
+ensure_rule_insert filter FORWARD $DROP_POS -i $IFACE -m mark ! --mark 99 -j DROP
 
 echo "Interface $IFACE Secured."

@@ -129,11 +129,17 @@ if ! iptables -C INPUT -i $IFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
 fi
 
 # 5. Drop Unauthorized Forwarding (Walled Garden Enforcement)
-# This MUST be at the end to ensure other rules are processed first
-if ! iptables -C FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null; then
-    echo "Adding walled garden DROP rule for $IFACE..."
-    iptables -A FORWARD -i $IFACE -m mark ! --mark 99 -j DROP
+# Insert near the top so it can't be bypassed by later custom ACCEPT rules.
+# For br0, keep position 2 so any pre-inserted allow rules (e.g. walled garden ACCEPT) can stay at position 1.
+DROP_POS=1
+if [ "$IFACE" = "br0" ]; then
+    DROP_POS=2
 fi
+while iptables -C FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null; do
+    iptables -D FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null || break
+done
+echo "Adding walled garden DROP rule for $IFACE (insert at $DROP_POS)..."
+iptables -I FORWARD $DROP_POS -i $IFACE -m mark ! --mark 99 -j DROP
 
 echo "Hotspot rules applied for $IFACE."
 echo "  - DNS interception: YES"

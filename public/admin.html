@@ -960,6 +960,104 @@
         let chatSocket = null;
         let currentChatMac = null;
         let currentChatType = 'hotspot';
+        const lastCoinPendingByMac = new Map();
+        const lastCoinToastAtByMac = new Map();
+        const coinPulseBufferByMac = new Map(); // mac -> { sum, source, timerId }
+
+        function ensureToastContainer() {
+            let el = document.getElementById('toast-container');
+            if (el) return el;
+            el = document.createElement('div');
+            el.id = 'toast-container';
+            document.body.appendChild(el);
+            return el;
+        }
+
+        function shortMac(mac) {
+            const m = String(mac || '').trim();
+            if (!m) return '';
+            if (m.length <= 10) return m;
+            return m.slice(0, 8) + '…' + m.slice(-4);
+        }
+
+        function formatVendoSource(source) {
+            const src = String(source || '').trim();
+            if (!src || src === 'hardware') return 'Main Vendo';
+            if (src.startsWith('subvendo:')) {
+                const deviceId = src.slice('subvendo:'.length);
+                try {
+                    const devices = window.subVendoDevicesCache || [];
+                    const found = devices.find(d => String(d.device_id || '').toLowerCase() === String(deviceId).toLowerCase());
+                    if (found && found.name) return found.name;
+                } catch (e) {}
+                return `Sub Vendo ${deviceId}`;
+            }
+            return src;
+        }
+
+        function showToast(a, b, c, d) {
+            let title = '';
+            let message = '';
+            let variant = 'info';
+            let durationMs = 6000;
+
+            const normalizeVariant = (v) => {
+                const s = String(v || '').toLowerCase();
+                if (s === 'error' || s === 'danger') return 'danger';
+                if (s === 'warn') return 'warning';
+                if (s === 'ok') return 'success';
+                if (s === 'success' || s === 'warning' || s === 'info') return s;
+                return 'info';
+            };
+
+            if (typeof b === 'string' && ['success', 'warning', 'info', 'error', 'danger', 'warn', 'ok'].includes(String(b).toLowerCase())) {
+                // Signature: showToast(message, type)
+                message = String(a ?? '');
+                variant = normalizeVariant(b);
+                title = variant === 'success' ? 'Success' : (variant === 'warning' ? 'Warning' : (variant === 'danger' ? 'Error' : 'Info'));
+                durationMs = 5000;
+            } else {
+                // Signature: showToast(title, message, variant, durationMs)
+                title = String(a ?? '');
+                message = String(b ?? '');
+                variant = normalizeVariant(c);
+                durationMs = (d == null) ? 6000 : Number(d);
+                if (!Number.isFinite(durationMs) || durationMs < 0) durationMs = 6000;
+            }
+
+            const container = ensureToastContainer();
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${variant}`;
+
+            const titleRow = document.createElement('div');
+            titleRow.className = 'toast-title';
+
+            const t = document.createElement('div');
+            t.textContent = title;
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'toast-close';
+            closeBtn.type = 'button';
+            closeBtn.textContent = '×';
+            closeBtn.onclick = () => toast.remove();
+
+            titleRow.appendChild(t);
+            titleRow.appendChild(closeBtn);
+
+            const msg = document.createElement('div');
+            msg.className = 'toast-msg';
+            msg.textContent = message;
+
+            toast.appendChild(titleRow);
+            toast.appendChild(msg);
+            container.appendChild(toast);
+
+            if (durationMs > 0) {
+                setTimeout(() => {
+                    if (toast && toast.parentNode) toast.remove();
+                }, durationMs);
+            }
+        }
 
         function setChatType(type) {
             currentChatType = type;
@@ -1079,6 +1177,55 @@
                     lastSubVendoRefreshMs = now;
                     loadSubVendoDevices();
                     loadSubVendoWaitingList();
+                } catch (e) {}
+            });
+
+            chatSocket.on('coin_pulse', (data) => {
+                try {
+                    const mac = (data && data.mac) ? String(data.mac).toLowerCase() : '';
+                    if (!mac) return;
+                    const pulses = Number(data.pulses) || 0;
+                    if (pulses <= 0) return;
+
+                    const src = String(data.source || 'hardware');
+                    const totalPrev = Number(lastCoinPendingByMac.get(mac)) || 0;
+                    const totalNext = totalPrev + pulses;
+                    lastCoinPendingByMac.set(mac, totalNext);
+
+                    const buf = coinPulseBufferByMac.get(mac) || { sum: 0, source: src, timerId: null };
+                    buf.sum += pulses;
+                    buf.source = src;
+
+                    if (buf.timerId) clearTimeout(buf.timerId);
+                    buf.timerId = setTimeout(() => {
+                        try {
+                            const now = Date.now();
+                            const lastToastAt = lastCoinToastAtByMac.get(mac) || 0;
+                            if ((now - lastToastAt) < 350) return;
+                            lastCoinToastAtByMac.set(mac, now);
+
+                            const sum = Number(buf.sum) || 0;
+                            const total = Number(lastCoinPendingByMac.get(mac)) || 0;
+                            const vendo = formatVendoSource(buf.source);
+                            coinPulseBufferByMac.delete(mac);
+
+                            showToast(`Insert Coin: ${shortMac(mac)} +₱${sum.toFixed(2)} on ${vendo} (Total ₱${total.toFixed(2)})`, 'info');
+                        } catch (e) {}
+                    }, 250);
+
+                    coinPulseBufferByMac.set(mac, buf);
+                } catch (e) {}
+            });
+
+            chatSocket.on('coin_finalized', (data) => {
+                try {
+                    const mac = (data && data.mac) ? String(data.mac).toLowerCase() : '';
+                    if (!mac) return;
+                    lastCoinPendingByMac.delete(mac);
+                    lastCoinToastAtByMac.delete(mac);
+                    const buf = coinPulseBufferByMac.get(mac);
+                    if (buf && buf.timerId) clearTimeout(buf.timerId);
+                    coinPulseBufferByMac.delete(mac);
                 } catch (e) {}
             });
         }
@@ -2671,6 +2818,17 @@
         .btn.icon-only svg { width: 16px; height: 16px; fill: currentColor; }
         .btn.add-plus { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; }
         .btn.btn-sm.add-plus { width: 28px; height: 28px; font-size: 18px; }
+
+        #toast-container { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 5000; pointer-events: none; }
+        .toast { min-width: 280px; max-width: 360px; background: rgba(30, 39, 46, 0.96); border: 1px solid rgba(255,255,255,0.08); border-left-width: 4px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.35); padding: 12px 12px 12px 12px; pointer-events: auto; }
+        .toast.toast-info { border-left-color: var(--primary); }
+        .toast.toast-success { border-left-color: var(--status-active); }
+        .toast.toast-warning { border-left-color: var(--warning); }
+        .toast.toast-danger { border-left-color: var(--status-expired); }
+        .toast-title { font-weight: 700; color: var(--text-main); font-size: 0.9rem; margin: 0 0 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .toast-msg { color: var(--text-muted); font-size: 0.85rem; margin: 0; line-height: 1.2rem; }
+        .toast-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; padding: 0 4px; line-height: 1; }
+        .toast-close:hover { color: var(--text-main); }
 
         /* Login Screen */
         #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.25); display: flex; justify-content: center; align-items: center; z-index: 3000; }
@@ -6139,6 +6297,27 @@
                                     </div>
                                 </div>
 
+                                <!-- IPTV Widget Settings -->
+                                <div style="grid-column: 1 / -1; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
+                                    <h4 style="margin: 0 0 10px 0; font-size: 0.95rem; color: var(--text-main);">IPTV Widget</h4>
+                                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--bg-body); border-radius: 6px; border: 1px solid var(--border);">
+                                        <div style="display:flex; align-items:center;">
+                                            <span style="font-weight: 600; color: var(--text-main);">Enable IPTV Button</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="portal-iptv-enabled">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    <div style="margin-top: 10px;">
+                                        <label for="portal-iptv-link" style="display:block; font-weight:600; margin-bottom:4px; font-size:0.9rem;">IPTV Link (URL)</label>
+                                        <input type="text" id="portal-iptv-link" class="login-input" placeholder="e.g. http://iptv.example.com" style="margin:0;">
+                                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">
+                                            This will add an IPTV widget button on the client portal. Clicking it redirects to this link.
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Footer Settings -->
                                 <div style="grid-column: 1 / -1; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
                                     <h4 style="margin: 0 0 10px 0; font-size: 0.95rem; color: var(--text-main);">Footer Configuration</h4>
@@ -7204,10 +7383,10 @@
     </div>
 
     <!-- DHCP Modal -->
-    <div id="dhcp-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
-        <div style="background:var(--card-bg); width:95%; max-width:600px; color:var(--text-main); border-radius:8px; display:flex; flex-direction:column; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem;">New DHCP</div>
-            <div style="padding:20px; display:flex; flex-direction:column; gap:15px;">
+        <div id="dhcp-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:600px; height:90vh; color:var(--text-main); border-radius:8px; display:flex; flex-direction:column; overflow:hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); position:sticky; top:0; z-index:10;">New DHCP</div>
+            <div style="padding:16px; display:flex; flex-direction:column; gap:12px; overflow-y:auto; -webkit-overflow-scrolling:touch; flex:1 1 auto;">
                  <div style="background:var(--bg-body); padding:10px; border-radius:4px; border:1px solid var(--border);">
                      <label style="display:block; margin-bottom:5px; font-weight:600;">Global Bitmask Setting</label>
                      <div style="display:flex; gap:10px; align-items: center;">
@@ -7227,7 +7406,7 @@
                              <input type="checkbox" id="dhcp-iface-selectall" style="transform:scale(1.1);">
                              <label for="dhcp-iface-selectall" style="font-weight:600;">Select All Available Interfaces</label>
                          </div>
-                         <div id="dhcp-iface-list" style="display:flex; flex-wrap:wrap; gap:8px;">
+                        <div id="dhcp-iface-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:8px; max-height:26vh; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-right:6px;">
                              <!-- Populated via JS -->
                          </div>
                          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">
@@ -7251,7 +7430,7 @@
                      Loading next available slot...
                  </div>
             </div>
-            <div style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+            <div style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:var(--card-bg); position:sticky; bottom:0; z-index:10;">
                 <button class="btn btn-sm btn-danger" onclick="document.getElementById('dhcp-modal').style.display = 'none'">Close</button>
                 <button class="btn btn-sm btn-success" onclick="addDhcpServer()">Save</button>
             </div>
@@ -10495,6 +10674,15 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     tickerTextInput.value = config.ticker_text || '';
                 }
 
+                const iptvEnabledToggle = document.getElementById('portal-iptv-enabled');
+                if (iptvEnabledToggle) {
+                    iptvEnabledToggle.checked = config.iptv_enabled || false;
+                }
+                const iptvLinkInput = document.getElementById('portal-iptv-link');
+                if (iptvLinkInput) {
+                    iptvLinkInput.value = config.iptv_link || '';
+                }
+
                 // Announcement Settings
                 const announcementEnabledToggle = document.getElementById('portal-announcement-enabled');
                 if (announcementEnabledToggle) {
@@ -10701,6 +10889,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const footerText = document.getElementById('portal-footer-text').value;
             const footerLink = document.getElementById('portal-footer-link').value;
             const theme = document.getElementById('portal-theme-select').value;
+            const iptvEnabled = document.getElementById('portal-iptv-enabled').checked;
+            const iptvLink = document.getElementById('portal-iptv-link').value;
 
             try {
                 await fetch('/api/admin/portal-config', {
@@ -10724,6 +10914,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         slideshow_interval: slideshowInterval,
                         footer_text: footerText,
                         footer_link: footerLink,
+                        iptv_enabled: iptvEnabled,
+                        iptv_link: iptvLink,
                         theme: theme
                     })
                 });
@@ -13571,6 +13763,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     if (!name) return;
                     // Skip unusable types
                     if (name === 'lo') return;
+                    if (/^ppp/.test(name)) return;
                     if (/^(zt|tun|tap|docker|veth)/.test(name)) return;
                     if (name.includes('ifb')) return;
                     // Skip if already has DHCP server
@@ -13584,6 +13777,22 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     if (added.has(name)) return;
                     added.add(name);
                     available.push(name);
+                });
+
+                const parseIface = (n) => {
+                    const s = String(n || '').toLowerCase();
+                    const m = s.match(/^(.*?)(?:\.([0-9]{1,4}))$/);
+                    if (m) return { base: m[1], vlan: parseInt(m[2], 10) };
+                    return { base: s, vlan: null };
+                };
+                available.sort((a, b) => {
+                    const pa = parseIface(a);
+                    const pb = parseIface(b);
+                    if (pa.base !== pb.base) return pa.base.localeCompare(pb.base);
+                    const va = (pa.vlan == null) ? Number.POSITIVE_INFINITY : pa.vlan;
+                    const vb = (pb.vlan == null) ? Number.POSITIVE_INFINITY : pb.vlan;
+                    if (va !== vb) return va - vb;
+                    return a.localeCompare(b);
                 });
 
                 // Populate dropdown (for slot preview) and checkboxes for multi-add

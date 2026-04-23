@@ -739,6 +739,28 @@
             height: 24px;
             fill: currentColor;
         }
+        .iptv-widget-btn {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            background: #8e44ad;
+            border-radius: 50%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            cursor: pointer;
+            z-index: 1000;
+            user-select: none;
+            transition: transform 0.2s;
+            font-weight: 800;
+            font-size: 12px;
+            letter-spacing: 0.8px;
+        }
+        .iptv-widget-btn:hover { transform: scale(1.1); }
         .chat-widget-box {
             position: fixed;
             bottom: 80px;
@@ -1151,6 +1173,8 @@
         let selectedVendoMode = 'auto';
         let selectedVendoId = localStorage.getItem('vendo_target') || 'hardware';
         let portalConfig = {};
+        let iptvEnabled = false;
+        let iptvLink = '';
         let ratesCache = [];
         let pendingCoinPoints = 0;
         let lastPendingCoinMinutes = 0;
@@ -1198,8 +1222,35 @@
             }
         }
 
+        function updateIptvWidgetPosition() {
+            const btn = document.getElementById('iptv-widget-btn');
+            if (!btn) return;
+            const chatBtn = document.getElementById('chat-widget-btn');
+            const chatOn = !!(chatBtn && window.getComputedStyle(chatBtn).display !== 'none');
+            btn.style.bottom = chatOn ? '80px' : '20px';
+        }
+
+        function updateIptvWidget() {
+            const btn = document.getElementById('iptv-widget-btn');
+            if (!btn) return;
+            if (iptvEnabled && iptvLink) {
+                btn.style.display = 'flex';
+                updateIptvWidgetPosition();
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        function openIptv() {
+            if (!iptvEnabled || !iptvLink) return;
+            window.location.href = iptvLink;
+        }
+
         function applyPortalConfig(config) {
             portalConfig = config;
+            iptvEnabled = !!config.iptv_enabled;
+            iptvLink = (config.iptv_link || '').trim();
+            updateIptvWidget();
             
             // Apply Styles
             const root = document.documentElement;
@@ -2638,6 +2689,7 @@
             if (modals.length > 0) closeModal(modals[modals.length - 1].id);
         });
     </script>
+    <div id="iptv-widget-btn" class="iptv-widget-btn" onclick="openIptv()">IPTV</div>
     <!-- Chat Widget -->
     <div id="chat-widget-btn" class="chat-widget-btn" onclick="toggleChat()">
         <div id="chat-unread-badge" class="chat-unread-badge"></div>
@@ -2707,6 +2759,7 @@
                         box.style.display = 'none';
                         isChatOpen = false;
                     }
+                    try { updateIptvWidgetPosition(); } catch (e) {}
                 });
 
                 chatSocket.on('chat_history', (messages) => {

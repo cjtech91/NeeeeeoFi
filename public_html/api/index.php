@@ -548,16 +548,40 @@ if ($method === 'GET' && $endpoint === 'downloads-download') {
     $orig = (string)($items[$idx]['name'] ?? 'download.bin');
     $mime = (string)($items[$idx]['mime'] ?? 'application/octet-stream');
     $path = __DIR__ . '/../_downloads/' . $stored;
-    if ($stored === '' || !file_exists($path)) json_response(['success' => false, 'message' => 'Missing file'], 404);
+    if ($stored === '' || !is_file($path) || !is_readable($path)) json_response(['success' => false, 'message' => 'Missing file'], 404);
 
     $items[$idx]['downloads'] = (int)($items[$idx]['downloads'] ?? 0) + 1;
     $items[$idx]['lastDownloadedAt'] = date('c');
     saveDownloadsDB($items);
 
+    session_write_close();
+    @set_time_limit(0);
+    @ignore_user_abort(true);
+    @ini_set('zlib.output_compression', '0');
+    @ini_set('output_buffering', '0');
+    @ini_set('implicit_flush', '1');
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+
+    $safeName = str_replace('"', '', $orig);
+    $safeName = preg_replace('/[\r\n]+/', ' ', $safeName);
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: attachment; filename="' . str_replace('"', '', $orig) . '"');
-    header('Content-Length: ' . filesize($path));
-    readfile($path);
+    header('Content-Disposition: attachment; filename="' . $safeName . '"');
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $fp = @fopen($path, 'rb');
+    if (!$fp) json_response(['success' => false, 'message' => 'Cannot open file'], 500);
+    while (!feof($fp)) {
+        $buf = fread($fp, 1024 * 1024);
+        if ($buf === false) break;
+        echo $buf;
+        flush();
+    }
+    fclose($fp);
     exit;
 }
 

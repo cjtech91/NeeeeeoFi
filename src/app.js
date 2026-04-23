@@ -3108,6 +3108,8 @@ app.get('/api/portal/config', (req, res) => {
         announcement_message: configService.get('portal_announcement_message', ''),
         insert_coin_bg_image: configService.get('portal_insert_coin_bg_image', ''),
         insert_coin_bg_audio: configService.get('portal_insert_coin_bg_audio', ''),
+        iptv_enabled: !!configService.get('portal_iptv_enabled', false),
+        iptv_link: configService.get('portal_iptv_link', ''),
         points_earning_rate: configService.get('points_earning_rate')
     };
     res.json(config);
@@ -3195,7 +3197,8 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
         use_default_banner, default_banner_file, hide_voucher_code,
         banner_mode, slideshow_interval, footer_text, footer_link, theme,
         ticker_text, ticker_enabled,
-        announcement_enabled, announcement_title, announcement_message
+        announcement_enabled, announcement_title, announcement_message,
+        iptv_enabled, iptv_link
     } = req.body;
 
     if (container_width) configService.set('portal_container_width', container_width);
@@ -3217,6 +3220,9 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
     if (announcement_title !== undefined) configService.set('portal_announcement_title', announcement_title);
     if (announcement_message !== undefined) configService.set('portal_announcement_message', announcement_message);
     configService.set('portal_announcement_enabled', !!announcement_enabled);
+
+    configService.set('portal_iptv_enabled', !!iptv_enabled);
+    if (iptv_link !== undefined) configService.set('portal_iptv_link', String(iptv_link || '').trim());
 
     if (theme) {
         if (theme.startsWith('portal') && theme.endsWith('.html') && !theme.includes('/') && !theme.includes('\\')) {

@@ -602,6 +602,7 @@ class NetworkConfigService {
             // Use set:<tag> to identify clients on this subnet for specific options
             content += `dhcp-range=set:${tag},${s.pool_start},${s.pool_end},${s.netmask},12h\n`;
             content += `dhcp-option=tag:${tag},3,${s.gateway}\n`; // Option 3: Router
+            content += `dhcp-option=tag:${tag},114,http://${s.gateway}/portal\n`; // Option 114: Captive Portal URL
             const dns1 = (s.gateway || dhcp.dns1 || '').trim();
             const dns2 = (dhcp.dns2 || '').trim();
             if (dns1 && dns2) content += `dhcp-option=tag:${tag},6,${dns1},${dns2}\n`; // Option 6: DNS
