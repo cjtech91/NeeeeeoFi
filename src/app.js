@@ -2583,6 +2583,46 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
     res.json(stats);
 });
 
+app.get('/api/admin/dashboard/daily-sales', isAuthenticated, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+
+    const rawDays = Number.parseInt(String(req.query.days || '30'), 10);
+    const days = Math.max(1, Math.min(365, Number.isFinite(rawDays) ? rawDays : 30));
+
+    try {
+        const todayRow = db.prepare("SELECT date('now', '+8 hours') as d").get();
+        const today = (todayRow && todayRow.d) ? String(todayRow.d) : new Date().toISOString().slice(0, 10);
+        const offsetDays = days - 1;
+
+        const rows = db.prepare(`
+            SELECT date(timestamp) as d, SUM(amount) as total
+            FROM sales
+            WHERE date(timestamp) >= date('now', '+8 hours', ?)
+            GROUP BY date(timestamp)
+            ORDER BY date(timestamp) ASC
+        `).all(`-${offsetDays} days`);
+
+        const totalsByDay = new Map();
+        for (const r of rows || []) {
+            const d = r && r.d ? String(r.d) : '';
+            if (!d) continue;
+            totalsByDay.set(d, Number(r.total) || 0);
+        }
+
+        const base = new Date(`${today}T00:00:00Z`);
+        const series = [];
+        for (let i = offsetDays; i >= 0; i--) {
+            const dt = new Date(base.getTime() - (i * 86400000));
+            const d = dt.toISOString().slice(0, 10);
+            series.push({ date: d, total: totalsByDay.get(d) || 0 });
+        }
+
+        res.json({ days, series });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // PPPoE Profiles API
 app.get('/api/admin/pppoe/profiles', isAuthenticated, (req, res) => {
     try {

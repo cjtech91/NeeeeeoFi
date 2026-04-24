@@ -3699,6 +3699,26 @@
                         </div>
                     </div>
 
+                    <div class="card" style="margin-top:20px; display:flex; flex-direction:column;">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <span style="display:inline-flex;align-items:center;gap:6px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path fill="currentColor" d="M3 17h2v-7h2v7h2V7h2v10h2V4h2v13h2V9h2v8h2v2H3z"/>
+                                    </svg>
+                                    <span>Daily Sales</span>
+                                </span>
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Last 30 Days</div>
+                        </div>
+                        <div style="height:220px; width:100%; position:relative;">
+                            <canvas id="dailySalesChart"></canvas>
+                            <div id="daily-sales-fallback" style="display:none; text-align:center; padding-top:90px; font-weight:600; color:var(--text-muted);">
+                                Charts are disabled.
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Dashboard Grid Layout -->
                     <div style="display:flex; gap:20px; margin-top:20px; flex-wrap:wrap; align-items:stretch;">
                         
@@ -7604,7 +7624,7 @@
 
     <script>
         // --- Init Charts ---
-        let bwChart, cpuDoughnut;
+        let bwChart, cpuDoughnut, dailySalesChart;
         
         // --- Global Interval Manager ---
         const IntervalManager = {
@@ -7632,6 +7652,7 @@
         let chartsEnabled = false;
         let topVendoPeriod = 'monthly';
         let topClientsPeriod = 'monthly';
+        let lastDailySalesSig = '';
 
         // --- Theme Helpers ---
         function getVar(name) {
@@ -7706,6 +7727,31 @@
                 
                 cpuDoughnut.update();
             }
+
+            if (dailySalesChart) {
+                dailySalesChart.options.scales.x.ticks.color = textColor;
+                dailySalesChart.options.scales.y.grid.color = gridColor;
+                dailySalesChart.options.scales.y.ticks.color = textColor;
+
+                dailySalesChart.options.plugins.tooltip.backgroundColor = tooltipBg;
+                dailySalesChart.options.plugins.tooltip.titleColor = tooltipText;
+                dailySalesChart.options.plugins.tooltip.bodyColor = tooltipText;
+                dailySalesChart.options.plugins.tooltip.borderColor = tooltipBorder;
+                dailySalesChart.options.plugins.tooltip.borderWidth = 1;
+
+                try {
+                    const ulColor = getVar('--chart-ul') || '#0984e3';
+                    const ulBg = getVar('--chart-ul-bg') || 'rgba(9,132,227,0.2)';
+                    if (dailySalesChart.data?.datasets?.[0]) {
+                        dailySalesChart.data.datasets[0].borderColor = ulColor;
+                        dailySalesChart.data.datasets[0].pointBackgroundColor = ulColor;
+                        dailySalesChart.data.datasets[0].pointBorderColor = ulColor;
+                        dailySalesChart.data.datasets[0].backgroundColor = ulBg;
+                    }
+                } catch (_) {}
+
+                dailySalesChart.update();
+            }
         }
 
         // Unique colors for each core
@@ -7757,6 +7803,8 @@
         function initCharts() {
             if (typeof Chart === 'undefined') {
                 console.warn("Chart.js not loaded.");
+                const dailyFallback = document.getElementById('daily-sales-fallback');
+                if (dailyFallback) dailyFallback.style.display = 'block';
                 return;
             }
             chartsEnabled = true;
@@ -7922,6 +7970,89 @@
                     }
                 }
             });
+
+            const ctxDaily = document.getElementById('dailySalesChart')?.getContext?.('2d');
+            if (ctxDaily) {
+                dailySalesChart = new Chart(ctxDaily, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Daily Sales',
+                            data: [],
+                            borderColor: getVar('--chart-ul') || '#0984e3',
+                            pointBackgroundColor: getVar('--chart-ul') || '#0984e3',
+                            pointBorderColor: getVar('--chart-ul') || '#0984e3',
+                            backgroundColor: getVar('--chart-ul-bg') || 'rgba(9,132,227,0.2)',
+                            fill: true,
+                            tension: 0.35,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: getVar('--chart-tooltip-bg'),
+                                titleColor: getVar('--chart-tooltip-text'),
+                                bodyColor: getVar('--chart-tooltip-text'),
+                                borderColor: getVar('--chart-tooltip-border'),
+                                borderWidth: 1,
+                                callbacks: {
+                                    title: (items) => {
+                                        const label = items?.[0]?.label || '';
+                                        const d = String(label).slice(0, 10);
+                                        const dt = new Date(`${d}T00:00:00`);
+                                        if (Number.isNaN(dt.getTime())) return d;
+                                        return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' });
+                                    },
+                                    label: (ctx) => {
+                                        const v = Number(ctx.parsed.y || 0);
+                                        return `₱${v.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { display: false },
+                                ticks: {
+                                    color: getVar('--chart-text'),
+                                    maxRotation: 0,
+                                    autoSkip: true,
+                                    maxTicksLimit: 10,
+                                    font: { size: 10 },
+                                    callback: (value, index) => {
+                                        const label = (typeof value === 'string')
+                                            ? value
+                                            : (dailySalesChart?.data?.labels?.[index] || '');
+                                        return formatDayLabel(label);
+                                    }
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: getVar('--chart-grid'), borderDash: [2, 3] },
+                                ticks: {
+                                    color: getVar('--chart-text'),
+                                    callback: (value) => `₱${value}`
+                                }
+                            }
+                        },
+                        animation: {
+                            duration: 250,
+                            easing: 'linear'
+                        }
+                    }
+                });
+            } else {
+                const dailyFallback = document.getElementById('daily-sales-fallback');
+                if (dailyFallback) dailyFallback.style.display = 'block';
+            }
         }
 
         // --- Core Logic ---
@@ -7969,7 +8100,10 @@
             icon.classList.add('spin');
             
             try {
-                if (currentView === 'dashboard') await loadDashboardData();
+                if (currentView === 'dashboard') {
+                    await loadDashboardData();
+                    await loadDailySalesChart(true);
+                }
                 else if (currentView === 'sales') await loadSalesData('daily'); // Default to daily for now
                 // Settings doesn't need refresh usually
             } catch (e) {
@@ -8246,6 +8380,8 @@
             if (view === 'dashboard') {
                 loadDashboardData();
                 IntervalManager.start('dashboard', loadDashboardData, 5000);
+                loadDailySalesChart(true);
+                IntervalManager.start('daily_sales_chart', () => loadDailySalesChart(false), 60000);
                 
                 // Bandwidth Chart (5s update)
                 updateBandwidthChart();
@@ -8510,6 +8646,39 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
             } catch(e) {
                 console.error("Dashboard Load Error:", e);
+            }
+        }
+
+        function formatDayLabel(d) {
+            if (!d) return '';
+            const dt = new Date(`${String(d).slice(0, 10)}T00:00:00`);
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const day = String(dt.getDate()).padStart(2, '0');
+            return `${m}/${day}`;
+        }
+
+        async function loadDailySalesChart(force = false) {
+            if (!chartsEnabled || !dailySalesChart) return;
+            if (document.hidden) return;
+
+            try {
+                const res = await fetch('/api/admin/dashboard/daily-sales?days=30', { credentials: 'include', cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                const series = Array.isArray(data?.series) ? data.series : [];
+
+                const sig = series.map(x => `${x?.date || ''}:${Number(x?.total) || 0}`).join('|');
+                if (!force && sig && sig === lastDailySalesSig) return;
+                lastDailySalesSig = sig;
+
+                const labels = series.map(x => String(x.date || '').slice(0, 10));
+                const values = series.map(x => Number(x.total) || 0);
+
+                dailySalesChart.data.labels = labels;
+                dailySalesChart.data.datasets[0].data = values;
+                dailySalesChart.update();
+            } catch (e) {
+                console.error('Daily sales chart load error:', e);
             }
         }
 

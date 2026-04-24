@@ -86,16 +86,7 @@
         }
 
         .portal-banner::after {
-            content: "";
-            position: absolute;
-            left: -1px;
-            right: -1px;
-            bottom: -1px;
-            height: 26px;
-            background: var(--white);
-            clip-path: polygon(0% 40%, 6% 55%, 12% 42%, 18% 60%, 24% 46%, 30% 62%, 36% 48%, 42% 63%, 48% 50%, 54% 65%, 60% 52%, 66% 64%, 72% 50%, 78% 62%, 84% 46%, 90% 60%, 96% 44%, 100% 58%, 100% 100%, 0% 100%);
-            pointer-events: none;
-            z-index: 2;
+            display: none;
         }
 
         .portal-banner-media {
@@ -356,8 +347,11 @@
             text-align: center;
             font-size: 1.15rem;
             font-weight: 700;
-            padding: 0;
+            padding: 0 12px;
             line-height: 1.1;
+            white-space: normal;
+            overflow: hidden;
+            word-break: break-word;
         }
 
         @keyframes heartbeat {

@@ -12,6 +12,7 @@ class NetworkService {
         this.interface = 'br0'; 
         this.wanInterface = 'eth0'; // Default fallback
         this.bridgeIp = '10.0.0.1'; // Default
+        this._internetCache = { at: 0, up: null };
     }
 
     async runCommand(command, silent = false) {
@@ -264,7 +265,21 @@ class NetworkService {
     async secureLanInterface(iface, portalIp) {
         console.log(`Securing Interface ${iface} with Portal IP ${portalIp}...`);
         const script = path.join(__dirname, '../scripts/secure_interface.sh');
-        await this.runCommand(`bash "${script}" ${iface} ${portalIp} 3000`);
+        let enableRedirect = 1;
+        try {
+            enableRedirect = (await this.getInternetUpCached()) ? 1 : 0;
+        } catch (_) {}
+        await this.runCommand(`bash "${script}" ${iface} ${portalIp} 3000 ${enableRedirect}`);
+    }
+
+    async getInternetUpCached(maxAgeMs = 30000) {
+        const now = Date.now();
+        if (this._internetCache && this._internetCache.up != null && (now - this._internetCache.at) < maxAgeMs) {
+            return !!this._internetCache.up;
+        }
+        const up = await this.checkInternetConnection();
+        this._internetCache = { at: now, up: !!up };
+        return !!up;
     }
 
     async initQos(iface) {

@@ -1,11 +1,12 @@
 #!/bin/bash
 # Secure a LAN Interface (VLAN or Bridge)
-# Usage: secure_interface.sh <iface> <portal_ip> <portal_port>
+# Usage: secure_interface.sh <iface> <portal_ip> <portal_port> [internet_up]
 # This script is IDEMPOTENT (safe to run multiple times)
 
 IFACE=$1
 PORTAL_IP=$2
 PORTAL_PORT=$3
+INTERNET_UP=$4
 
 if [ -z "$IFACE" ] || [ -z "$PORTAL_IP" ] || [ -z "$PORTAL_PORT" ]; then
     echo "Usage: $0 <iface> <portal_ip> <portal_port>"
@@ -25,6 +26,19 @@ ensure_rule() {
         # echo "Added rule: -t $table -A $chain $rule"
     fi
 }
+
+enable_redirect="auto"
+if [ "$INTERNET_UP" = "1" ]; then
+    enable_redirect="yes"
+elif [ "$INTERNET_UP" = "0" ]; then
+    enable_redirect="no"
+else
+    if ping -c 1 -W 1 8.8.8.8 >/dev/null 2>&1; then
+        enable_redirect="yes"
+    else
+        enable_redirect="no"
+    fi
+fi
 
 echo "Securing Interface: $IFACE"
 
@@ -51,7 +65,17 @@ ensure_rule nat PREROUTING -i $IFACE -p tcp --dport 53 -j DNAT --to-destination 
 
 # 3. NAT - HTTP Redirection (Captive Portal)
 # Redirect HTTP requests (TCP 80) from UNMARKED (unauthorized) packets to the local portal
-ensure_rule nat PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+if [ "$enable_redirect" = "yes" ]; then
+    ensure_rule nat PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+    ensure_rule nat PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+else
+    while iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; do
+        iptables -t nat -D PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null || break
+    done
+    while iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; do
+        iptables -t nat -D PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null || break
+    done
+fi
 
 # Redirect DIRECT requests to Portal IP
 ensure_rule nat PREROUTING -i $IFACE -d $PORTAL_IP -p tcp --dport 80 -j REDIRECT --to-port $PORTAL_PORT

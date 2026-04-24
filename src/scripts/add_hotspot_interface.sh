@@ -7,6 +7,7 @@
 IFACE=$1
 PORTAL_IP=$2
 CIDR=$3
+INTERNET_UP=$4
 PORTAL_PORT="3000"
 
 if [ -z "$IFACE" ] || [ -z "$PORTAL_IP" ]; then
@@ -20,6 +21,19 @@ if [ -z "$CIDR" ]; then
 fi
 
 echo "Configuring Hotspot rules for $IFACE ($PORTAL_IP/$CIDR)..."
+
+enable_redirect="auto"
+if [ "$INTERNET_UP" = "1" ]; then
+    enable_redirect="yes"
+elif [ "$INTERNET_UP" = "0" ]; then
+    enable_redirect="no"
+else
+    if ping -c 1 -W 1 8.8.8.8 >/dev/null 2>&1; then
+        enable_redirect="yes"
+    else
+        enable_redirect="no"
+    fi
+fi
 
 # Ensure IP forwarding is enabled (needed for NAT and captive portal flows)
 sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1 || true
@@ -94,9 +108,15 @@ fi
 
 # 3. HTTP Redirection (Captive Portal)
 # Redirect HTTP requests from unauthorized users (no mark 99) to Portal
-if ! iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
-    echo "Adding HTTP redirect rule for $IFACE..."
-    iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+if [ "$enable_redirect" = "yes" ]; then
+    if ! iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
+        echo "Adding HTTP redirect rule for $IFACE..."
+        iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+    fi
+else
+    while iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; do
+        iptables -t nat -D PREROUTING -i $IFACE -p tcp --dport 80 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null || break
+    done
 fi
 
 # Redirect explicit requests to the Gateway IP to Portal Port
@@ -106,9 +126,15 @@ fi
 
 # 3.1 HTTPS Redirection for captive portal detection
 # Many modern browsers/devices check HTTPS first - redirect to portal
-if ! iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
-    echo "Adding HTTPS redirect rule for $IFACE..."
-    iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+if [ "$enable_redirect" = "yes" ]; then
+    if ! iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; then
+        echo "Adding HTTPS redirect rule for $IFACE..."
+        iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT
+    fi
+else
+    while iptables -t nat -C PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null; do
+        iptables -t nat -D PREROUTING -i $IFACE -p tcp --dport 443 -m mark ! --mark 99 -j REDIRECT --to-port $PORTAL_PORT 2>/dev/null || break
+    done
 fi
 
 # 4. Input Access (Allow DNS and Portal)
@@ -143,7 +169,7 @@ iptables -I FORWARD $DROP_POS -i $IFACE -m mark ! --mark 99 -j DROP
 
 echo "Hotspot rules applied for $IFACE."
 echo "  - DNS interception: YES"
-echo "  - HTTP redirect: YES"
-echo "  - HTTPS redirect: YES"
+echo "  - HTTP redirect: $([ "$enable_redirect" = "yes" ] && echo YES || echo NO)"
+echo "  - HTTPS redirect: $([ "$enable_redirect" = "yes" ] && echo YES || echo NO)"
 echo "  - NAT/Masquerade: YES"
 echo "  - Walled Garden: YES"
