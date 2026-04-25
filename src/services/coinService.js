@@ -45,13 +45,15 @@ class CoinService extends EventEmitter {
         this.banTimer = null;
         this.activityStart = 0; // Track start of pulse activity
         
-        // Run cleanup script before initialization (Linux only)
-        if (process.platform !== 'win32') {
+        const gpioEnabled = !!configService.get('gpio_enabled', true);
+        const isRoot = (typeof process.getuid === 'function') ? (process.getuid() === 0) : false;
+
+        // Run cleanup script before initialization (Linux only; requires root; only when GPIO is enabled)
+        if (process.platform === 'linux' && gpioEnabled && isRoot) {
             try {
                 const scriptPath = path.join(__dirname, '../scripts/fix_gpio.sh');
                 console.log('CoinService: Running GPIO cleanup script...');
-                execSync(`chmod +x "${scriptPath}"`);
-                execSync(`"${scriptPath}"`);
+                execSync(`bash "${scriptPath}"`, { stdio: 'ignore' });
                 console.log('CoinService: GPIO cleanup complete.');
             } catch (err) {
                 console.error('CoinService: GPIO cleanup failed:', err.message);

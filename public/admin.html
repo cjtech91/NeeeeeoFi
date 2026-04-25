@@ -9551,9 +9551,10 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     return;
                 }
 
-                rows.forEach(r => {
+                const sortedRows = rows.slice().sort((a, b) => (Number(b?.overall_total ?? b?.total) || 0) - (Number(a?.overall_total ?? a?.total) || 0));
+                sortedRows.forEach(r => {
                     const tr = document.createElement('tr');
-                    const total = (Number(r.total) || 0).toFixed(2);
+                    const total = (Number(r.overall_total ?? r.total) || 0).toFixed(2);
                     const daily = (Number(r.daily) || 0).toFixed(2);
                     const pending = (Number(r.pending) || 0).toFixed(2);
                     tr.innerHTML = `

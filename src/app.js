@@ -2876,6 +2876,13 @@ app.get('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
         `).all();
         const totalMap = new Map(totalRows.map(r => [String(r.source), Number(r.total) || 0]));
 
+        const overallRows = db.prepare(`
+            SELECT COALESCE(source, 'hardware') AS source, SUM(amount) AS overall_total
+            FROM sales
+            GROUP BY COALESCE(source, 'hardware')
+        `).all();
+        const overallMap = new Map(overallRows.map(r => [String(r.source), Number(r.overall_total) || 0]));
+
         // Daily (Always Today)
         const todayRows = db.prepare(`
             SELECT COALESCE(source, 'hardware') AS source, SUM(amount) AS daily
@@ -2913,6 +2920,7 @@ app.get('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
             }
 
             const total = totalMap.get(source) || 0;
+            const overall_total = overallMap.get(source) || 0;
             const daily = dailyMap.get(source) || 0;
             const pendingRow = pendingStmt.get(source, lastOut, lastOut);
             const pending = (pendingRow && Number(pendingRow.pending)) || 0;
@@ -2924,7 +2932,7 @@ app.get('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
             const hasMetrics = total > 0 || daily > 0 || pending > 0;
 
             if (isRegistered || hasMetrics) {
-                result.push({ source, name, total, daily, pending });
+                result.push({ source, name, total, overall_total, daily, pending });
             }
         }
         
@@ -6131,21 +6139,32 @@ app.delete('/api/admin/devices/:id', isAuthenticated, async (req, res) => {
 server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
         console.log(`Port ${PORT} is already in use.`);
-        console.log('Trying to kill the existing process...');
+        console.log('Trying to free the port...');
         
-        // Try to kill the process on Linux/Unix
-        require('child_process').exec(`fuser -k ${PORT}/tcp`, (err) => {
-                    if (err) {
-                         console.log('Could not kill process automatically. Please run: killall node');
-                         process.exit(1);
-                    } else {
-                         console.log('Process killed. Retrying in 2 seconds...');
-                         setTimeout(() => {
-                             server.close();
-                             server.listen(PORT);
-                         }, 2000);
-                    }
-                });
+        if (process.platform !== 'linux') {
+            console.log('Could not free port automatically on this OS. Please stop the other process using the port and retry.');
+            process.exit(1);
+        }
+
+        const { exec } = require('child_process');
+        const cmd = `bash -lc "set -e; ` +
+            `(command -v fuser >/dev/null 2>&1 && fuser -k ${PORT}/tcp >/dev/null 2>&1 && exit 0) || true; ` +
+            `(command -v lsof >/dev/null 2>&1 && pids=\\$(lsof -ti tcp:${PORT} -sTCP:LISTEN 2>/dev/null || true) && [ -n \\\"\\$pids\\\" ] && kill -TERM \\$pids 2>/dev/null && exit 0) || true; ` +
+            `(command -v ss >/dev/null 2>&1 && pids=\\$(ss -ltnp 2>/dev/null | awk '/:${PORT} /{print \\$NF}' | sed -n 's/.*pid=\\([0-9]\\+\\).*/\\1/p' | sort -u | tr '\\n' ' ' ) && [ -n \\\"\\$pids\\\" ] && kill -TERM \\$pids 2>/dev/null && exit 0) || true; ` +
+            `exit 1\"`;
+
+        exec(cmd, (err) => {
+            if (err) {
+                console.log('Could not free port automatically. If using PM2, stop old instances (pm2 list / pm2 delete).');
+                process.exit(1);
+            } else {
+                console.log('Port freed. Retrying in 2 seconds...');
+                setTimeout(() => {
+                    try { server.close(); } catch (_) {}
+                    server.listen(PORT);
+                }, 2000);
+            }
+        });
     } else {
         console.error('Server Error:', e);
     }
