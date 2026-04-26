@@ -13842,7 +13842,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                             <td style="padding:10px;">${s.subnet}</td>
                             <td style="padding:10px;">${s.pool_start} - ${s.pool_end}</td>
                             <td style="padding:10px;">${s.netmask}</td>
-                            <td style="padding:10px;">${s.lease || '12h'}</td>
+                            <td style="padding:10px;">${s.lease || '1d'}</td>
                             <td style="padding:10px;">${dhcp.dns1}, ${dhcp.dns2}</td>
                             <td style="padding:10px;">
                                 <button class="btn btn-sm btn-danger icon-only" onclick="removeDhcpServer('${s.interface}')" title="Delete">

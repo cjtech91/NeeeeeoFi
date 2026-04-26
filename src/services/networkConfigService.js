@@ -600,7 +600,9 @@ class NetworkConfigService {
             content += `\n# DHCP for ${s.interface}\n`;
             content += `interface=${s.interface}\n`;
             // Use set:<tag> to identify clients on this subnet for specific options
-            content += `dhcp-range=set:${tag},${s.pool_start},${s.pool_end},${s.netmask},12h\n`;
+            const leaseRaw = (s && s.lease != null) ? String(s.lease).trim() : '';
+            const lease = (/^\d+[smhdw]$/i.test(leaseRaw) ? leaseRaw : '1d');
+            content += `dhcp-range=set:${tag},${s.pool_start},${s.pool_end},${s.netmask},${lease}\n`;
             content += `dhcp-option=tag:${tag},3,${s.gateway}\n`; // Option 3: Router
             content += `dhcp-option=tag:${tag},114,http://${s.gateway}/portal\n`; // Option 114: Captive Portal URL
             const dns1 = (s.gateway || dhcp.dns1 || '').trim();

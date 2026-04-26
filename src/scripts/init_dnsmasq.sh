@@ -6,7 +6,7 @@ PORTAL_IP="${1:-10.0.0.1}"
 
 # Calculate DHCP Range based on IP (Assumes /24)
 PREFIX=$(echo $PORTAL_IP | cut -d'.' -f1-3)
-DHCP_RANGE="${PREFIX}.10,${PREFIX}.250,12h"
+DHCP_RANGE="${PREFIX}.10,${PREFIX}.250,1d"
 
 # 1. Ensure Bridge IP is set (Redundant safety check)
 # Wait for interface to be ready (Max 10s)
