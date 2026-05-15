@@ -35,9 +35,64 @@ class MonitoringService {
     // 0. System Usage (CPU %)
     async getCpuUsage() {
         return new Promise(resolve => {
+            const clampPct = (n) => Math.max(0, Math.min(100, Number(n) || 0));
+
+            const fromProcStat = () => {
+                if (process.platform !== 'linux') return null;
+                if (!fs.existsSync('/proc/stat')) return null;
+                const content = fs.readFileSync('/proc/stat', 'utf8');
+                const lines = content.split('\n');
+
+                const parseCpuLine = (line) => {
+                    const parts = line.trim().split(/\s+/);
+                    if (parts.length < 5) return null;
+                    const vals = parts.slice(1).map(v => Number(v) || 0);
+                    const idle = (vals[3] || 0) + (vals[4] || 0);
+                    const total = vals.slice(0, 8).reduce((a, b) => a + b, 0) || vals.reduce((a, b) => a + b, 0);
+                    return { total, idle };
+                };
+
+                const totalLine = lines.find(l => l.startsWith('cpu '));
+                if (!totalLine) return null;
+                const totalNow = parseCpuLine(totalLine);
+                if (!totalNow) return null;
+
+                const coreNow = [];
+                for (const line of lines) {
+                    if (!/^cpu\d+\s/.test(line)) continue;
+                    const row = parseCpuLine(line);
+                    if (row) coreNow.push(row);
+                }
+
+                let avg = 0;
+                const prev = this._procCpuPrev;
+                if (prev && prev.total) {
+                    const dTotal = totalNow.total - prev.total.total;
+                    const dIdle = totalNow.idle - prev.total.idle;
+                    if (dTotal > 0) avg = clampPct(100 - (dIdle / dTotal) * 100);
+                }
+
+                const cores = [];
+                for (let i = 0; i < coreNow.length; i++) {
+                    let p = 0;
+                    if (prev && Array.isArray(prev.cores) && prev.cores[i]) {
+                        const dTotal = coreNow[i].total - prev.cores[i].total;
+                        const dIdle = coreNow[i].idle - prev.cores[i].idle;
+                        if (dTotal > 0) p = clampPct(100 - (dIdle / dTotal) * 100);
+                    }
+                    cores.push(Number(p.toFixed(1)));
+                }
+
+                this._procCpuPrev = { total: totalNow, cores: coreNow };
+                return { avg: Number(avg.toFixed(1)), cores };
+            };
+
+            const proc = (() => {
+                try { return fromProcStat(); } catch (_) { return null; }
+            })();
+            if (proc) return resolve(proc);
+
             const cpus = os.cpus();
-            
-            // Calculate Global Usage
             let user = 0, nice = 0, sys = 0, idle = 0, irq = 0, total = 0;
             for (let cpu of cpus) {
                 user += cpu.times.user;
@@ -47,18 +102,17 @@ class MonitoringService {
                 irq += cpu.times.irq;
             }
             total = user + nice + sys + idle + irq;
-            
+
             let globalUsage = 0;
             if (this.lastCpuInfo) {
                 const totalDiff = total - this.lastCpuInfo.total;
                 const idleDiff = idle - this.lastCpuInfo.idle;
                 if (totalDiff > 0) {
-                    globalUsage = 100 - ((idleDiff / totalDiff) * 100);
+                    globalUsage = clampPct(100 - ((idleDiff / totalDiff) * 100));
                 }
             }
             this.lastCpuInfo = { total, idle };
 
-            // Calculate Per-Core Usage
             const coresUsage = [];
             if (!this.lastCoresInfo) this.lastCoresInfo = [];
 
@@ -66,24 +120,21 @@ class MonitoringService {
                 const t = cpu.times;
                 const coreTotal = t.user + t.nice + t.sys + t.idle + t.irq;
                 const coreIdle = t.idle;
-                
+
                 let corePercent = 0;
                 if (this.lastCoresInfo[i]) {
                     const dTotal = coreTotal - this.lastCoresInfo[i].total;
                     const dIdle = coreIdle - this.lastCoresInfo[i].idle;
                     if (dTotal > 0) {
-                        corePercent = 100 - ((dIdle / dTotal) * 100);
+                        corePercent = clampPct(100 - ((dIdle / dTotal) * 100));
                     }
                 }
-                
+
                 this.lastCoresInfo[i] = { total: coreTotal, idle: coreIdle };
-                coresUsage.push(parseFloat(corePercent.toFixed(1)));
+                coresUsage.push(Number(corePercent.toFixed(1)));
             });
 
-            resolve({
-                avg: parseFloat(globalUsage.toFixed(1)),
-                cores: coresUsage
-            });
+            resolve({ avg: Number(globalUsage.toFixed(1)), cores: coresUsage });
         });
     }
 
@@ -533,6 +584,42 @@ class MonitoringService {
                 });
             }
         });
+    }
+
+    async getOsInfo() {
+        try {
+            if (process.platform === 'linux') {
+                try {
+                    if (fs.existsSync('/etc/os-release')) {
+                        const raw = fs.readFileSync('/etc/os-release', 'utf8');
+                        const lines = raw.split('\n');
+                        const map = {};
+                        for (const line of lines) {
+                            const l = String(line || '').trim();
+                            if (!l || l.startsWith('#')) continue;
+                            const idx = l.indexOf('=');
+                            if (idx <= 0) continue;
+                            const k = l.slice(0, idx).trim();
+                            let v = l.slice(idx + 1).trim();
+                            v = v.replace(/^"/, '').replace(/"$/, '');
+                            if (k) map[k] = v;
+                        }
+                        const pretty = (map.PRETTY_NAME || map.NAME || '').trim();
+                        const ver = (map.VERSION || map.VERSION_ID || '').trim();
+                        const result = pretty || (ver ? `${map.NAME} ${ver}` : map.NAME) || '';
+                        if (result) return result;
+                    }
+                } catch (_) {}
+            }
+
+            const type = os.type();
+            const rel = os.release();
+            const plat = os.platform();
+            const arch = os.arch();
+            return `${type} ${rel} (${plat}/${arch})`;
+        } catch (e) {
+            return '';
+        }
     }
     // 5. System Stats (CPU, Memory, Uptime)
     async getSystemStats() {

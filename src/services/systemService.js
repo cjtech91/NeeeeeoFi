@@ -31,26 +31,80 @@ class SystemService {
     async factoryReset() {
         try {
             logService.critical('SYSTEM', 'Factory Reset initiated - Clearing data...');
-            // Clear specific tables
-            db.prepare('DELETE FROM sales').run();
-            db.prepare('DELETE FROM vouchers').run();
-            db.prepare('DELETE FROM users').run();
-            db.prepare('DELETE FROM pppoe_users').run();
-            db.prepare('DELETE FROM chat_messages').run();
-            db.prepare('DELETE FROM system_logs').run();
-            // Clear other logs
-            db.prepare('DELETE FROM pppoe_sales').run();
-            db.prepare('DELETE FROM free_time_claims').run();
-            db.prepare('DELETE FROM coins_out_logs').run();
-            
-            // Reset admin accounts to default: superadmin/superadmin and admin/admin
-            db.prepare('DELETE FROM admins').run();
-            const superHash = bcrypt.hashSync('Neofi2026', 10);
-            const adminHash = bcrypt.hashSync('admin', 10);
-            const insert = db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, ?)');
-            insert.run('superadmin', superHash, 'What is the name of your first pet?', 'admin', 'super_admin', 1);
-            insert.run('admin', adminHash, 'What is the name of your first pet?', 'admin', 'admin', 0);
-            
+
+            const preservedSettings = (() => {
+                try {
+                    const rows = db
+                        .prepare(
+                            `SELECT key, value, type, category, updated_at
+                             FROM settings
+                             WHERE key LIKE 'license_%'
+                                OR category = 'license'
+                                OR key = 'last_license_key'`
+                        )
+                        .all();
+                    return Array.isArray(rows) ? rows : [];
+                } catch (_) {
+                    return [];
+                }
+            })();
+
+            const tx = db.transaction(() => {
+                try {
+                    db.exec('PRAGMA foreign_keys = OFF');
+                } catch (_) {}
+
+                const tables = db
+                    .prepare(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                    )
+                    .all()
+                    .map(r => r.name)
+                    .filter(Boolean);
+
+                for (const table of tables) {
+                    try {
+                        if (table === 'license_activations') continue;
+                        db.prepare(`DELETE FROM ${table}`).run();
+                    } catch (_) {}
+                }
+
+                try {
+                    db.exec('DELETE FROM sqlite_sequence');
+                } catch (_) {}
+
+                if (preservedSettings.length) {
+                    const stmt = db.prepare(
+                        'INSERT OR REPLACE INTO settings (key, value, type, category, updated_at) VALUES (?, ?, ?, ?, ?)'
+                    );
+                    for (const s of preservedSettings) {
+                        try {
+                            stmt.run(
+                                String(s.key),
+                                s.value == null ? null : String(s.value),
+                                s.type == null ? null : String(s.type),
+                                s.category == null ? null : String(s.category),
+                                s.updated_at == null ? null : String(s.updated_at)
+                            );
+                        } catch (_) {}
+                    }
+                }
+
+                const superHash = bcrypt.hashSync('Neofi2026', 10);
+                const adminHash = bcrypt.hashSync('admin', 10);
+                const insert = db.prepare(
+                    'INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, ?)'
+                );
+                insert.run('superadmin', superHash, 'What is the name of your first pet?', 'admin', 'super_admin', 1);
+                insert.run('admin', adminHash, 'What is the name of your first pet?', 'admin', 'admin', 0);
+
+                try {
+                    db.exec('PRAGMA foreign_keys = ON');
+                } catch (_) {}
+            });
+
+            tx();
+
             logService.info('SYSTEM', 'Factory Reset completed successfully');
             return true;
         } catch (e) {

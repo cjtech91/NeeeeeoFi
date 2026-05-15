@@ -16,6 +16,26 @@ class WifiService {
         };
     }
 
+    async resolveWifiInterface(preferred) {
+        const requested = String(preferred || '').trim();
+        if (process.platform === 'win32') return requested || 'wlan0';
+        const exists = (ifn) => {
+            const n = String(ifn || '').trim();
+            if (!n) return false;
+            return fs.existsSync(`/sys/class/net/${n}`);
+        };
+        if (requested && exists(requested)) return requested;
+
+        try {
+            const out = await this.execPromise('ls /sys/class/net/wl* 2>/dev/null | head -n 1');
+            const cand = String(out || '').trim();
+            if (cand && exists(cand)) return cand;
+        } catch (e) {}
+
+        if (requested) return requested;
+        return 'wlan0';
+    }
+
     async getConfig() {
         try {
             // Check if hostapd is running/enabled
@@ -65,9 +85,9 @@ class WifiService {
 
     async saveConfig(newConfig) {
         try {
+            const resolvedIface = await this.resolveWifiInterface(newConfig.interface || this.config.interface || 'wlan0');
             const config = {
-                interface: newConfig.interface || 'wlan0',
-                bridge: 'br0',
+                interface: resolvedIface,
                 driver: 'nl80211',
                 country_code: 'PH',
                 ssid: newConfig.ssid || 'NeoFi_Built-In_WiFi',
@@ -107,33 +127,45 @@ class WifiService {
             }
             // 'open' mode uses default auth_algs=1 and no wpa settings
 
-            let fileContent = '';
-            for (const [key, value] of Object.entries(config)) {
-                fileContent += `${key}=${value}\n`;
-            }
+            const canBridge = async (iface, bridge) => {
+                if (process.platform === 'win32') return false;
+                if (!iface || !bridge) return false;
+                if (!fs.existsSync(`/sys/class/net/${bridge}`)) return false;
+                try {
+                    await this.execPromise(`ip link set ${iface} down || true`);
+                    await this.execPromise(`ip link set ${iface} nomaster || true`);
+                    await this.execPromise(`ip link set ${iface} master ${bridge}`);
+                    await this.execPromise(`ip link set ${iface} nomaster || true`);
+                    return true;
+                } catch (e) {
+                    try { await this.execPromise(`ip link set ${iface} nomaster || true`); } catch (_) {}
+                    return false;
+                }
+            };
+
+            const writeHostapd = async (bridgeEnabled) => {
+                const bridge = 'br0';
+                const entries = { ...config };
+                if (bridgeEnabled) entries.bridge = bridge;
+                let fileContent = '';
+                for (const [key, value] of Object.entries(entries)) {
+                    fileContent += `${key}=${value}\n`;
+                }
+                if (process.platform !== 'win32') {
+                    const configDir = path.dirname(HOSTAPD_CONF);
+                    if (!fs.existsSync(configDir)) {
+                        fs.mkdirSync(configDir, { recursive: true });
+                    }
+                    fs.accessSync(configDir, fs.constants.W_OK);
+                    fs.writeFileSync(HOSTAPD_CONF, fileContent);
+                }
+                return { bridgeEnabled, bridge };
+            };
 
             // Write config file
             if (process.platform !== 'win32') {
-                const configDir = path.dirname(HOSTAPD_CONF);
-                if (!fs.existsSync(configDir)) {
-                    try {
-                        console.log(`Creating directory: ${configDir}`);
-                        fs.mkdirSync(configDir, { recursive: true });
-                    } catch (err) {
-                        console.error(`Failed to create directory ${configDir}:`, err);
-                        throw new Error(`Failed to create directory ${configDir}: ${err.message}`);
-                    }
-                }
-                
-                // Double check if directory exists and is writable
-                try {
-                    fs.accessSync(configDir, fs.constants.W_OK);
-                } catch (err) {
-                    console.error(`Directory ${configDir} is not writable:`, err);
-                    throw new Error(`Directory ${configDir} is not writable: ${err.message}`);
-                }
-
-                fs.writeFileSync(HOSTAPD_CONF, fileContent);
+                const bridgeOk = await canBridge(config.interface, 'br0');
+                await writeHostapd(bridgeOk);
             } else {
                 console.log('Windows: Skipping hostapd.conf write');
             }
@@ -143,18 +175,37 @@ class WifiService {
                 // Pre-flight check: Stop wpa_supplicant on this interface to avoid conflict
                 // And ensure RFKill is unblocked
                 await this.execPromise(`rfkill unblock wifi || true`);
-                await this.execPromise(`killall wpa_supplicant || true`);
+                await this.execPromise(`pkill -f "wpa_supplicant.*-i${config.interface}" || true`);
+                await this.execPromise(`pkill -f "wpa_supplicant.*-i\\s+${config.interface}" || true`);
 
                 // Ensure interface is free from bridge and down (Clean State)
                 await this.execPromise(`ip link set ${config.interface} nomaster || true`);
                 await this.execPromise(`ip link set ${config.interface} down || true`);
+                if (await this.execPromise('which nmcli >/dev/null 2>&1; echo $?').then(x => String(x || '').trim() === '0').catch(() => false)) {
+                    await this.execPromise(`nmcli dev set ${config.interface} managed no || true`);
+                }
                 
                 await this.execPromise('systemctl unmask hostapd');
                 await this.execPromise('systemctl enable hostapd');
                 
                 // Stop first to ensure clean state
                 await this.execPromise('systemctl stop hostapd || true');
-                await this.execPromise('systemctl start hostapd');
+                try {
+                    await this.execPromise('systemctl start hostapd');
+                } catch (e) {
+                    try {
+                        await writeHostapd(false);
+                        await this.execPromise('systemctl stop hostapd || true');
+                        await this.execPromise('systemctl start hostapd');
+                    } catch (e2) {
+                        let extra = '';
+                        try {
+                            extra = await this.execPromise('systemctl status hostapd --no-pager -n 80 || true');
+                        } catch (_) {}
+                        const msg = (e2 && e2.message) ? e2.message : (e && e.message) ? e.message : 'hostapd start failed';
+                        throw new Error(`${msg}${extra ? `\n${extra}` : ''}`);
+                    }
+                }
             } else {
                 await this.execPromise('systemctl stop hostapd');
                 await this.execPromise('systemctl disable hostapd');

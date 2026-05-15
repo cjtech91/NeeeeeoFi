@@ -21,6 +21,61 @@ function generateUniqueUserCode() {
     }
 }
 
+function asPositiveIntOrNull(v) {
+    if (v == null) return null;
+    if (typeof v === 'string' && v.trim() === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    const i = Math.trunc(n);
+    return i > 0 ? i : null;
+}
+
+function resolveRateSpeeds({ durationMinutes, price }) {
+    const mins = asPositiveIntOrNull(durationMinutes);
+    const amt = asPositiveIntOrNull(price);
+
+    let row = null;
+    if (amt != null && mins != null) {
+        row = db.prepare(`
+            SELECT upload_speed, download_speed
+            FROM rates
+            WHERE amount = ? AND minutes = ?
+            ORDER BY id DESC
+            LIMIT 1
+        `).get(amt, mins);
+    }
+    if (!row && amt != null) {
+        row = db.prepare(`
+            SELECT upload_speed, download_speed
+            FROM rates
+            WHERE amount = ?
+            ORDER BY minutes DESC, id DESC
+            LIMIT 1
+        `).get(amt);
+    }
+    if (!row && mins != null) {
+        row = db.prepare(`
+            SELECT upload_speed, download_speed
+            FROM rates
+            WHERE minutes = ?
+            ORDER BY amount DESC, id DESC
+            LIMIT 1
+        `).get(mins);
+    }
+    if (!row && mins != null) {
+        row = db.prepare(`
+            SELECT upload_speed, download_speed
+            FROM rates
+            ORDER BY ABS(minutes - ?) ASC, amount DESC, id DESC
+            LIMIT 1
+        `).get(mins);
+    }
+
+    const dl = row ? asPositiveIntOrNull(row.download_speed) : null;
+    const ul = row ? asPositiveIntOrNull(row.upload_speed) : null;
+    return { download_speed: dl, upload_speed: ul };
+}
+
 class VoucherService {
     
     /**
@@ -43,8 +98,8 @@ class VoucherService {
             duration = 60,
             plan_name = 'Standard',
             price = 0,
-            download_speed = 5120, // Default 5Mbps
-            upload_speed = 1024,   // Default 1Mbps
+            download_speed,
+            upload_speed,
             is_random = true,
             prefix = '',
             length = 6,
@@ -56,6 +111,12 @@ class VoucherService {
         const shouldCreateBatch = count > threshold;
         const batchId = shouldCreateBatch ? (options.batch_id || `B${crypto.randomBytes(8).toString('hex').toUpperCase()}`) : null;
         const durationSeconds = duration * 60;
+
+        const manualDl = asPositiveIntOrNull(download_speed);
+        const manualUl = asPositiveIntOrNull(upload_speed);
+        const resolved = resolveRateSpeeds({ durationMinutes: duration, price });
+        const finalDl = manualDl != null ? manualDl : (resolved.download_speed != null ? resolved.download_speed : 5120);
+        const finalUl = manualUl != null ? manualUl : (resolved.upload_speed != null ? resolved.upload_speed : 1024);
         
         const insert = db.prepare(`
             INSERT INTO vouchers 
@@ -84,7 +145,7 @@ class VoucherService {
                     }
                 }
                 
-                insert.run(code, durationSeconds, plan_name, price, download_speed, upload_speed, batchId);
+                insert.run(code, durationSeconds, plan_name, price, finalDl, finalUl, batchId);
                 vouchers.push(code);
             }
         });
@@ -114,6 +175,13 @@ class VoucherService {
         if (ipAddress) {
              iface = await networkService.getInterfaceForIp(ipAddress);
         }
+
+        const voucherDl = asPositiveIntOrNull(voucher.download_speed);
+        const voucherUl = asPositiveIntOrNull(voucher.upload_speed);
+        const durMins = Math.max(1, Math.round((Number(voucher.duration) || 0) / 60));
+        const resolved = resolveRateSpeeds({ durationMinutes: durMins, price: voucher.price });
+        const finalDl = voucherDl != null ? voucherDl : (resolved.download_speed != null ? resolved.download_speed : null);
+        const finalUl = voucherUl != null ? voucherUl : (resolved.upload_speed != null ? resolved.upload_speed : null);
 
         const transaction = db.transaction(() => {
             // Create user if not exists
@@ -157,7 +225,7 @@ class VoucherService {
                 last_traffic_at = CURRENT_TIMESTAMP,
                 interface = COALESCE(?, interface)
                 WHERE id = ?
-            `).run(voucher.duration, voucher.duration, voucher.upload_speed, voucher.download_speed, newCode, newCode, clientId, iface, user.id);
+            `).run(voucher.duration, voucher.duration, finalUl, finalDl, newCode, newCode, clientId, iface, user.id);
             
             // Apply speed limit
             const bandwidthService = require('./bandwidthService'); // Lazy load to avoid circular dep
@@ -168,8 +236,8 @@ class VoucherService {
                 // We stored 'iface' above if we had 'ipAddress'.
                 
                 bandwidthService.setLimit(targetIp, 
-                    voucher.download_speed || user.download_speed, 
-                    voucher.upload_speed || user.upload_speed
+                    (finalDl != null ? finalDl : user.download_speed), 
+                    (finalUl != null ? finalUl : user.upload_speed)
                 );
             }
         });
@@ -181,8 +249,8 @@ class VoucherService {
         return { 
             success: true, 
             duration: voucher.duration,
-            download_speed: voucher.download_speed || 5120,
-            upload_speed: voucher.upload_speed || 1024
+            download_speed: (finalDl != null ? finalDl : 5120),
+            upload_speed: (finalUl != null ? finalUl : 1024)
         };
     }
 }

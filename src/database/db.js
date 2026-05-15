@@ -23,6 +23,7 @@ const initDb = () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       session_code TEXT,
+      validity_expiry DATETIME,
       idle_timeout INTEGER DEFAULT 120, -- in seconds
       last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -99,6 +100,10 @@ const initDb = () => {
     // Check and add session_expiry
     if (!columns.some(col => col.name === 'session_expiry')) {
         db.exec("ALTER TABLE users ADD COLUMN session_expiry DATETIME");
+    }
+
+    if (!columns.some(col => col.name === 'validity_expiry')) {
+        db.exec("ALTER TABLE users ADD COLUMN validity_expiry DATETIME");
     }
 
     // Check and add keepalive_timeout
@@ -270,6 +275,120 @@ const initDb = () => {
     console.error('Migration error (pppoe_users stats):', e);
   }
 
+  try {
+    const pppoeCols = db.pragma('table_info(pppoe_users)');
+    const has = (col) => pppoeCols.some(c => c.name === col);
+    if (!has('address')) db.exec("ALTER TABLE pppoe_users ADD COLUMN address TEXT");
+    if (!has('latitude')) db.exec("ALTER TABLE pppoe_users ADD COLUMN latitude REAL");
+    if (!has('longitude')) db.exec("ALTER TABLE pppoe_users ADD COLUMN longitude REAL");
+    if (!has('nap_id')) db.exec("ALTER TABLE pppoe_users ADD COLUMN nap_id INTEGER");
+    if (!has('plc_port')) db.exec("ALTER TABLE pppoe_users ADD COLUMN plc_port INTEGER");
+  } catch (e) {
+    console.error('Migration error (pppoe_users location):', e);
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS olts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      code TEXT UNIQUE,
+      server_id INTEGER,
+      pon_ports INTEGER,
+      latitude REAL,
+      longitude REAL,
+      ip_address TEXT,
+      status TEXT DEFAULT 'active',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(server_id) REFERENCES topology_servers(id)
+    )
+  `);
+
+  try {
+    const oltCols = db.pragma('table_info(olts)');
+    if (!oltCols.some(col => col.name === 'pon_ports')) {
+      db.exec("ALTER TABLE olts ADD COLUMN pon_ports INTEGER");
+    }
+    if (!oltCols.some(col => col.name === 'server_id')) {
+      db.exec("ALTER TABLE olts ADD COLUMN server_id INTEGER");
+    }
+  } catch (e) {
+    console.error('Migration error (olts pon_ports):', e);
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS topology_servers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      code TEXT UNIQUE,
+      latitude REAL,
+      longitude REAL,
+      status TEXT DEFAULT 'active',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  try {
+    const c = db.prepare('SELECT COUNT(*) AS c FROM topology_servers').get();
+    if ((c?.c || 0) === 0) {
+      const rows = db.prepare(`
+        SELECT key, value FROM settings
+        WHERE key IN ('topology_server_name', 'topology_server_latitude', 'topology_server_longitude', 'topology_server_status')
+      `).all();
+      const m = {};
+      for (const r of rows) m[r.key] = r.value;
+      const name = String(m.topology_server_name || '').trim() || 'Server';
+      const status = String(m.topology_server_status || '').trim() || 'active';
+      const lat = Number(m.topology_server_latitude);
+      const lng = Number(m.topology_server_longitude);
+      const latitude = Number.isFinite(lat) ? lat : null;
+      const longitude = Number.isFinite(lng) ? lng : null;
+      if (latitude != null || longitude != null || name !== 'Server' || status !== 'active') {
+        db.prepare(`
+          INSERT INTO topology_servers (name, code, latitude, longitude, status)
+          VALUES (?, NULL, ?, ?, ?)
+        `).run(name, latitude, longitude, status);
+      }
+    }
+  } catch (e) {
+    console.error('Migration error (topology_servers seed):', e);
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS topology_routes (
+      link_key TEXT PRIMARY KEY,
+      points_json TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS naps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nap_code TEXT UNIQUE NOT NULL,
+      name TEXT,
+      olt_id INTEGER,
+      parent_nap_id INTEGER,
+      pon_port INTEGER,
+      splitter_ratio TEXT,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      address TEXT,
+      status TEXT DEFAULT 'active',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(olt_id) REFERENCES olts(id),
+      FOREIGN KEY(parent_nap_id) REFERENCES naps(id)
+    )
+  `);
+
+  try {
+    const napCols = db.pragma('table_info(naps)');
+    if (!napCols.some(col => col.name === 'parent_nap_id')) {
+      db.exec("ALTER TABLE naps ADD COLUMN parent_nap_id INTEGER");
+    }
+  } catch (e) {
+    console.error('Migration error (naps parent_nap_id):', e);
+  }
+
   // Table for Firewall / AdBlock Rules
   db.exec(`
     CREATE TABLE IF NOT EXISTS firewall_rules (
@@ -349,16 +468,8 @@ const initDb = () => {
 
       // Ensure there is a single super admin account "superadmin"
       const existingSuper = db.prepare('SELECT * FROM admins WHERE username = ?').get('superadmin');
-      const superHash = bcrypt.hashSync('Neofi2026', 10);
-      if (existingSuper) {
-          db.prepare(`
-            UPDATE admins
-            SET password_hash = ?, role = 'super_admin', is_super_admin = 1,
-                security_question = COALESCE(security_question, ?),
-                security_answer = COALESCE(security_answer, ?)
-            WHERE username = 'superadmin'
-          `).run(superHash, petQ, 'admin');
-      } else {
+      if (!existingSuper) {
+          const superHash = bcrypt.hashSync('Neofi2026', 10);
           const primary = db.prepare('SELECT * FROM admins WHERE id = 1').get();
           if (primary) {
               db.prepare(`
@@ -376,18 +487,10 @@ const initDb = () => {
 
       // Ensure there is a normal admin account "admin"
       const existingAdmin = db.prepare('SELECT * FROM admins WHERE username = ?').get('admin');
-      const adminHash = bcrypt.hashSync('admin', 10);
       if (!existingAdmin) {
+          const adminHash = bcrypt.hashSync('admin', 10);
           db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, 0)')
             .run('admin', adminHash, petQ, 'admin', 'admin');
-      } else {
-          db.prepare(`
-            UPDATE admins
-            SET password_hash = ?, role = 'admin', is_super_admin = 0,
-                security_question = COALESCE(security_question, ?),
-                security_answer = COALESCE(security_answer, ?)
-            WHERE username = 'admin'
-          `).run(adminHash, petQ, 'admin');
       }
   }
 
@@ -419,11 +522,24 @@ const initDb = () => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       amount INTEGER NOT NULL,
       minutes INTEGER NOT NULL,
+      validity_hours INTEGER DEFAULT 0,
       upload_speed INTEGER DEFAULT 5120,
       download_speed INTEGER DEFAULT 5120,
       is_pausable INTEGER DEFAULT 1
     )
   `);
+
+  try {
+    const info = db.prepare('PRAGMA table_info(rates)').all();
+    const hasValidity = info.some(col => col.name === 'validity_hours');
+    if (!hasValidity) {
+      console.log('Migrating: Adding validity_hours to rates...');
+      db.prepare('ALTER TABLE rates ADD COLUMN validity_hours INTEGER DEFAULT 0').run();
+      db.prepare('UPDATE rates SET validity_hours = 0 WHERE validity_hours IS NULL').run();
+    }
+  } catch (e) {
+    console.error('Migration error (rates validity_hours):', e);
+  }
 
   // Table for Point Rates (Redemption)
   db.exec(`
@@ -579,6 +695,10 @@ const initDb = () => {
     if (!has('license_key')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN license_key TEXT").run();
     if (!has('license_activated_at')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN license_activated_at DATETIME").run();
     if (!has('trial_end_ts')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN trial_end_ts INTEGER").run();
+    if (!has('latitude')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN latitude REAL").run();
+    if (!has('longitude')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN longitude REAL").run();
+    if (!has('nap_id')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN nap_id INTEGER").run();
+    if (!has('plc_port')) db.prepare("ALTER TABLE sub_vendo_devices ADD COLUMN plc_port INTEGER").run();
   } catch (e) {
     console.error('Migration error (sub_vendo_devices):', e);
   }
@@ -655,9 +775,9 @@ const initDb = () => {
   // Seed default rates
   const ratesCount = db.prepare('SELECT count(*) as count FROM rates').get().count;
   if (ratesCount === 0) {
-      db.prepare('INSERT INTO rates (amount, minutes, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?)').run(1, 15, 5120, 5120, 1);
-      db.prepare('INSERT INTO rates (amount, minutes, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?)').run(5, 120, 5120, 5120, 1);
-      db.prepare('INSERT INTO rates (amount, minutes, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?)').run(10, 300, 5120, 5120, 1);
+      db.prepare('INSERT INTO rates (amount, minutes, validity_hours, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?, ?)').run(1, 15, 0, 5120, 5120, 1);
+      db.prepare('INSERT INTO rates (amount, minutes, validity_hours, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?, ?)').run(5, 120, 0, 5120, 5120, 1);
+      db.prepare('INSERT INTO rates (amount, minutes, validity_hours, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?, ?)').run(10, 300, 0, 5120, 5120, 1);
   }
 
   // Seed default settings if empty

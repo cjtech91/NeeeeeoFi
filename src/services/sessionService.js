@@ -58,6 +58,9 @@ class SessionService extends EventEmitter {
             try { await this.checkSessionTimeout(); } 
             catch (e) { console.error("[Session] checkSessionTimeout failed:", e); }
 
+            try { await this.checkValidityExpiry(); }
+            catch (e) { console.error("[Session] checkValidityExpiry failed:", e); }
+
             try { await this.syncFirewall(activeMacs); } 
             catch (e) { console.error("[Session] syncFirewall failed:", e); }
         };
@@ -388,6 +391,34 @@ class SessionService extends EventEmitter {
             }
         } catch (e) {
             console.error("[Session] Error checking session timeouts:", e);
+        }
+    }
+
+    async checkValidityExpiry() {
+        try {
+            const expiredUsers = db.prepare(`
+                SELECT id, mac_address, ip_address
+                FROM users
+                WHERE validity_expiry IS NOT NULL
+                  AND validity_expiry < CURRENT_TIMESTAMP
+                  AND (time_remaining > 0 OR is_connected = 1)
+            `).all();
+
+            if (expiredUsers.length > 0) {
+                const networkService = require('./networkService');
+                for (const user of expiredUsers) {
+                    console.log(`[Session] User ${user.mac_address} validity expired. Expiring remaining time.`);
+                    db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0, is_paused = 0, validity_expiry = NULL WHERE id = ?').run(user.id);
+                    await networkService.blockUser(user.mac_address, user.ip_address);
+                    if (user.ip_address) {
+                        if (bandwidthService && bandwidthService.removeLimit) {
+                            await bandwidthService.removeLimit(user.ip_address);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("[Session] Error checking validity expiry:", e);
         }
     }
 

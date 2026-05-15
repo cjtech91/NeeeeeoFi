@@ -76,17 +76,23 @@ class NetworkService {
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            // 3. Fallback: Check for any interface with a non-local IP (likely upstream)
-            const links = await this.runCommand('ip -4 addr show');
+            // 3. Fallback: Check for any WiFi interface with a non-local IP (likely upstream)
+            const links = await this.runCommand('ip -4 -o addr show');
             if (links) {
-                // Look for wlan0 or eth0 having an IP that is NOT 127.0.0.1 and NOT 10.0.0.1 (default portal IP)
-                // This regex captures interface name from "2: wlan0: ..." lines
-                const wlanMatch = links.match(/\d+:\s+(wlan\d+):.*inet\s+([0-9.]+)/);
-                if (wlanMatch && wlanMatch[2] !== '127.0.0.1' && !wlanMatch[2].startsWith('10.0.')) {
-                     this.wanInterface = wlanMatch[1];
-                     console.log(`Fallback: Detected active WiFi interface: ${this.wanInterface}`);
-                     this.saveWanInterface(this.wanInterface);
-                     return this.wanInterface;
+                const lines = links.split('\n');
+                for (const line of lines) {
+                    // Example: "2: wlp2s0    inet 192.168.1.10/24 brd 192.168.1.255 scope global ..."
+                    const m = line.match(/^\d+:\s+(\S+)\s+inet\s+(\d+(?:\.\d+){3})\//);
+                    if (!m) continue;
+                    const ifn = m[1];
+                    const ip = m[2];
+                    if (!String(ifn).toLowerCase().startsWith('wl')) continue;
+                    if (ip === '127.0.0.1') continue;
+                    if (ip.startsWith('10.0.')) continue; // default portal subnet
+                    this.wanInterface = ifn;
+                    console.log(`Fallback: Detected active WiFi interface: ${this.wanInterface}`);
+                    this.saveWanInterface(this.wanInterface);
+                    return this.wanInterface;
                 }
             }
 
@@ -493,7 +499,8 @@ class NetworkService {
                 if (iface.includes('tun') || iface.includes('ppp') || iface.includes('docker')) continue;
                 
                 const isVlan = iface.includes('vlan') || iface.includes('.');
-                const isLan = iface.startsWith('eth') || iface.startsWith('end') || iface.startsWith('enx') || iface.startsWith('wlx') || iface.startsWith('usb');
+                const isWifi = iface.startsWith('wl');
+                const isLan = iface.startsWith('eth') || iface.startsWith('end') || iface.startsWith('enx') || iface.startsWith('usb');
                 
                 // 1. Bridging Logic (Only for physical LAN interfaces, NOT VLANs)
                 if (isLan && !isVlan && !currentBridged.includes(iface)) {
@@ -515,7 +522,7 @@ class NetworkService {
 
                 // 2. Security & QoS Logic (For Standalone LAN/VLAN interfaces)
                 // If it's NOT in the bridge, we must secure it individually.
-                if ((isLan || isVlan) && !currentBridged.includes(iface)) {
+                if ((isLan || isVlan || isWifi) && !currentBridged.includes(iface)) {
                     // Check if interface is UP
                     try {
                         const operState = fs.readFileSync(`/sys/class/net/${iface}/operstate`, 'utf8').trim();

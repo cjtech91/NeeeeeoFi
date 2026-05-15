@@ -466,10 +466,26 @@ class PppoeServerService {
             user.rate_limit_down = user.rate_limit_down || 0;
             user.mac_address = user.mac_address || null;
             user.profile_id_on_expiry = user.profile_id_on_expiry || null;
+            user.address = (typeof user.address === 'string' && user.address.trim()) ? user.address.trim() : null;
+            {
+                const lat = Number(user.latitude);
+                user.latitude = Number.isFinite(lat) ? lat : null;
+                const lng = Number(user.longitude);
+                user.longitude = Number.isFinite(lng) ? lng : null;
+            }
+            const toIntOrNull = (v) => {
+                if (v == null) return null;
+                const s = String(v).trim();
+                if (!s) return null;
+                const n = Number(s);
+                return Number.isFinite(n) ? Math.trunc(n) : null;
+            };
+            user.nap_id = toIntOrNull(user.nap_id);
+            user.plc_port = toIntOrNull(user.plc_port);
 
             const stmt = db.prepare(`
-                INSERT INTO pppoe_users (username, password, profile_id, profile_name, profile_id_on_expiry, rate_limit_up, rate_limit_down, expiration_date, mac_address)
-                VALUES (@username, @password, @profile_id, @profile_name, @profile_id_on_expiry, @rate_limit_up, @rate_limit_down, @expiration_date, @mac_address)
+                INSERT INTO pppoe_users (username, password, profile_id, profile_name, profile_id_on_expiry, rate_limit_up, rate_limit_down, expiration_date, mac_address, address, latitude, longitude, nap_id, plc_port)
+                VALUES (@username, @password, @profile_id, @profile_name, @profile_id_on_expiry, @rate_limit_up, @rate_limit_down, @expiration_date, @mac_address, @address, @latitude, @longitude, @nap_id, @plc_port)
             `);
             const info = stmt.run(user);
             this.syncSecrets();
@@ -500,13 +516,32 @@ class PppoeServerService {
         user.is_active = user.is_active !== undefined ? user.is_active : 1;
         user.mac_address = user.mac_address || null;
         user.profile_id_on_expiry = user.profile_id_on_expiry || null;
+        user.address = (typeof user.address === 'string' && user.address.trim()) ? user.address.trim() : null;
+        {
+            const lat = Number(user.latitude);
+            user.latitude = Number.isFinite(lat) ? lat : null;
+            const lng = Number(user.longitude);
+            user.longitude = Number.isFinite(lng) ? lng : null;
+        }
+        const toIntOrNull = (v) => {
+            if (v == null) return null;
+            const s = String(v).trim();
+            if (!s) return null;
+            const n = Number(s);
+            return Number.isFinite(n) ? Math.trunc(n) : null;
+        };
+        user.nap_id = toIntOrNull(user.nap_id);
+        user.plc_port = toIntOrNull(user.plc_port);
 
         const stmt = db.prepare(`
             UPDATE pppoe_users 
             SET username = @username, password = @password, profile_id = @profile_id, profile_name = @profile_name,
                 profile_id_on_expiry = @profile_id_on_expiry,
                 rate_limit_up = @rate_limit_up, rate_limit_down = @rate_limit_down,
-                expiration_date = @expiration_date, is_active = @is_active, mac_address = @mac_address
+                expiration_date = @expiration_date, is_active = @is_active, mac_address = @mac_address,
+                address = @address, latitude = @latitude, longitude = @longitude,
+                nap_id = @nap_id,
+                plc_port = @plc_port
             WHERE id = @id
         `);
         stmt.run({ ...user, id });

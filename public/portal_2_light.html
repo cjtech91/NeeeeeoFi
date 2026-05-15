@@ -974,6 +974,9 @@
             </div>
             
             <div class="timer-value" id="time-display">00:00:00</div>
+            <div id="validity-row" class="info-row info-row-compact" style="justify-content:center; margin-top:6px; display:none;">
+                <span>Validity: <span id="validity-display">--</span></span>
+            </div>
             
             <div id="vendo-selection-container" style="margin-top: 12px; text-align: center;">
                 <div style="font-size: 0.85rem; color: #666; display: none;">Vendo Mode: <span id="vendo-mode-label" style="font-weight:600;">-</span></div>
@@ -1988,6 +1991,7 @@
 
                 if (data.time_remaining > 0) {
                     updateTimer(data.time_remaining);
+                    updateValidityDisplay(data.validity_expiry, data.validity_remaining_seconds);
                     const pauseBtn = document.getElementById('btn-pause');
                     const statusText = document.getElementById('status-text');
                     
@@ -2036,6 +2040,7 @@
                     pauseBtn.style.display = 'block';
                 } else {
                     updateTimer(0);
+                    updateValidityDisplay(null, null);
                     const st = document.getElementById('status-text');
                     if (st) {
                         st.textContent = 'Disconnected';
@@ -2174,6 +2179,38 @@
             const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
             const s = (seconds % 60).toString().padStart(2, '0');
             if (timeEl) timeEl.textContent = `${h}:${m}:${s}`;
+        }
+
+        function formatValidityRemaining(seconds) {
+            const s = Math.max(0, Math.floor(Number(seconds) || 0));
+            const d = Math.floor(s / 86400);
+            const h = Math.floor((s % 86400) / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const parts = [];
+            if (d > 0) parts.push(d + 'd');
+            if (h > 0) parts.push(h + 'h');
+            if (m > 0 && d === 0) parts.push(m + 'm');
+            return parts.join(' ');
+        }
+
+        function updateValidityDisplay(validityExpiry, validityRemainingSeconds) {
+            const row = document.getElementById('validity-row');
+            const el = document.getElementById('validity-display');
+            if (!row || !el) return;
+            if (!currentUser || !(Number(currentUser.time_remaining) > 0)) {
+                row.style.display = 'none';
+                el.textContent = '--';
+                return;
+            }
+            const exp = validityExpiry ? String(validityExpiry).trim() : '';
+            if (!exp) {
+                row.style.display = 'flex';
+                el.textContent = 'No Expiry';
+                return;
+            }
+            const remText = validityRemainingSeconds != null ? formatValidityRemaining(validityRemainingSeconds) : '';
+            row.style.display = 'flex';
+            el.textContent = remText ? `Valid until ${exp} (${remText})` : `Valid until ${exp}`;
         }
 
         // Insert Coin Background Audio

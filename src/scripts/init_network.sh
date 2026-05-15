@@ -15,9 +15,9 @@ if ! ip link show "$WAN_IF" > /dev/null 2>&1; then
     # Try 1: Find interface with default route
     DETECTED_WAN=$(ip route show default | awk '/default/ {print $5}' | head -n 1)
     
-    # Try 2: Find any interface with an IP address (excluding lo, br0, wlan*, docker*)
+    # Try 2: Find any interface with an IP address (excluding lo, br0, wl*, docker*)
     if [ -z "$DETECTED_WAN" ]; then
-         DETECTED_WAN=$(ip -4 addr show | grep -vE 'lo|br0|wlan|docker' | grep -oP '(?<=inet\s)\d+(\.\d+){3}.*global' -B 2 | grep -oP '^\d+: \K[^:@]+' | head -n 1)
+         DETECTED_WAN=$(ip -4 addr show | grep -vE 'lo|br0|wl|docker' | grep -oP '(?<=inet\s)\d+(\.\d+){3}.*global' -B 2 | grep -oP '^\d+: \K[^:@]+' | head -n 1)
     fi
 
     if [ -n "$DETECTED_WAN" ]; then
@@ -31,18 +31,23 @@ fi
 # 0. Preparation: Unblock WiFi
 rfkill unblock wifi 2>/dev/null || true
 
-# SAFETY CHECK: If wlan0 has an IP, it is likely the WAN/Upstream.
-# Do NOT kill wpa_supplicant and do NOT add it to the bridge.
-WLAN_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
-if [ -n "$WLAN_IP" ] && [ "$WAN_IF" != "wlan0" ]; then
-    echo "⚠️  WARNING: wlan0 has an IP ($WLAN_IP) but WAN_IF is set to $WAN_IF."
-    echo "   Assuming wlan0 is actually the WAN interface to prevent lockout."
-    WAN_IF="wlan0"
-fi
+# SAFETY CHECK: If any WiFi interface has an IP (and it's not the portal gateway),
+# it is likely the WAN/Upstream. This prevents lockout.
+for WF in $(ls /sys/class/net/wl* 2>/dev/null); do
+    WF_IP=$(ip -4 addr show "$WF" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n 1)
+    if [ -n "$WF_IP" ] && [[ "$WF_IP" != "$PORTAL_IP" ]] && [[ "$WF_IP" != 10.0.* ]]; then
+        if [ "$WAN_IF" != "$WF" ]; then
+            echo "⚠️  WARNING: $WF has an IP ($WF_IP) but WAN_IF is set to $WAN_IF."
+            echo "   Assuming $WF is actually the WAN interface to prevent lockout."
+            WAN_IF="$WF"
+        fi
+        break
+    fi
+done
 
 # Kill wpa_supplicant ONLY if WAN is not wireless
-# If WAN is wlan0, we need wpa_supplicant to stay connected to upstream WiFi
-if [[ "$WAN_IF" != wlan* ]] && [[ "$WAN_IF" != wlx* ]]; then
+# If WAN is WiFi (wl*), we need wpa_supplicant to stay connected to upstream WiFi
+if [[ "$WAN_IF" != wl* ]]; then
     echo "WAN is not wireless ($WAN_IF). Killing wpa_supplicant to free up WiFi for AP mode..."
     killall wpa_supplicant 2>/dev/null || true
 else
@@ -66,18 +71,14 @@ if command -v nmcli >/dev/null 2>&1; then
     done
 fi
 
-# 1. Wait for WLAN interface (Optional - skip if not present)
+# 1. Wait for WiFi interface (Optional - skip if not present)
 echo "Checking for wireless interface..."
 WIFI_IF=""
 # Wait max 10s for USB WiFi to initialize (reduced from 45s)
 for i in {1..10}; do
-    # Check for wlan* OR wlx* (USB WiFi)
-    if ls /sys/class/net/wlan* 1> /dev/null 2>&1; then
-        WIFI_IF=$(ls /sys/class/net/wlan* | head -n 1)
-        echo "Wireless interface found: $WIFI_IF"
-        break
-    elif ls /sys/class/net/wlx* 1> /dev/null 2>&1; then
-        WIFI_IF=$(ls /sys/class/net/wlx* | head -n 1)
+    # Check for any wl* (built-in WiFi is often wlp*/wlo*, USB is often wlx*)
+    if ls /sys/class/net/wl* 1> /dev/null 2>&1; then
+        WIFI_IF=$(ls /sys/class/net/wl* | head -n 1)
         echo "Wireless interface found: $WIFI_IF"
         break
     fi
@@ -112,7 +113,7 @@ for IF in $ALL_IFS; do
     fi
 
     # Skip Wireless Interfaces (Hostapd will handle them, and Station mode cannot be bridged easily)
-    if [[ "$IF" == wlan* ]] || [[ "$IF" == wlx* ]]; then
+    if [[ "$IF" == wl* ]]; then
         echo "Skipping wireless interface $IF (reserved for Hostapd)"
         continue
     fi

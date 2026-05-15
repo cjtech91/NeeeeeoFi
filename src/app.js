@@ -420,9 +420,12 @@ function getActivePortalFile() {
 }
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public', getActivePortalFile()));
+    return res.redirect(302, '/client?page=portal');
 });
 app.get('/portal', (req, res) => {
+    return res.redirect(302, '/client?page=portal');
+});
+app.get('/client', (req, res) => {
     res.sendFile(path.join(__dirname, '../public', getActivePortalFile()));
 });
 app.get('/admin', (req, res) => {
@@ -556,7 +559,7 @@ let lastTick = Date.now();
 const selectActiveUsers = db.prepare('SELECT id, user_code, mac_address, ip_address, time_remaining, total_data_up, total_data_down, interface, download_speed, upload_speed FROM users WHERE time_remaining > 0 AND is_paused = 0');
 const updateTime = db.prepare('UPDATE users SET time_remaining = ? WHERE id = ?');
 const updateUserInterfaceAndIp = db.prepare('UPDATE users SET interface = ?, ip_address = ? WHERE id = ?');
-const expireUser = db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0 WHERE id = ?');
+const expireUser = db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0, is_paused = 0, validity_expiry = NULL WHERE id = ?');
 const pauseUser = db.prepare('UPDATE users SET is_paused = 1, is_connected = 1 WHERE id = ?');
 const insertSystemLog = db.prepare('INSERT INTO system_logs (category, level, message, timestamp) VALUES (?, ?, ?, ?)');
 
@@ -1228,6 +1231,7 @@ async function finalizeCoinSession(sessionKey, reason) {
     const best = calculateTimeFromRates(amount, clientId);
     const minutesToAdd = Number(best.minutes) || 0;
     const secondsToAdd = minutesToAdd * 60;
+    const validityHoursToAdd = Math.max(0, Math.floor(Number(best.validity_hours_added) || 0));
 
     // Calculate Points Earned
     const pointsEarningRate = Number(configService.get('points_earning_rate')) || 0; // Default 0 (disabled) if not set
@@ -1265,6 +1269,23 @@ async function finalizeCoinSession(sessionKey, reason) {
         iface = await networkService.getInterfaceForIp(ip);
     }
 
+    const toSqliteLocal = (ms) => {
+        const d = new Date(ms - (new Date().getTimezoneOffset() * 60000));
+        return d.toISOString().slice(0, 19).replace('T', ' ');
+    };
+
+    const computeNewValidityExpiry = (currentExpiryStr, addHours) => {
+        const h = Math.max(0, Math.floor(Number(addHours) || 0));
+        if (h <= 0) return null;
+        const nowMs = Date.now();
+        let baseMs = nowMs;
+        if (currentExpiryStr) {
+            const parsed = new Date(String(currentExpiryStr).replace(' ', 'T')).getTime();
+            if (Number.isFinite(parsed) && parsed > nowMs) baseMs = parsed;
+        }
+        return toSqliteLocal(baseMs + h * 3600 * 1000);
+    };
+
     let isPausedValue = 0; // Default for new users (Active)
 
     if (user) {
@@ -1281,6 +1302,8 @@ async function finalizeCoinSession(sessionKey, reason) {
         isPausedValue = 0;
         console.log(`[Coin] User ${mac} coin inserted. Auto-starting session (Rem: ${remaining}, PrevPaused: ${isPaused}).`);
 
+        const newValidityExpiry = computeNewValidityExpiry(user.validity_expiry, validityHoursToAdd);
+
         db.prepare(`
             UPDATE users 
             SET time_remaining = time_remaining + ?, 
@@ -1296,9 +1319,10 @@ async function finalizeCoinSession(sessionKey, reason) {
                 is_connected = 1,
                 last_active_at = CURRENT_TIMESTAMP,
                 last_traffic_at = CURRENT_TIMESTAMP,
+                validity_expiry = COALESCE(?, validity_expiry),
                 interface = COALESCE(?, interface)
             WHERE id = ?
-        `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, isPausedValue, userCode, userCode, ip, clientId, iface, user.id);
+        `).run(secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, isPausedValue, userCode, userCode, ip, clientId, newValidityExpiry, iface, user.id);
 
         try {
             // Re-fetch user to get the accurate new total time
@@ -1338,10 +1362,12 @@ async function finalizeCoinSession(sessionKey, reason) {
         // New users are always Active (is_paused = 0)
         isPausedValue = 0;
 
+        const newValidityExpiry = computeNewValidityExpiry(null, validityHoursToAdd);
+
         db.prepare(`
-            INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, session_code, last_active_at, last_traffic_at, interface) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)
-        `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, userCode, timestamp, timestamp, iface);
+            INSERT INTO users (mac_address, ip_address, client_id, time_remaining, total_time, points_balance, upload_speed, download_speed, is_paused, is_connected, user_code, session_code, last_active_at, last_traffic_at, validity_expiry, interface) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?)
+        `).run(mac, ip, clientId, secondsToAdd, secondsToAdd, pointsEarned, uploadSpeed, downloadSpeed, userCode, userCode, timestamp, timestamp, newValidityExpiry, iface);
     }
 
     // Only allow network access if NOT paused
@@ -1399,6 +1425,7 @@ function calculateTimeFromRates(amount, deviceId = null) {
         
         let remainingAmount = amount;
         let totalMinutes = 0;
+        let totalValidityHours = 0;
         let maxRateUsed = null;
         
         // 2. Greedy approach: match largest denominations first
@@ -1406,6 +1433,7 @@ function calculateTimeFromRates(amount, deviceId = null) {
             if (remainingAmount >= rate.amount) {
                 const count = Math.floor(remainingAmount / rate.amount);
                 totalMinutes += count * rate.minutes;
+                totalValidityHours += count * (Number(rate.validity_hours) || 0);
                 remainingAmount -= count * rate.amount;
                 
                 if (!maxRateUsed) maxRateUsed = rate; // Capture properties of the largest rate used
@@ -1417,6 +1445,7 @@ function calculateTimeFromRates(amount, deviceId = null) {
             const baseRate = rates.find(r => r.amount === 1);
             if (baseRate) {
                 totalMinutes += remainingAmount * baseRate.minutes;
+                totalValidityHours += remainingAmount * (Number(baseRate.validity_hours) || 0);
                 if (!maxRateUsed) maxRateUsed = baseRate;
             }
         }
@@ -1424,11 +1453,12 @@ function calculateTimeFromRates(amount, deviceId = null) {
         return {
             minutes: totalMinutes,
             upload_speed: maxRateUsed ? maxRateUsed.upload_speed : null,
-            download_speed: maxRateUsed ? maxRateUsed.download_speed : null
+            download_speed: maxRateUsed ? maxRateUsed.download_speed : null,
+            validity_hours_added: totalValidityHours
         };
     } catch (err) {
         console.error('Error calculating rates:', err);
-        return { minutes: 0, upload_speed: null, download_speed: null };
+        return { minutes: 0, upload_speed: null, download_speed: null, validity_hours_added: 0 };
     }
 }
 
@@ -2045,13 +2075,17 @@ app.post('/api/auth/login', async (req, res) => {
         db.prepare('UPDATE admins SET session_token = ? WHERE id = ?').run(sessionToken, admin.id);
     }
 
-    res.cookie('admin_session', sessionToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+    res.cookie('admin_session', sessionToken, {
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+        path: '/'
+    });
     res.json({ success: true });
 });
 
 app.post('/api/auth/logout', (req, res) => {
     logService.info('SYSTEM', 'Admin logout');
-    res.clearCookie('admin_session');
+    res.clearCookie('admin_session', { path: '/' });
     res.json({ success: true });
 });
 
@@ -2441,7 +2475,8 @@ app.post('/api/admin/system/hostname', isAuthenticated, async (req, res) => {
 app.post('/api/admin/system/reset', isAuthenticated, async (req, res) => {
     try {
         await systemService.factoryReset();
-        res.json({ success: true });
+        res.json({ success: true, rebooting: true });
+        try { setTimeout(() => { try { systemService.reboot(); } catch (_) {} }, 1200); } catch (_) {}
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -2555,6 +2590,7 @@ app.get('/api/admin/dashboard', isAuthenticated, async (req, res) => {
         uptime: os.uptime(),
         load_avg: os.loadavg(),
         cpu_usage: await monitoringService.getCpuUsage(),
+        os_name: await monitoringService.getOsInfo(),
         memory: {
             total: os.totalmem(),
             free: os.freemem()
@@ -2945,6 +2981,129 @@ app.get('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
     }
 });
 
+// Rentals (Phone/Tablet Rental Devices)
+function getRentalDevicesConfig() {
+    const raw = configService.get('rental_devices', []);
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .filter(d => d && typeof d === 'object')
+        .map(d => ({
+            mac: formatMac(d.mac || ''),
+            name: String(d.name || '').trim(),
+            type: String(d.type || '').trim(),
+            created_at: d.created_at || null
+        }))
+        .filter(d => d.mac && d.mac.length >= 11);
+}
+
+function saveRentalDevicesConfig(devices) {
+    const normalized = Array.isArray(devices) ? devices : [];
+    configService.set('rental_devices', normalized, 'rentals');
+    return normalized;
+}
+
+app.get('/api/admin/rentals', isAuthenticated, (req, res) => {
+    try {
+        const devices = getRentalDevicesConfig();
+        const userByMacLower = new Map();
+        try {
+            const rows = db.prepare(`
+                SELECT mac_address, ip_address, user_code, alias, time_remaining, is_connected, is_paused, updated_at
+                FROM users
+            `).all();
+            for (const r of rows) {
+                const m = formatMac(r.mac_address);
+                if (m) userByMacLower.set(m, r);
+            }
+        } catch (_) {}
+
+        const result = devices.map(d => {
+            const u = userByMacLower.get(d.mac) || null;
+            const timeRemaining = u ? (Number(u.time_remaining) || 0) : 0;
+            const isPaused = u ? (Number(u.is_paused) || 0) : 0;
+            const isConnected = u ? (Number(u.is_connected) || 0) : 0;
+            const status = (timeRemaining > 0 && !isPaused) ? 'unlocked' : 'locked';
+            return {
+                mac: d.mac,
+                name: d.name || d.mac,
+                type: d.type || null,
+                created_at: d.created_at || null,
+                status,
+                time_remaining: timeRemaining,
+                is_paused: isPaused,
+                is_connected: isConnected,
+                ip_address: u ? u.ip_address : null,
+                user_code: u ? u.user_code : null,
+                alias: u ? u.alias : null,
+                updated_at: u ? u.updated_at : null
+            };
+        });
+
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/rentals', isAuthenticated, (req, res) => {
+    try {
+        const mac = formatMac(req.body?.mac);
+        const name = String(req.body?.name || '').trim();
+        const type = String(req.body?.type || '').trim();
+
+        if (!mac || mac.length < 11) return res.status(400).json({ error: 'Invalid MAC address' });
+
+        const devices = getRentalDevicesConfig();
+        const exists = devices.some(d => d.mac === mac);
+        if (!exists) {
+            devices.push({
+                mac,
+                name: name || mac,
+                type: type || null,
+                created_at: new Date().toISOString()
+            });
+            saveRentalDevicesConfig(devices);
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/admin/rentals/:mac', isAuthenticated, (req, res) => {
+    try {
+        const mac = formatMac(req.params.mac);
+        if (!mac) return res.status(400).json({ error: 'Invalid MAC address' });
+
+        const devices = getRentalDevicesConfig();
+        const next = devices.filter(d => d.mac !== mac);
+        saveRentalDevicesConfig(next);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/rentals/:mac/lock', isAuthenticated, async (req, res) => {
+    try {
+        const mac = formatMac(req.params.mac);
+        if (!mac) return res.status(400).json({ error: 'Invalid MAC address' });
+
+        const user = db.prepare('SELECT id, mac_address, ip_address FROM users WHERE LOWER(mac_address) = ?').get(mac);
+        if (user) {
+            db.prepare('UPDATE users SET time_remaining = 0, is_connected = 0, is_paused = 0, validity_expiry = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+            try {
+                await networkService.blockUser(user.mac_address, user.ip_address);
+            } catch (_) {}
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/admin/sales/by-client', isAuthenticated, (req, res) => {
     const type = req.query.type || 'monthly';
     try {
@@ -3213,6 +3372,703 @@ app.delete('/api/admin/pppoe/users/:id', isAuthenticated, (req, res) => {
     try {
         pppoeServerService.deleteUser(req.params.id);
         res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 0.6 Network Topology (OLT -> NAP -> Clients/SubVendo)
+app.get('/api/admin/topology/olts', isAuthenticated, (req, res) => {
+    try {
+        const rows = db.prepare('SELECT * FROM olts ORDER BY name ASC').all();
+        res.json(rows);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/topology/olts', isAuthenticated, (req, res) => {
+    const body = req.body || {};
+    const toIntOrNull = (v) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (!s) return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    const ip = typeof body.ip_address === 'string' ? body.ip_address.trim() : '';
+    const status = typeof body.status === 'string' ? body.status.trim() : 'active';
+    const serverId = toIntOrNull(body.server_id ?? body.serverId);
+    const ponPorts = toIntOrNull(
+        body.pon_ports ?? body.ponPorts ?? body.ponports ?? body.ponPortsCount ?? body.pon_ports_count
+    );
+    const lat = Number(body.latitude);
+    const lng = Number(body.longitude);
+    if (!name) return res.status(400).json({ error: 'OLT name is required' });
+    if (ponPorts != null && (ponPorts < 1 || ponPorts > 256)) return res.status(400).json({ error: 'Invalid pon_ports' });
+    const latitude = Number.isFinite(lat) ? lat : null;
+    const longitude = Number.isFinite(lng) ? lng : null;
+    try {
+        if (serverId != null) {
+            const ok = db.prepare('SELECT id FROM topology_servers WHERE id = ?').get(serverId);
+            if (!ok) return res.status(400).json({ error: 'Invalid server_id' });
+        }
+        const info = db.prepare(`
+            INSERT INTO olts (name, code, server_id, pon_ports, latitude, longitude, ip_address, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(name, code || null, serverId, ponPorts, latitude, longitude, ip || null, status || 'active');
+        const row = db.prepare('SELECT * FROM olts WHERE id = ?').get(info.lastInsertRowid);
+        res.json({ success: true, olt: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/admin/topology/olts/:id', isAuthenticated, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const body = req.body || {};
+    const toIntOrNull = (v) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (!s) return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
+    const name = typeof body.name === 'string' ? body.name.trim() : null;
+    const code = typeof body.code === 'string' ? body.code.trim() : null;
+    const ip = typeof body.ip_address === 'string' ? body.ip_address.trim() : null;
+    const status = typeof body.status === 'string' ? body.status.trim() : null;
+    const hasServerId = (Object.prototype.hasOwnProperty.call(body, 'server_id') || Object.prototype.hasOwnProperty.call(body, 'serverId')) ? 1 : 0;
+    const serverId = hasServerId ? toIntOrNull(body.server_id ?? body.serverId) : undefined;
+    const hasPonPorts = (
+        Object.prototype.hasOwnProperty.call(body, 'pon_ports') ||
+        Object.prototype.hasOwnProperty.call(body, 'ponPorts') ||
+        Object.prototype.hasOwnProperty.call(body, 'ponports') ||
+        Object.prototype.hasOwnProperty.call(body, 'ponPortsCount') ||
+        Object.prototype.hasOwnProperty.call(body, 'pon_ports_count')
+    ) ? 1 : 0;
+    const ponPorts = hasPonPorts
+        ? toIntOrNull(body.pon_ports ?? body.ponPorts ?? body.ponports ?? body.ponPortsCount ?? body.pon_ports_count)
+        : undefined;
+    const latitude = body.latitude === undefined ? undefined : (Number.isFinite(Number(body.latitude)) ? Number(body.latitude) : null);
+    const longitude = body.longitude === undefined ? undefined : (Number.isFinite(Number(body.longitude)) ? Number(body.longitude) : null);
+    const hasLat = Object.prototype.hasOwnProperty.call(body, 'latitude') ? 1 : 0;
+    const hasLng = Object.prototype.hasOwnProperty.call(body, 'longitude') ? 1 : 0;
+    if (hasPonPorts && ponPorts != null && (ponPorts < 1 || ponPorts > 256)) return res.status(400).json({ error: 'Invalid pon_ports' });
+    try {
+        if (hasServerId && serverId != null) {
+            const ok = db.prepare('SELECT id FROM topology_servers WHERE id = ?').get(serverId);
+            if (!ok) return res.status(400).json({ error: 'Invalid server_id' });
+        }
+        db.prepare(`
+            UPDATE olts
+            SET name = COALESCE(?, name),
+                code = COALESCE(?, code),
+                server_id = CASE WHEN ? = 1 THEN ? ELSE server_id END,
+                ip_address = COALESCE(?, ip_address),
+                status = COALESCE(?, status),
+                pon_ports = CASE WHEN ? = 1 THEN ? ELSE pon_ports END,
+                latitude = CASE WHEN ? = 1 THEN ? ELSE latitude END,
+                longitude = CASE WHEN ? = 1 THEN ? ELSE longitude END
+            WHERE id = ?
+        `).run(
+            name,
+            code,
+            hasServerId, hasServerId ? serverId : null,
+            ip,
+            status,
+            hasPonPorts, hasPonPorts ? ponPorts : null,
+            hasLat, latitude,
+            hasLng, longitude,
+            id
+        );
+        const row = db.prepare('SELECT * FROM olts WHERE id = ?').get(id);
+        res.json({ success: true, olt: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/admin/topology/olts/:id', isAuthenticated, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    try {
+        const napCount = db.prepare('SELECT COUNT(*) AS c FROM naps WHERE olt_id = ?').get(id).c;
+        if (napCount > 0) return res.status(400).json({ error: 'Cannot delete OLT with existing NAPs' });
+        db.prepare('DELETE FROM olts WHERE id = ?').run(id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/topology/servers', isAuthenticated, (req, res) => {
+    try {
+        const rows = db.prepare('SELECT * FROM topology_servers ORDER BY name ASC').all();
+        res.json(rows);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/topology/servers', isAuthenticated, (req, res) => {
+    const body = req.body || {};
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    const status = typeof body.status === 'string' ? body.status.trim() : 'active';
+    const lat = Number(body.latitude);
+    const lng = Number(body.longitude);
+    const latitude = Number.isFinite(lat) ? lat : null;
+    const longitude = Number.isFinite(lng) ? lng : null;
+    if (!name) return res.status(400).json({ error: 'Server name is required' });
+    if (latitude != null && (latitude < -90 || latitude > 90)) return res.status(400).json({ error: 'Invalid latitude' });
+    if (longitude != null && (longitude < -180 || longitude > 180)) return res.status(400).json({ error: 'Invalid longitude' });
+    try {
+        const info = db.prepare(`
+            INSERT INTO topology_servers (name, code, latitude, longitude, status)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(name, code || null, latitude, longitude, status || 'active');
+        const row = db.prepare('SELECT * FROM topology_servers WHERE id = ?').get(info.lastInsertRowid);
+        res.json({ success: true, server: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/admin/topology/servers/:id', isAuthenticated, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const body = req.body || {};
+    const name = typeof body.name === 'string' ? body.name.trim() : null;
+    const code = typeof body.code === 'string' ? body.code.trim() : null;
+    const status = typeof body.status === 'string' ? body.status.trim() : null;
+    const hasLat = Object.prototype.hasOwnProperty.call(body, 'latitude') ? 1 : 0;
+    const hasLng = Object.prototype.hasOwnProperty.call(body, 'longitude') ? 1 : 0;
+    const latitude = hasLat ? (Number.isFinite(Number(body.latitude)) ? Number(body.latitude) : null) : undefined;
+    const longitude = hasLng ? (Number.isFinite(Number(body.longitude)) ? Number(body.longitude) : null) : undefined;
+    if (hasLat && latitude != null && (latitude < -90 || latitude > 90)) return res.status(400).json({ error: 'Invalid latitude' });
+    if (hasLng && longitude != null && (longitude < -180 || longitude > 180)) return res.status(400).json({ error: 'Invalid longitude' });
+    try {
+        db.prepare(`
+            UPDATE topology_servers
+            SET name = COALESCE(?, name),
+                code = COALESCE(?, code),
+                status = COALESCE(?, status),
+                latitude = CASE WHEN ? = 1 THEN ? ELSE latitude END,
+                longitude = CASE WHEN ? = 1 THEN ? ELSE longitude END
+            WHERE id = ?
+        `).run(name, code, status, hasLat, hasLat ? latitude : null, hasLng, hasLng ? longitude : null, id);
+        const row = db.prepare('SELECT * FROM topology_servers WHERE id = ?').get(id);
+        res.json({ success: true, server: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/admin/topology/servers/:id', isAuthenticated, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    try {
+        const oltCount = db.prepare('SELECT COUNT(*) AS c FROM olts WHERE server_id = ?').get(id).c;
+        if (oltCount > 0) return res.status(400).json({ error: 'Cannot delete server with linked OLTs' });
+        db.prepare('DELETE FROM topology_servers WHERE id = ?').run(id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Backward-compatible single-server endpoints (uses first server row; falls back to old settings if none)
+app.get('/api/admin/topology/server', isAuthenticated, (req, res) => {
+    try {
+        const row = db.prepare('SELECT * FROM topology_servers ORDER BY id ASC LIMIT 1').get();
+        if (row) return res.json(row);
+        const name = String(configService.get('topology_server_name', 'Server') || 'Server');
+        const latitude = Number(configService.get('topology_server_latitude', null));
+        const longitude = Number(configService.get('topology_server_longitude', null));
+        const status = String(configService.get('topology_server_status', 'active') || 'active');
+        res.json({
+            id: null,
+            name,
+            code: null,
+            latitude: Number.isFinite(latitude) ? latitude : null,
+            longitude: Number.isFinite(longitude) ? longitude : null,
+            status
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/admin/topology/server', isAuthenticated, (req, res) => {
+    const body = req.body || {};
+    const name = typeof body.name === 'string' ? body.name.trim() : null;
+    const status = typeof body.status === 'string' ? body.status.trim() : null;
+    const hasLat = Object.prototype.hasOwnProperty.call(body, 'latitude') ? 1 : 0;
+    const hasLng = Object.prototype.hasOwnProperty.call(body, 'longitude') ? 1 : 0;
+    const latitude = hasLat ? (Number.isFinite(Number(body.latitude)) ? Number(body.latitude) : null) : undefined;
+    const longitude = hasLng ? (Number.isFinite(Number(body.longitude)) ? Number(body.longitude) : null) : undefined;
+    if (hasLat && latitude != null && (latitude < -90 || latitude > 90)) return res.status(400).json({ error: 'Invalid latitude' });
+    if (hasLng && longitude != null && (longitude < -180 || longitude > 180)) return res.status(400).json({ error: 'Invalid longitude' });
+    try {
+        const existing = db.prepare('SELECT id FROM topology_servers ORDER BY id ASC LIMIT 1').get();
+        if (!existing) {
+            const info = db.prepare('INSERT INTO topology_servers (name, status, latitude, longitude) VALUES (?, ?, ?, ?)').run(
+                (name || 'Server'),
+                (status || 'active'),
+                hasLat ? latitude : null,
+                hasLng ? longitude : null
+            );
+            const row = db.prepare('SELECT * FROM topology_servers WHERE id = ?').get(info.lastInsertRowid);
+            return res.json({ success: true, server: row });
+        }
+        db.prepare(`
+            UPDATE topology_servers
+            SET name = COALESCE(?, name),
+                status = COALESCE(?, status),
+                latitude = CASE WHEN ? = 1 THEN ? ELSE latitude END,
+                longitude = CASE WHEN ? = 1 THEN ? ELSE longitude END
+            WHERE id = ?
+        `).run(name, status, hasLat, hasLat ? latitude : null, hasLng, hasLng ? longitude : null, existing.id);
+        const row = db.prepare('SELECT * FROM topology_servers WHERE id = ?').get(existing.id);
+        res.json({ success: true, server: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/topology/naps', isAuthenticated, (req, res) => {
+    try {
+        const rows = db.prepare(`
+            SELECT n.*,
+                   o.name AS olt_name, o.code AS olt_code,
+                   p.nap_code AS parent_nap_code, p.name AS parent_nap_name
+            FROM naps n
+            LEFT JOIN olts o ON o.id = n.olt_id
+            LEFT JOIN naps p ON p.id = n.parent_nap_id
+            ORDER BY n.nap_code ASC
+        `).all();
+        res.json(rows);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/topology/naps', isAuthenticated, (req, res) => {
+    const body = req.body || {};
+    const toIntOrNull = (v) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (!s) return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
+    const resolveNapIdFlexible = (v) => {
+        const id = toIntOrNull(v);
+        if (id != null) return id;
+        if (v == null) return null;
+        const raw = String(v).trim();
+        if (!raw) return null;
+        const code = raw.includes(' - ') ? raw.split(' - ')[0].trim() : raw;
+        const row = db.prepare('SELECT id FROM naps WHERE nap_code = ?').get(code);
+        return row ? Math.trunc(Number(row.id)) : null;
+    };
+    const napCode = typeof body.nap_code === 'string' ? body.nap_code.trim() : '';
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const oltId = toIntOrNull(body.olt_id);
+    const parentNapId = resolveNapIdFlexible(body.parent_nap_id);
+    const ponPort = toIntOrNull(body.pon_port);
+    const splitter = typeof body.splitter_ratio === 'string' ? body.splitter_ratio.trim() : '';
+    const address = typeof body.address === 'string' ? body.address.trim() : '';
+    const status = typeof body.status === 'string' ? body.status.trim() : 'active';
+    const lat = Number(body.latitude);
+    const lng = Number(body.longitude);
+    if (!napCode) return res.status(400).json({ error: 'NAP code is required' });
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ error: 'Latitude/Longitude is required' });
+    if (lat < -90 || lat > 90) return res.status(400).json({ error: 'Invalid latitude' });
+    if (lng < -180 || lng > 180) return res.status(400).json({ error: 'Invalid longitude' });
+    try {
+        const resolveOltForNap = (napId) => {
+            let cur = napId;
+            let guard = 0;
+            while (cur != null && guard++ < 80) {
+                const row = db.prepare('SELECT olt_id, parent_nap_id FROM naps WHERE id = ?').get(cur);
+                if (!row) return null;
+                if (row.olt_id != null) return Math.trunc(Number(row.olt_id));
+                cur = row.parent_nap_id != null ? Math.trunc(Number(row.parent_nap_id)) : null;
+            }
+            return null;
+        };
+
+        if (parentNapId != null) {
+            const parent = db.prepare('SELECT id, olt_id, parent_nap_id FROM naps WHERE id = ?').get(parentNapId);
+            if (!parent) return res.status(400).json({ error: 'Invalid parent_nap_id' });
+        }
+
+        const effectiveOltId = oltId != null ? oltId : (parentNapId != null ? resolveOltForNap(parentNapId) : null);
+        if (effectiveOltId != null && ponPort != null) {
+            const exists = db.prepare('SELECT id, pon_ports FROM olts WHERE id = ?').get(effectiveOltId);
+            if (exists && exists.pon_ports != null) {
+                const maxPon = Number(exists.pon_ports);
+                if (Number.isFinite(maxPon) && ponPort > maxPon) return res.status(400).json({ error: 'PON port exceeds OLT pon_ports' });
+            }
+        }
+
+        const info = db.prepare(`
+            INSERT INTO naps (nap_code, name, olt_id, parent_nap_id, pon_port, splitter_ratio, latitude, longitude, address, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            napCode,
+            name || null,
+            oltId,
+            parentNapId,
+            ponPort,
+            splitter || null,
+            lat,
+            lng,
+            address || null,
+            status || 'active'
+        );
+        const row = db.prepare('SELECT * FROM naps WHERE id = ?').get(info.lastInsertRowid);
+        res.json({ success: true, nap: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/admin/topology/naps/:id', isAuthenticated, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    const body = req.body || {};
+    const toIntOrNull = (v) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (!s) return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
+    const resolveNapIdFlexible = (v) => {
+        const id = toIntOrNull(v);
+        if (id != null) return id;
+        if (v == null) return null;
+        const raw = String(v).trim();
+        if (!raw) return null;
+        const code = raw.includes(' - ') ? raw.split(' - ')[0].trim() : raw;
+        const row = db.prepare('SELECT id FROM naps WHERE nap_code = ?').get(code);
+        return row ? Math.trunc(Number(row.id)) : null;
+    };
+    const napCode = typeof body.nap_code === 'string' ? body.nap_code.trim() : null;
+    const name = typeof body.name === 'string' ? body.name.trim() : null;
+    const status = typeof body.status === 'string' ? body.status.trim() : null;
+    const splitter = typeof body.splitter_ratio === 'string' ? body.splitter_ratio.trim() : null;
+    const address = typeof body.address === 'string' ? body.address.trim() : null;
+
+    const hasOlt = Object.prototype.hasOwnProperty.call(body, 'olt_id') ? 1 : 0;
+    const oltId = hasOlt ? toIntOrNull(body.olt_id) : undefined;
+
+    const hasParent = Object.prototype.hasOwnProperty.call(body, 'parent_nap_id') ? 1 : 0;
+    const parentNapId = hasParent ? resolveNapIdFlexible(body.parent_nap_id) : undefined;
+
+    const hasPon = Object.prototype.hasOwnProperty.call(body, 'pon_port') ? 1 : 0;
+    const ponPort = hasPon ? toIntOrNull(body.pon_port) : undefined;
+
+    const hasLat = Object.prototype.hasOwnProperty.call(body, 'latitude') ? 1 : 0;
+    const latVal = hasLat ? (Number.isFinite(Number(body.latitude)) ? Number(body.latitude) : null) : undefined;
+
+    const hasLng = Object.prototype.hasOwnProperty.call(body, 'longitude') ? 1 : 0;
+    const lngVal = hasLng ? (Number.isFinite(Number(body.longitude)) ? Number(body.longitude) : null) : undefined;
+
+    if (hasLat && latVal != null && (latVal < -90 || latVal > 90)) return res.status(400).json({ error: 'Invalid latitude' });
+    if (hasLng && lngVal != null && (lngVal < -180 || lngVal > 180)) return res.status(400).json({ error: 'Invalid longitude' });
+    if (hasOlt && oltId != null) {
+        const exists = db.prepare('SELECT id, pon_ports FROM olts WHERE id = ?').get(oltId);
+        if (!exists) return res.status(400).json({ error: 'Invalid olt_id' });
+        if (hasPon && ponPort != null && exists.pon_ports != null) {
+            const maxPon = Number(exists.pon_ports);
+            if (Number.isFinite(maxPon) && ponPort > maxPon) return res.status(400).json({ error: 'PON port exceeds OLT pon_ports' });
+        }
+    }
+    if (hasParent) {
+        if (parentNapId === id) return res.status(400).json({ error: 'Invalid parent_nap_id' });
+        if (parentNapId != null) {
+            const parent = db.prepare('SELECT id, parent_nap_id FROM naps WHERE id = ?').get(parentNapId);
+            if (!parent) return res.status(400).json({ error: 'Invalid parent_nap_id' });
+            let cur = parentNapId;
+            let guard = 0;
+            while (cur != null && guard++ < 80) {
+                if (cur === id) return res.status(400).json({ error: 'NAP hierarchy cycle detected' });
+                const row = db.prepare('SELECT parent_nap_id FROM naps WHERE id = ?').get(cur);
+                if (!row) break;
+                cur = row.parent_nap_id != null ? Math.trunc(Number(row.parent_nap_id)) : null;
+            }
+        }
+    }
+    if (hasPon && ponPort != null) {
+        let effectiveOltId = null;
+        if (hasOlt) {
+            effectiveOltId = oltId;
+        } else if (hasParent && parentNapId != null) {
+            let cur = parentNapId;
+            let guard = 0;
+            while (cur != null && guard++ < 80) {
+                const row = db.prepare('SELECT olt_id, parent_nap_id FROM naps WHERE id = ?').get(cur);
+                if (!row) break;
+                if (row.olt_id != null) {
+                    effectiveOltId = Math.trunc(Number(row.olt_id));
+                    break;
+                }
+                cur = row.parent_nap_id != null ? Math.trunc(Number(row.parent_nap_id)) : null;
+            }
+        } else {
+            const self = db.prepare('SELECT olt_id, parent_nap_id FROM naps WHERE id = ?').get(id);
+            if (self) {
+                if (self.olt_id != null) {
+                    effectiveOltId = Math.trunc(Number(self.olt_id));
+                } else if (self.parent_nap_id != null) {
+                    let cur = Math.trunc(Number(self.parent_nap_id));
+                    let guard = 0;
+                    while (cur != null && guard++ < 80) {
+                        const row = db.prepare('SELECT olt_id, parent_nap_id FROM naps WHERE id = ?').get(cur);
+                        if (!row) break;
+                        if (row.olt_id != null) {
+                            effectiveOltId = Math.trunc(Number(row.olt_id));
+                            break;
+                        }
+                        cur = row.parent_nap_id != null ? Math.trunc(Number(row.parent_nap_id)) : null;
+                    }
+                }
+            }
+        }
+        if (effectiveOltId != null) {
+            const exists = db.prepare('SELECT id, pon_ports FROM olts WHERE id = ?').get(effectiveOltId);
+            if (exists && exists.pon_ports != null) {
+                const maxPon = Number(exists.pon_ports);
+                if (Number.isFinite(maxPon) && ponPort > maxPon) return res.status(400).json({ error: 'PON port exceeds OLT pon_ports' });
+            }
+        }
+    }
+    try {
+        db.prepare(`
+            UPDATE naps
+            SET nap_code = COALESCE(?, nap_code),
+                name = COALESCE(?, name),
+                status = COALESCE(?, status),
+                splitter_ratio = COALESCE(?, splitter_ratio),
+                address = COALESCE(?, address),
+                olt_id = CASE WHEN ? = 1 THEN ? ELSE olt_id END,
+                parent_nap_id = CASE WHEN ? = 1 THEN ? ELSE parent_nap_id END,
+                pon_port = CASE WHEN ? = 1 THEN ? ELSE pon_port END,
+                latitude = CASE WHEN ? = 1 THEN ? ELSE latitude END,
+                longitude = CASE WHEN ? = 1 THEN ? ELSE longitude END
+            WHERE id = ?
+        `).run(
+            napCode,
+            name,
+            status,
+            splitter,
+            address,
+            hasOlt, hasOlt ? oltId : null,
+            hasParent, hasParent ? parentNapId : null,
+            hasPon, hasPon ? ponPort : null,
+            hasLat, hasLat ? latVal : null,
+            hasLng, hasLng ? lngVal : null,
+            id
+        );
+        const row = db.prepare('SELECT * FROM naps WHERE id = ?').get(id);
+        res.json({ success: true, nap: row });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/admin/topology/naps/:id', isAuthenticated, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+    try {
+        const childNapCount = db.prepare('SELECT COUNT(*) AS c FROM naps WHERE parent_nap_id = ?').get(id).c;
+        if ((childNapCount || 0) > 0) return res.status(400).json({ error: 'Cannot delete NAP with child NAPs' });
+        const clientCount = db.prepare('SELECT COUNT(*) AS c FROM pppoe_users WHERE nap_id = ?').get(id).c;
+        const subvendoCount = db.prepare('SELECT COUNT(*) AS c FROM sub_vendo_devices WHERE nap_id = ?').get(id).c;
+        if ((clientCount || 0) > 0 || (subvendoCount || 0) > 0) {
+            return res.status(400).json({ error: 'Cannot delete NAP with assigned clients/subvendo' });
+        }
+        db.prepare('DELETE FROM naps WHERE id = ?').run(id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/topology/routes', isAuthenticated, (req, res) => {
+    try {
+        const rows = (() => {
+            try {
+                return db.prepare('SELECT link_key, points_json, updated_at FROM topology_routes ORDER BY updated_at DESC').all();
+            } catch (_) {
+                return [];
+            }
+        })();
+        const routes = [];
+        for (const r of rows) {
+            try {
+                const pts = JSON.parse(String(r.points_json || '[]'));
+                if (!Array.isArray(pts)) continue;
+                routes.push({ link_key: r.link_key, points: pts, updated_at: r.updated_at });
+            } catch (_) {}
+        }
+        res.json(routes);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.put('/api/admin/topology/routes', isAuthenticated, (req, res) => {
+    const body = req.body || {};
+    const linkKey = typeof body.link_key === 'string' ? body.link_key.trim() : '';
+    const points = Array.isArray(body.points) ? body.points : null;
+    if (!linkKey) return res.status(400).json({ error: 'link_key is required' });
+    if (!points) return res.status(400).json({ error: 'points is required' });
+    if (points.length > 500) return res.status(400).json({ error: 'Too many route points' });
+    const normalized = [];
+    for (const p of points) {
+        const lat = Number(p?.lat ?? p?.latitude ?? (Array.isArray(p) ? p[0] : null));
+        const lng = Number(p?.lng ?? p?.longitude ?? (Array.isArray(p) ? p[1] : null));
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        if (lat < -90 || lat > 90) continue;
+        if (lng < -180 || lng > 180) continue;
+        normalized.push({ lat, lng });
+    }
+    try {
+        db.prepare(`
+            INSERT INTO topology_routes (link_key, points_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(link_key) DO UPDATE SET points_json = excluded.points_json, updated_at = CURRENT_TIMESTAMP
+        `).run(linkKey, JSON.stringify(normalized));
+        res.json({ success: true, link_key: linkKey, points: normalized });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/admin/topology/routes', isAuthenticated, (req, res) => {
+    const body = req.body || {};
+    const linkKey = typeof body.link_key === 'string' ? body.link_key.trim() : '';
+    if (!linkKey) return res.status(400).json({ error: 'link_key is required' });
+    try {
+        db.prepare('DELETE FROM topology_routes WHERE link_key = ?').run(linkKey);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/topology/status', isAuthenticated, (req, res) => {
+    try {
+        const clients = (() => {
+            try {
+                return db
+                    .prepare(
+                        `SELECT id, username, current_ip, status, disabled, is_disabled, nap_id
+                         FROM pppoe_users
+                         ORDER BY username ASC`
+                    )
+                    .all();
+            } catch (_) {
+                return [];
+            }
+        })();
+
+        const rawSubvendos = db
+            .prepare('SELECT id, device_id, name, status, nap_id, last_active_at FROM sub_vendo_devices ORDER BY created_at DESC')
+            .all();
+        const now = Date.now();
+        const offlineAfter = (typeof SUB_VENDO_OFFLINE_AFTER_MS === 'number' && Number.isFinite(SUB_VENDO_OFFLINE_AFTER_MS))
+            ? SUB_VENDO_OFFLINE_AFTER_MS
+            : 120000;
+        const subvendos = rawSubvendos.map(d => {
+            let online = false;
+            if (d.last_active_at) {
+                const raw = String(d.last_active_at);
+                const parsedA = new Date(raw);
+                const parsedB = new Date(raw.includes('T') ? raw : (raw.replace(' ', 'T') + 'Z'));
+                const lastActive = isNaN(parsedA.getTime()) ? parsedB : parsedA;
+                if (!isNaN(lastActive.getTime())) {
+                    if ((now - lastActive.getTime()) < offlineAfter) online = true;
+                }
+            }
+            return { ...d, online };
+        });
+
+        res.json({ ts: Date.now(), clients, subvendos });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/topology/map', isAuthenticated, (req, res) => {
+    try {
+        const servers = (() => {
+            try {
+                return db.prepare('SELECT * FROM topology_servers ORDER BY name ASC').all();
+            } catch (_) {
+                return [];
+            }
+        })();
+        const serverName = String(configService.get('topology_server_name', 'Server') || 'Server');
+        const serverLat = Number(configService.get('topology_server_latitude', null));
+        const serverLng = Number(configService.get('topology_server_longitude', null));
+        const serverStatus = String(configService.get('topology_server_status', 'active') || 'active');
+        const server = servers.length > 0
+            ? servers[0]
+            : {
+                id: null,
+                name: serverName,
+                code: null,
+                latitude: Number.isFinite(serverLat) ? serverLat : null,
+                longitude: Number.isFinite(serverLng) ? serverLng : null,
+                status: serverStatus
+            };
+        const olts = db.prepare('SELECT * FROM olts ORDER BY name ASC').all();
+        const naps = db.prepare('SELECT * FROM naps ORDER BY nap_code ASC').all();
+        const clients = pppoeServerService.getUsers();
+        const rawSubvendos = db.prepare('SELECT * FROM sub_vendo_devices ORDER BY created_at DESC').all();
+        const now = Date.now();
+        const offlineAfter = (typeof SUB_VENDO_OFFLINE_AFTER_MS === 'number' && Number.isFinite(SUB_VENDO_OFFLINE_AFTER_MS))
+            ? SUB_VENDO_OFFLINE_AFTER_MS
+            : 120000;
+        const subvendos = rawSubvendos.map(d => {
+            let online = false;
+            if (d.last_active_at) {
+                const raw = String(d.last_active_at);
+                const parsedA = new Date(raw);
+                const parsedB = new Date(raw.includes('T') ? raw : (raw.replace(' ', 'T') + 'Z'));
+                const lastActive = isNaN(parsedA.getTime()) ? parsedB : parsedA;
+                if (!isNaN(lastActive.getTime())) {
+                    if ((now - lastActive.getTime()) < offlineAfter) online = true;
+                }
+            }
+            return { ...d, online };
+        });
+        const routes = (() => {
+            try {
+                const rows = db.prepare('SELECT link_key, points_json, updated_at FROM topology_routes ORDER BY updated_at DESC').all();
+                const out = [];
+                for (const r of rows) {
+                    try {
+                        const pts = JSON.parse(String(r.points_json || '[]'));
+                        if (!Array.isArray(pts)) continue;
+                        out.push({ link_key: r.link_key, points: pts, updated_at: r.updated_at });
+                    } catch (_) {}
+                }
+                return out;
+            } catch (_) {
+                return [];
+            }
+        })();
+        res.json({ server, servers, olts, naps, clients, subvendos, routes });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -3951,8 +4807,17 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
     const description = typeof body.description === 'string' ? body.description : null;
 
     const asIntOrNull = (v) => {
+        if (v == null) return null;
+        if (typeof v === 'string' && v.trim() === '') return null;
         const n = Number(v);
         return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
+
+    const asFloatOrNull = (v) => {
+        if (v == null) return null;
+        if (typeof v === 'string' && v.trim() === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
     };
 
     const coinPin = asIntOrNull(body.coin_pin);
@@ -3969,12 +4834,24 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
     const freeTimeDownloadSpeed = asIntOrNull(body.free_time_download_speed);
     const freeTimeUploadSpeed = asIntOrNull(body.free_time_upload_speed);
     const relayPinActiveState = typeof body.relay_pin_active_state === 'string' ? body.relay_pin_active_state : null;
+    const latitude = asFloatOrNull(body.latitude);
+    const longitude = asFloatOrNull(body.longitude);
+    const hasNapId = Object.prototype.hasOwnProperty.call(body, 'nap_id');
+    const napId = hasNapId ? asIntOrNull(body.nap_id) : undefined;
+    const plcPort = Object.prototype.hasOwnProperty.call(body, 'plc_port') ? asIntOrNull(body.plc_port) : undefined;
 
     if (coinPin != null && (coinPin < 0 || coinPin > 16)) return res.status(400).json({ error: 'Invalid coin pin' });
     if (relayPin != null && (relayPin < 0 || relayPin > 16)) return res.status(400).json({ error: 'Invalid relay pin' });
     if (pesoPerPulse != null && (pesoPerPulse < 1 || pesoPerPulse > 100)) return res.status(400).json({ error: 'Invalid vendo rate' });
     if (pulseDivisor != null && (pulseDivisor < 1 || pulseDivisor > 20)) return res.status(400).json({ error: 'Invalid pulse divisor' });
     if (relayPinActiveState != null && !['HIGH', 'LOW'].includes(relayPinActiveState)) return res.status(400).json({ error: 'Invalid relay pin active state' });
+    if (latitude != null && (latitude < -90 || latitude > 90)) return res.status(400).json({ error: 'Invalid latitude' });
+    if (longitude != null && (longitude < -180 || longitude > 180)) return res.status(400).json({ error: 'Invalid longitude' });
+    if (plcPort !== undefined && plcPort != null && (plcPort < 1 || plcPort > 256)) return res.status(400).json({ error: 'Invalid PLC port' });
+    if (hasNapId && napId != null) {
+        const exists = db.prepare('SELECT id FROM naps WHERE id = ?').get(napId);
+        if (!exists) return res.status(400).json({ error: 'Invalid nap_id' });
+    }
 
     try {
         db.prepare(`
@@ -3994,7 +4871,11 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
                 free_time_enabled = COALESCE(?, free_time_enabled),
                 free_time_download_speed = COALESCE(?, free_time_download_speed),
                 free_time_upload_speed = COALESCE(?, free_time_upload_speed),
-                relay_pin_active_state = COALESCE(?, relay_pin_active_state)
+                relay_pin_active_state = COALESCE(?, relay_pin_active_state),
+                latitude = COALESCE(?, latitude),
+                longitude = COALESCE(?, longitude),
+                plc_port = CASE WHEN ? = 1 THEN ? ELSE plc_port END,
+                nap_id = CASE WHEN ? = 1 THEN ? ELSE nap_id END
             WHERE id = ?
         `).run(
             name,
@@ -4013,6 +4894,12 @@ app.put('/api/admin/subvendo/devices/:id', isAuthenticated, (req, res) => {
             freeTimeDownloadSpeed,
             freeTimeUploadSpeed,
             relayPinActiveState,
+            latitude,
+            longitude,
+            plcPort !== undefined ? 1 : 0,
+            plcPort !== undefined ? plcPort : null,
+            hasNapId ? 1 : 0,
+            hasNapId ? napId : null,
             id
         );
 
@@ -5000,12 +5887,34 @@ app.get('/api/status', async (req, res) => {
         target_device_id: coinSession.targetDeviceId || null
     } : null;
 
+    const computeValidityPayload = (expiryStr) => {
+        const raw = expiryStr ? String(expiryStr).trim() : '';
+        if (!raw) return { validity_expiry: null, validity_remaining_seconds: null };
+        const ms = new Date(raw.replace(' ', 'T')).getTime();
+        if (!Number.isFinite(ms)) return { validity_expiry: raw, validity_remaining_seconds: null };
+        const rem = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+        return { validity_expiry: raw, validity_remaining_seconds: rem };
+    };
+
+    const validity = computeValidityPayload(user ? user.validity_expiry : null);
+    const speed = ip ? sessionService.getCurrentSpeed(ip) : { dl_speed: 0, ul_speed: 0 };
+    const internetIsUp = await monitoringService.checkInternet();
+
     res.set('Cache-Control', 'no-store');
     res.json({
         mac: mac || null,
         ip: ip || null,
         session_code: user ? user.user_code : null,
         time_remaining: user ? user.time_remaining : 0,
+        validity_expiry: validity.validity_expiry,
+        validity_remaining_seconds: validity.validity_remaining_seconds,
+        interface: user ? (user.interface || null) : null,
+        internet_is_up: !!internetIsUp,
+        internet_status: internetIsUp ? 'UP' : 'DOWN',
+        internet_down_bps: speed && speed.dl_speed != null ? Number(speed.dl_speed) : 0,
+        internet_up_bps: speed && speed.ul_speed != null ? Number(speed.ul_speed) : 0,
+        total_data_down: user ? (user.total_data_down || 0) : 0,
+        total_data_up: user ? (user.total_data_up || 0) : 0,
         points_balance: pointsBalance,
         is_paused: user ? user.is_paused : 0,
         is_connected: user ? user.is_connected : 0,
@@ -5151,6 +6060,7 @@ app.post('/api/coin-inserted', async (req, res) => {
     const best = calculateTimeFromRates(amount, svDevice ? svDevice.id : null);
     const minutesToAdd = Number(best.minutes) || 0;
     const secondsToAdd = minutesToAdd * 60;
+    const validityHoursToAdd = Math.max(0, Math.floor(Number(best.validity_hours_added) || 0));
 
     if (secondsToAdd <= 0) return res.status(400).json({ success: false, error: 'No rate available for this amount' });
 
@@ -5168,7 +6078,25 @@ app.post('/api/coin-inserted', async (req, res) => {
         if (svDevice.upload_speed != null) uploadSpeed = svDevice.upload_speed;
     }
 
+    const toSqliteLocal = (ms) => {
+        const d = new Date(ms - (new Date().getTimezoneOffset() * 60000));
+        return d.toISOString().slice(0, 19).replace('T', ' ');
+    };
+
+    const computeNewValidityExpiry = (currentExpiryStr, addHours) => {
+        const h = Math.max(0, Math.floor(Number(addHours) || 0));
+        if (h <= 0) return null;
+        const nowMs = Date.now();
+        let baseMs = nowMs;
+        if (currentExpiryStr) {
+            const parsed = new Date(String(currentExpiryStr).replace(' ', 'T')).getTime();
+            if (Number.isFinite(parsed) && parsed > nowMs) baseMs = parsed;
+        }
+        return toSqliteLocal(baseMs + h * 3600 * 1000);
+    };
+
     if (user) {
+        const newValidityExpiry = computeNewValidityExpiry(user.validity_expiry, validityHoursToAdd);
         db.prepare(`
             UPDATE users 
             SET time_remaining = time_remaining + ?, 
@@ -5178,9 +6106,10 @@ app.post('/api/coin-inserted', async (req, res) => {
                 is_paused = 0,
                 is_connected = 1,
                 last_active_at = CURRENT_TIMESTAMP,
-                last_traffic_at = CURRENT_TIMESTAMP
+                last_traffic_at = CURRENT_TIMESTAMP,
+                validity_expiry = COALESCE(?, validity_expiry)
             WHERE id = ?
-        `).run(secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed, user.id);
+        `).run(secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed, newValidityExpiry, user.id);
 
         try {
             const userCode = user.user_code || 'Unknown';
@@ -5190,10 +6119,11 @@ app.post('/api/coin-inserted', async (req, res) => {
             console.error('[Log] Failed to log extension:', e);
         }
     } else {
+        const newValidityExpiry = computeNewValidityExpiry(null, validityHoursToAdd);
         db.prepare(`
-            INSERT INTO users (mac_address, time_remaining, total_time, upload_speed, download_speed, is_paused, is_connected, last_active_at, last_traffic_at) 
-            VALUES (?, ?, ?, ?, ?, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `).run(mac, secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed);
+            INSERT INTO users (mac_address, time_remaining, total_time, upload_speed, download_speed, is_paused, is_connected, last_active_at, last_traffic_at, validity_expiry) 
+            VALUES (?, ?, ?, ?, ?, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+        `).run(mac, secondsToAdd, secondsToAdd, uploadSpeed, downloadSpeed, newValidityExpiry);
     }
 
     networkService.allowUser(mac);
@@ -5827,18 +6757,18 @@ app.get('/api/rates', (req, res) => {
             const dev = db.prepare('SELECT id FROM sub_vendo_devices WHERE device_id = ?').get(did);
             if (dev) {
                 const mapped = db.prepare(`
-                    SELECT r.amount, r.minutes, r.upload_speed, r.download_speed, r.is_pausable
+                    SELECT r.amount, r.minutes, r.validity_hours, r.upload_speed, r.download_speed, r.is_pausable
                     FROM rates r
                     JOIN sub_vendo_device_rates m ON m.rate_id = r.id
                     WHERE m.device_id = ? AND m.visible = 1
                     ORDER BY r.amount ASC
                 `).all(dev.id);
-                rates = mapped.length > 0 ? mapped : db.prepare('SELECT amount, minutes, upload_speed, download_speed, is_pausable FROM rates ORDER BY amount ASC').all();
+                rates = mapped.length > 0 ? mapped : db.prepare('SELECT amount, minutes, validity_hours, upload_speed, download_speed, is_pausable FROM rates ORDER BY amount ASC').all();
             } else {
-                rates = db.prepare('SELECT amount, minutes, upload_speed, download_speed, is_pausable FROM rates ORDER BY amount ASC').all();
+                rates = db.prepare('SELECT amount, minutes, validity_hours, upload_speed, download_speed, is_pausable FROM rates ORDER BY amount ASC').all();
             }
         } else {
-            rates = db.prepare('SELECT amount, minutes, upload_speed, download_speed, is_pausable FROM rates ORDER BY amount ASC').all();
+            rates = db.prepare('SELECT amount, minutes, validity_hours, upload_speed, download_speed, is_pausable FROM rates ORDER BY amount ASC').all();
         }
         res.json(rates);
     } catch (e) {
@@ -5860,15 +6790,26 @@ app.get('/api/admin/rates', isAuthenticated, (req, res) => {
 app.post('/api/admin/rates', isAuthenticated, (req, res) => {
     try {
         const { id, amount, minutes, upload_speed, download_speed, is_pausable } = req.body;
+        const hasValidityInBody = req.body && (Object.prototype.hasOwnProperty.call(req.body, 'validity_hours') || Object.prototype.hasOwnProperty.call(req.body, 'validityHours'));
+        const validityHoursRaw = req.body && (req.body.validity_hours ?? req.body.validityHours);
+        let validityHours = Math.max(0, Math.floor(Number(validityHoursRaw) || 0));
         
         if (id) {
-            db.prepare(`UPDATE rates SET amount=?, minutes=?, upload_speed=?, download_speed=?, is_pausable=? WHERE id=?`)
-              .run(amount, minutes, upload_speed, download_speed, is_pausable, id);
+            if (!hasValidityInBody) {
+                const existing = db.prepare('SELECT validity_hours FROM rates WHERE id = ?').get(id);
+                validityHours = existing && existing.validity_hours != null ? Number(existing.validity_hours) || 0 : 0;
+            }
+            db.prepare(`UPDATE rates SET amount=?, minutes=?, validity_hours=?, upload_speed=?, download_speed=?, is_pausable=? WHERE id=?`)
+              .run(amount, minutes, validityHours, upload_speed, download_speed, is_pausable, id);
+            const rate = db.prepare('SELECT * FROM rates WHERE id = ?').get(id);
+            return res.json({ success: true, rate });
         } else {
-            db.prepare(`INSERT INTO rates (amount, minutes, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?)`)
-              .run(amount, minutes, upload_speed, download_speed, is_pausable);
+            const result = db.prepare(`INSERT INTO rates (amount, minutes, validity_hours, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?, ?)`)
+              .run(amount, minutes, validityHours, upload_speed, download_speed, is_pausable);
+            const newId = Number(result && result.lastInsertRowid) || null;
+            const rate = newId ? db.prepare('SELECT * FROM rates WHERE id = ?').get(newId) : null;
+            return res.json({ success: true, rate });
         }
-        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
