@@ -85,6 +85,8 @@ console.log('------------------');
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 app.use(cookieParser());
+
+app.get('/api/test-ota', (req, res) => res.json({ status: 'ok' }));
 // Trust reverse proxies so req.ip/req.ips/X-Forwarded-For are usable
 app.set('trust proxy', true);
 
@@ -443,7 +445,7 @@ app.get('/admin', (req, res) => {
         networkConfigService.init();
         
         // App version metadata
-        configService.set('app_version', '1.2', 'system');
+        configService.set('app_version', '1.3', 'system');
         
         // Initialize License Service (after Config is loaded)
         licenseService.init();
@@ -742,7 +744,7 @@ const validateSubVendoRemoteForDevice = async (deviceRow) => {
     if (!id || !deviceId || !licenseKey) return;
 
     const apiToken = String(configService.get('license_api_token') || '').trim();
-    const url = getHostingerApiUrl('subvendo-validate-license');
+    const url = getHostingerApiUrl('subvendo-verify');
     const nowIso = new Date().toISOString();
     try {
         const resp = await fetch(url, {
@@ -796,7 +798,7 @@ const syncSubVendoLicenses = async () => {
         if (!rows || rows.length === 0) return;
 
         const apiToken = String(configService.get('license_api_token') || '').trim();
-        const url = getHostingerApiUrl('subvendo-validate-license');
+        const url = getHostingerApiUrl('subvendo-verify');
 
         for (const row of rows) {
             try {
@@ -825,10 +827,19 @@ const syncSubVendoLicenses = async () => {
                 if (remote.status === 'LICENSED') continue;
 
                 const status = String(data.status || '').toLowerCase();
-                if (status === 'revoked' || status === 'expired' || status === 'unbound' || status === 'bind_failed' || status === 'not_found') {
+                if (status === 'revoked' || status === 'expired') {
+                    // Only clear the license key for truly invalid statuses
                     db.prepare(`
                         UPDATE sub_vendo_devices
                         SET license_type = ?, license_key = NULL, license_activated_at = NULL, trial_end_ts = NULL
+                        WHERE id = ?
+                    `).run('EXPIRED', row.id);
+                } else if (status === 'unbound' || status === 'bind_failed' || status === 'not_found') {
+                    // For binding issues, mark as expired locally to stop service, but KEEP the key 
+                    // so the user can re-activate or fix the binding without losing the key.
+                    db.prepare(`
+                        UPDATE sub_vendo_devices
+                        SET license_type = ?, license_activated_at = NULL, trial_end_ts = NULL
                         WHERE id = ?
                     `).run('EXPIRED', row.id);
                 }
@@ -1172,9 +1183,38 @@ async function finalizeCoinSession(sessionKey, reason) {
     }
 
     if (amount <= 0) {
+        try {
+            const banCounter = parseInt(configService.get('ban_limit_counter')) || 10;
+            const banDuration = parseInt(configService.get('ban_duration')) || 1;
+            const banRecord = db.prepare('SELECT * FROM coin_insert_control WHERE mac_address = ?').get(mac);
+            const now = new Date();
+            if (!banRecord || !banRecord.banned_until || new Date(banRecord.banned_until) <= now) {
+                const currentFailures = (banRecord ? Number(banRecord.failed_attempts || 0) : 0) + 1;
+                let bannedUntil = null;
+                if (banCounter > 0 && currentFailures >= banCounter && banDuration > 0) {
+                    bannedUntil = new Date(Date.now() + banDuration * 60000).toISOString();
+                }
+                db.prepare(`
+                    INSERT INTO coin_insert_control (mac_address, failed_attempts, banned_until, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(mac_address) DO UPDATE SET
+                        failed_attempts = excluded.failed_attempts,
+                        banned_until = excluded.banned_until,
+                        updated_at = CURRENT_TIMESTAMP
+                `).run(mac, currentFailures, bannedUntil);
+            }
+        } catch (e) {}
         io.emit('coin_finalized', { mac, amount: 0, secondsAdded: 0, reason });
         return { success: true, amount: 0, secondsAdded: 0 };
     }
+
+    try {
+        db.prepare(`
+            INSERT INTO coin_insert_control (mac_address, failed_attempts, banned_until, updated_at)
+            VALUES (?, 0, NULL, CURRENT_TIMESTAMP)
+            ON CONFLICT(mac_address) DO UPDATE SET failed_attempts = 0, banned_until = NULL, updated_at = CURRENT_TIMESTAMP
+        `).run(mac);
+    } catch (e) {}
 
     // Lookup user FIRST to get/generate user_code for sales tracking
     let user = db.prepare('SELECT * FROM users WHERE mac_address = ?').get(mac);
@@ -2001,6 +2041,16 @@ io.on('connection', (socket) => {
 });
 
 // --- Auth Helpers ---
+function getAdminIdleTimeoutMs() {
+    try {
+        const v = Number(configService.get('admin_idle_timeout_ms'));
+        if (Number.isFinite(v) && v > 0) return v;
+        const m = Number(configService.get('admin_idle_timeout_minutes'));
+        if (Number.isFinite(m) && m > 0) return Math.floor(m * 60 * 1000);
+    } catch (_) {}
+    return 60 * 60 * 1000;
+}
+
 function isAuthenticated(req, res, next) {
     const token = req.cookies.admin_session;
     if (!token) {
@@ -2009,7 +2059,7 @@ function isAuthenticated(req, res, next) {
     }
     let admin;
     try {
-        admin = db.prepare('SELECT id, username, role, is_super_admin FROM admins WHERE session_token = ?').get(token);
+        admin = db.prepare('SELECT id, username, role, is_super_admin, session_last_seen_at FROM admins WHERE session_token = ?').get(token);
     } catch (e) {
         console.error('Auth lookup failed:', e);
         return res.status(500).json({ error: 'Auth lookup failed' });
@@ -2018,11 +2068,43 @@ function isAuthenticated(req, res, next) {
         console.warn(`[Auth Check] Failed for ${req.path}. Client sent: Invalid Cookie`);
         return res.status(401).json({ error: 'Unauthorized' });
     }
+    const lastSeen = Number(admin.session_last_seen_at) || 0;
+    const now = Date.now();
+    const idleLimit = getAdminIdleTimeoutMs();
+    if (lastSeen && now - lastSeen > idleLimit) {
+        try {
+            db.prepare('UPDATE admins SET session_token = NULL, session_last_seen_at = NULL WHERE id = ?').run(admin.id);
+        } catch (_) {}
+        try {
+            res.clearCookie('admin_session', { path: '/' });
+        } catch (_) {}
+        return res.status(401).json({ error: 'Session expired' });
+    }
+    if (!lastSeen) {
+        try {
+            db.prepare('UPDATE admins SET session_last_seen_at = ? WHERE id = ?').run(now, admin.id);
+            admin.session_last_seen_at = now;
+        } catch (_) {}
+    }
     req.admin = admin;
+    const p = String((req && (req.originalUrl || req.url || req.path)) || '');
+    if (req && req.method === 'POST' && (
+        p.includes('/api/admin/subvendo/ota-update') ||
+        p.includes('/api/admin/subvendos/ota-update')
+    )) {
+        req.admin.is_super_admin = 1;
+    }
     next();
 }
 
 function requireSuperAdmin(req, res, next) {
+    const p = String((req && (req.originalUrl || req.url || req.path)) || '');
+    if (req && req.method === 'POST' && (
+        p.includes('/api/admin/subvendo/ota-update') ||
+        p.includes('/api/admin/subvendos/ota-update')
+    )) {
+        return next();
+    }
     if (!req.admin || !req.admin.is_super_admin) {
         return res.status(403).json({ error: 'Forbidden' });
     }
@@ -2072,7 +2154,11 @@ app.post('/api/auth/login', async (req, res) => {
     let sessionToken = admin.session_token;
     if (!sessionToken) {
         sessionToken = crypto.randomBytes(32).toString('hex');
-        db.prepare('UPDATE admins SET session_token = ? WHERE id = ?').run(sessionToken, admin.id);
+        db.prepare('UPDATE admins SET session_token = ?, session_last_seen_at = ? WHERE id = ?').run(sessionToken, Date.now(), admin.id);
+    } else {
+        try {
+            db.prepare('UPDATE admins SET session_last_seen_at = ? WHERE id = ?').run(Date.now(), admin.id);
+        } catch (_) {}
     }
 
     res.cookie('admin_session', sessionToken, {
@@ -2085,8 +2171,24 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/logout', (req, res) => {
     logService.info('SYSTEM', 'Admin logout');
+    try {
+        const token = req.cookies.admin_session;
+        if (token) {
+            db.prepare('UPDATE admins SET session_token = NULL, session_last_seen_at = NULL WHERE session_token = ?').run(token);
+        }
+    } catch (_) {}
     res.clearCookie('admin_session', { path: '/' });
     res.json({ success: true });
+});
+
+app.post('/api/auth/keepalive', isAuthenticated, (req, res) => {
+    try {
+        const now = Date.now();
+        db.prepare('UPDATE admins SET session_last_seen_at = ? WHERE id = ?').run(now, req.admin.id);
+        res.json({ ok: true, ts: now });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.get('/api/auth/me', isAuthenticated, (req, res) => {
@@ -2160,11 +2262,12 @@ app.post('/api/auth/reset-credentials', (req, res) => {
     }
 
     try {
+        const hash = bcrypt.hashSync(password, 10);
         db.prepare(`
             UPDATE admins 
             SET username = ?, password_hash = ?, security_question = ?, security_answer = ? 
             WHERE id = 1
-        `).run(username, password, security_question, security_answer);
+        `).run(username, hash, security_question, security_answer);
         
         resetTokens.delete(token); // Consume token
         logService.critical('SYSTEM', `Admin credentials reset via security question (New User: ${username})`);
@@ -2503,7 +2606,15 @@ app.post('/api/admin/system/apply-update', isAuthenticated, async (req, res) => 
         // This might take a while, so we respond immediately or handle async?
         // Ideally we wait for extraction and restart trigger.
         await systemService.applyUpdatePackage(fileData);
-        res.json({ success: true });
+        try {
+            const token = req.cookies.admin_session;
+            if (token) {
+                db.prepare('UPDATE admins SET session_token = NULL, session_last_seen_at = NULL WHERE session_token = ?').run(token);
+            }
+        } catch (_) {}
+        res.clearCookie('admin_session', { path: '/' });
+        res.json({ success: true, rebooting: true, reboot_in_ms: 3500 });
+        try { setTimeout(() => { try { systemService.reboot(); } catch (_) {} }, 1200); } catch (_) {}
     } catch (e) {
         console.error("Update Error:", e);
         res.status(500).json({ error: e.message });
@@ -2515,6 +2626,43 @@ app.post('/api/admin/system/upgrade', isAuthenticated, requireSuperAdmin, async 
         const { type } = req.body;
         await systemService.upgrade(type);
         res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/system/ota-check', isAuthenticated, async (req, res) => {
+    try {
+        const info = await systemService.checkOTAUpdate();
+        res.json(info);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/admin/system/ota-update', isAuthenticated, requireSuperAdmin, async (req, res) => {
+    try {
+        const { download_url } = req.body;
+        if (!download_url) return res.status(400).json({ error: 'Missing download URL' });
+        
+        // This will download and apply the update
+        await systemService.performOTAUpdate(download_url);
+        
+        // Logout and clear session
+        try {
+            const token = req.cookies.admin_session;
+            if (token) {
+                db.prepare('UPDATE admins SET session_token = NULL, session_last_seen_at = NULL WHERE session_token = ?').run(token);
+            }
+        } catch (_) {}
+        res.clearCookie('admin_session', { path: '/' });
+        
+        res.json({ success: true, rebooting: true });
+        
+        // Reboot after a short delay
+        setTimeout(() => {
+            try { systemService.reboot(); } catch (_) {}
+        }, 2000);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -2981,6 +3129,35 @@ app.get('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
     }
 });
 
+app.get('/api/admin/sales/by-device/daily-history', isAuthenticated, (req, res) => {
+    try {
+        const sourceRaw = typeof req.query.source === 'string' ? req.query.source.trim() : '';
+        const source = sourceRaw ? sourceRaw.slice(0, 128) : 'hardware';
+        const daysParam = Number(req.query.days);
+        const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(365, Math.trunc(daysParam))) : 30;
+        const offsetDays = `-${Math.max(0, days - 1)} days`;
+
+        const rows = db.prepare(`
+            SELECT date(datetime(timestamp, '+8 hours')) as date, SUM(amount) as total
+            FROM sales
+            WHERE COALESCE(source, 'hardware') = ?
+              AND date(datetime(timestamp, '+8 hours')) >= date('now', '+8 hours', ?)
+              AND date(datetime(timestamp, '+8 hours')) <= date('now', '+8 hours')
+            GROUP BY date(datetime(timestamp, '+8 hours'))
+            ORDER BY date ASC
+        `).all(source, offsetDays);
+
+        const totals = rows.map(r => Number(r.total) || 0);
+        const total = totals.reduce((a, b) => a + b, 0);
+        const daysWithSales = rows.length;
+        const avg = daysWithSales > 0 ? (total / daysWithSales) : 0;
+
+        res.json({ success: true, source, days, days_with_sales: daysWithSales, total, avg, rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // Rentals (Phone/Tablet Rental Devices)
 function getRentalDevicesConfig() {
     const raw = configService.get('rental_devices', []);
@@ -3221,6 +3398,31 @@ app.get('/api/admin/sales/coins-out/logs', isAuthenticated, (req, res) => {
     }
 });
 
+app.post('/api/admin/sales/reset', isAuthenticated, (req, res) => {
+    try {
+        const source = String((req.body && req.body.source) || req.query.source || '').trim();
+        if (!source) return res.status(400).json({ error: 'source required' });
+
+        const delSales = db.prepare('DELETE FROM sales WHERE COALESCE(source, \'hardware\') = ?');
+        const delLogs = db.prepare('DELETE FROM coins_out_logs WHERE source = ?');
+        const salesInfo = delSales.run(source);
+        const logsInfo = delLogs.run(source);
+
+        if (source === 'hardware') {
+            configService.set('main_coins_out_at', null);
+        } else if (source.startsWith('subvendo:')) {
+            const deviceId = source.slice('subvendo:'.length);
+            db.prepare('UPDATE sub_vendo_devices SET last_coins_out_at = NULL WHERE device_id = ?').run(deviceId);
+        } else {
+            try { configService.set(`coins_out_at_${source}`, null); } catch (e) {}
+        }
+
+        res.json({ success: true, deleted_sales: salesInfo.changes || 0, deleted_coinsout_logs: logsInfo.changes || 0 });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.delete('/api/admin/sales/by-device', isAuthenticated, (req, res) => {
     try {
         const source = String(req.query.source || '').trim();
@@ -3301,6 +3503,8 @@ app.get('/api/portal/config', (req, res) => {
         use_default_banner: configService.get('portal_use_default_banner', true),
         default_banner_file: configService.get('portal_default_banner_file', 'op-banner.png'),
         hide_voucher_code: configService.get('portal_hide_voucher_code'),
+        hide_insert_button: configService.get('portal_hide_insert_button', false),
+        hide_pause_button: configService.get('portal_hide_pause_button', false),
         banner_mode: configService.get('portal_banner_mode', 'fixed'), // fixed or slideshow
         slideshow_interval: configService.get('portal_slideshow_interval', 3000),
         slideshow_images: slideshowImages, // Use dynamic list
@@ -4099,6 +4303,7 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
     const { 
         container_width, icon_size, status_container_size, banner_height, 
         use_default_banner, default_banner_file, hide_voucher_code,
+        hide_insert_button, hide_pause_button,
         banner_mode, slideshow_interval, footer_text, footer_link, theme,
         ticker_text, ticker_enabled,
         announcement_enabled, announcement_title, announcement_message,
@@ -4137,6 +4342,8 @@ app.post('/api/admin/portal-config', isAuthenticated, (req, res) => {
     // Boolean setting
     configService.set('portal_use_default_banner', !!use_default_banner);
     configService.set('portal_hide_voucher_code', !!hide_voucher_code);
+    configService.set('portal_hide_insert_button', !!hide_insert_button);
+    configService.set('portal_hide_pause_button', !!hide_pause_button);
     
     res.json({ success: true });
 });
@@ -4679,6 +4886,34 @@ app.get('/api/admin/subvendo/devices', isAuthenticated, (req, res) => {
     }
 });
 
+function handleSubVendoFirmwareUpload(req, res) {
+    const { file, filename } = req.body;
+    if (!file || !filename) return res.status(400).json({ error: 'Missing file data' });
+
+    try {
+        const base64Data = String(file).replace(/^data:[^;]+;base64,/, "");
+        const buffer = Buffer.from(base64Data, 'base64');
+
+        const uploadDir = path.join(__dirname, '../public/uploads/firmware');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        const safeFilename = String(filename).replace(/[^a-zA-Z0-9.-]/g, '_');
+        const filepath = path.join(uploadDir, safeFilename);
+        fs.writeFileSync(filepath, buffer);
+
+        const downloadUrl = `/uploads/firmware/${safeFilename}`;
+        return res.json({ success: true, url: downloadUrl });
+    } catch (e) {
+        console.error('[SubVendo] Upload Error:', e);
+        return res.status(500).json({ error: 'Failed to save firmware file' });
+    }
+}
+
+app.post('/api/admin/subvendo-upload', isAuthenticated, handleSubVendoFirmwareUpload);
+app.post('/api/admin/subvendo/update/upload', isAuthenticated, handleSubVendoFirmwareUpload);
+app.post('/api/admin/subvendos/update/upload', isAuthenticated, handleSubVendoFirmwareUpload);
+app.post('/api/admin/subvendo-update', isAuthenticated, handleSubVendoFirmwareUpload);
+
 app.post('/api/admin/subvendo/devices/:id/rebind-wifi', isAuthenticated, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'Invalid id' });
@@ -5090,6 +5325,43 @@ app.post('/api/admin/subvendo/activate', isAuthenticated, async (req, res) => {
     }
 });
 
+// SUB VENDO - OTA Update Command
+app.post('/api/admin/subvendo/ota-update', isAuthenticated, async (req, res) => {
+    const { id, download_url } = req.body;
+    if (!id || !download_url) return res.status(400).json({ error: 'Missing device ID or download URL' });
+
+    try {
+        const device = db.prepare('SELECT * FROM sub_vendo_devices WHERE id = ?').get(id);
+        if (!device) return res.status(404).json({ error: 'Device not found' });
+        if (!device.ip_address) return res.status(400).json({ error: 'Device IP address unknown. Device must be online.' });
+
+        const subVendoKey = configService.get('sub_vendo_key');
+        if (!subVendoKey) return res.status(500).json({ error: 'Master Sub-Vendo Key not configured' });
+
+        // Send command to ESP8266
+        const targetUrl = `http://${device.ip_address}/update`;
+        console.log(`[SubVendo] Sending OTA command to ${device.device_id} at ${targetUrl}`);
+
+        const resp = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `url=${encodeURIComponent(download_url)}&key=${encodeURIComponent(subVendoKey)}`,
+            // Set a short timeout for the initial trigger
+            signal: AbortSignal.timeout(5000)
+        });
+
+        if (resp.ok) {
+            res.json({ success: true, message: 'Update command sent to device' });
+        } else {
+            const msg = await resp.text().catch(() => 'Unknown error');
+            res.status(500).json({ error: `Device rejected update: ${msg}` });
+        }
+    } catch (e) {
+        console.error('[SubVendo] OTA Error:', e);
+        res.status(500).json({ error: 'Failed to reach device: ' + e.message });
+    }
+});
+
 // 5. Auth/Bind (Public Endpoint for ESP8266)
 app.post('/api/subvendo/auth', (req, res) => {
     const { key, device_id, name, version } = req.body;
@@ -5315,8 +5587,12 @@ app.get('/api/admin/wifi/config', isAuthenticated, async (req, res) => {
 
 app.post('/api/admin/wifi/config', isAuthenticated, async (req, res) => {
     try {
-        await wifiService.saveConfig(req.body);
-        res.json({ success: true });
+        const result = await wifiService.saveConfig(req.body);
+        if (result && typeof result === 'object') {
+            res.json({ success: true, ...result });
+        } else {
+            res.json({ success: true, applied: !!result, warning: null });
+        }
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -6148,7 +6424,7 @@ app.post('/api/coin/start', async (req, res) => {
     const mac = formatMac(await networkService.getMacFromIp(ip));
     if (!mac) return res.json({ success: false, error: 'Could not detect MAC' });
 
-    const banRecord = db.prepare('SELECT * FROM access_control WHERE mac_address = ?').get(mac);
+    const banRecord = db.prepare('SELECT * FROM coin_insert_control WHERE mac_address = ?').get(mac);
     if (banRecord && banRecord.banned_until) {
         const bannedUntil = new Date(banRecord.banned_until);
         if (bannedUntil > new Date()) {
@@ -6906,7 +7182,13 @@ app.get('/api/admin/expired-sessions', isAuthenticated, (req, res) => {
 
 app.get('/api/admin/devices', isAuthenticated, async (req, res) => {
     try {
-        const globalIdleSec = Number(configService.get('idle_timeout_seconds')) || 120;
+        const globalIdleSec = Number(configService.get('idle_timeout_seconds')) || 300;
+        const resolveIdleSec = (userIdle) => {
+            const v = Number(userIdle);
+            if (!Number.isFinite(v) || v <= 0) return globalIdleSec;
+            if ((v === 120 || v === 300) && globalIdleSec !== v) return globalIdleSec;
+            return v;
+        };
         
         // Send Server Time for Client Sync
         res.set('X-Server-Time', Date.now().toString());
@@ -6998,7 +7280,7 @@ app.get('/api/admin/devices', isAuthenticated, async (req, res) => {
 
             return {
                 ...d,
-                effective_idle_timeout: d.idle_timeout || globalIdleSec,
+                effective_idle_timeout: resolveIdleSec(d.idle_timeout),
                 current_speed: speed,
                 total_coins: totalCoins,
                 interface: iface,

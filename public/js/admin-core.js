@@ -2996,8 +2996,16 @@
                     const total = (Number(r.total) || 0).toFixed(2);
                     const daily = (Number(r.daily) || 0).toFixed(2);
                     const pending = (Number(r.pending) || 0).toFixed(2);
+                    const source = String(r.source || '');
+                    const name = String(r.name || r.source || '-');
+                    const isSubVendo = source.startsWith('subvendo:');
                     tr.innerHTML = `
-                        <td>${r.name || r.source || '-'}</td>
+                        <td>
+                            ${isSubVendo
+                                ? `<span style="cursor:pointer; text-decoration:underline; font-weight:600;" onclick="openSalesByVendoDailyModal('${source.replace(/'/g, "\\'")}', '${name.replace(/'/g, "\\'")}')">${name}</span>`
+                                : name
+                            }
+                        </td>
                         <td style="font-weight:bold;">₱${total}</td>
                         <td>₱${daily}</td>
                         <td style="color:#e67e22; font-weight:600;">₱${pending}</td>
@@ -3018,6 +3026,68 @@
 
         let salesCoinsOutSource = null;
         let salesCoinsOutPending = 0;
+
+        let salesByVendoDailySource = null;
+
+        async function openSalesByVendoDailyModal(source, displayName) {
+            const modal = document.getElementById('sales-by-vendo-daily-modal');
+            const titleEl = document.getElementById('sales-by-vendo-daily-device');
+            const avgEl = document.getElementById('sales-by-vendo-daily-avg');
+            const totalEl = document.getElementById('sales-by-vendo-daily-total');
+            const daysEl = document.getElementById('sales-by-vendo-daily-days');
+            const tbody = document.querySelector('#sales-by-vendo-daily-table tbody');
+
+            salesByVendoDailySource = String(source || '');
+            if (titleEl) titleEl.textContent = String(displayName || source || '-');
+            if (avgEl) avgEl.textContent = '₱0.00';
+            if (totalEl) totalEl.textContent = '₱0.00';
+            if (daysEl) daysEl.textContent = '0';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:16px;">Loading...</td></tr>';
+
+            if (modal) modal.style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/admin/sales/by-device/daily-history?source=${encodeURIComponent(salesByVendoDailySource)}&days=30`);
+                if (res.status === 401) return location.reload();
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data || data.success !== true) {
+                    throw new Error((data && (data.error || data.message)) ? (data.error || data.message) : 'Failed to load history');
+                }
+
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+                const total = Number(data.total) || 0;
+                const avg = Number(data.avg) || 0;
+                const daysWithSales = Number(data.days_with_sales) || 0;
+
+                if (avgEl) avgEl.textContent = `₱${avg.toFixed(2)}`;
+                if (totalEl) totalEl.textContent = `₱${total.toFixed(2)}`;
+                if (daysEl) daysEl.textContent = String(daysWithSales);
+
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    if (rows.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:16px; color:var(--text-muted);">No sales data</td></tr>';
+                    } else {
+                        rows.forEach(r => {
+                            const tr = document.createElement('tr');
+                            const label = String(r.date || '');
+                            const amount = Number(r.total) || 0;
+                            tr.innerHTML = `<td>${label}</td><td style="font-weight:700;">₱${amount.toFixed(2)}</td>`;
+                            tbody.appendChild(tr);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                if (tbody) tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:16px; color:red;">${String(e && e.message ? e.message : 'Error')}</td></tr>`;
+            }
+        }
+
+        function closeSalesByVendoDailyModal() {
+            const modal = document.getElementById('sales-by-vendo-daily-modal');
+            if (modal) modal.style.display = 'none';
+            salesByVendoDailySource = null;
+        }
 
         function openSalesCoinsOutModal(source) {
             const modal = document.getElementById('sales-coinsout-modal');

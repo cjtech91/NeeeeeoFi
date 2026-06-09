@@ -1142,11 +1142,13 @@ class NetworkService {
                 targets.push('8.8.8.8', '1.1.1.1');
             }
 
+            const pingTargets = ['1.1.1.1', '8.8.8.8', ...targets].filter(Boolean);
+
             // Auto-update active WAN interface based on routing table
             // This ensures we are always tracking the interface actually used for internet
-            if (process.platform === 'linux' && targets.length > 0) {
+            if (process.platform === 'linux' && pingTargets.length > 0) {
                 try {
-                    const activeIface = await this.getInterfaceForIp(targets[0]);
+                    const activeIface = await this.getInterfaceForIp(pingTargets[0]);
                     if (activeIface && activeIface !== 'lo' && activeIface !== 'br0' && activeIface !== this.wanInterface) {
                          console.log(`[Network] Auto-detected active WAN change: ${this.wanInterface} -> ${activeIface}`);
                          this.wanInterface = activeIface;
@@ -1154,7 +1156,7 @@ class NetworkService {
                 } catch (e) {}
             }
 
-            for (const target of targets) {
+            for (const target of pingTargets) {
                 let cmd;
                 if (process.platform === 'win32') {
                     cmd = `ping -n 1 -w 2000 ${target}`;
@@ -1168,6 +1170,22 @@ class NetworkService {
                 const result = await this.runCommand(cmd, true);
                 if (result !== null) {
                     return true;
+                }
+            }
+
+            if (process.platform === 'linux') {
+                const httpChecks = [
+                    'http://1.1.1.1',
+                    'http://neverssl.com',
+                    'https://connectivitycheck.gstatic.com/generate_204'
+                ];
+                for (const url of httpChecks) {
+                    const code = await this.runCommand(
+                        `bash -lc "code=$(curl -m 4 -s -o /dev/null -w '%{http_code}' '${url}' 2>/dev/null || true); echo $code"`,
+                        true
+                    );
+                    const normalized = String(code || '').trim();
+                    if (normalized && normalized !== '000') return true;
                 }
             }
 

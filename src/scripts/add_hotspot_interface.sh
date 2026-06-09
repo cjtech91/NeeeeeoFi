@@ -154,6 +154,14 @@ if ! iptables -C INPUT -i $IFACE -p tcp --dport 443 -j ACCEPT 2>/dev/null; then
     iptables -A INPUT -i $IFACE -p tcp --dport 443 -j ACCEPT
 fi
 
+# 4.5 Block DNS-over-TLS (Private DNS) to prevent bypassing local DNS filtering
+if ! iptables -C FORWARD -i $IFACE -p tcp --dport 853 -j DROP 2>/dev/null; then
+    iptables -A FORWARD -i $IFACE -p tcp --dport 853 -j DROP
+fi
+if ! iptables -C FORWARD -i $IFACE -p udp --dport 853 -j DROP 2>/dev/null; then
+    iptables -A FORWARD -i $IFACE -p udp --dport 853 -j DROP
+fi
+
 # 5. Drop Unauthorized Forwarding (Walled Garden Enforcement)
 # Insert near the top so it can't be bypassed by later custom ACCEPT rules.
 # For br0, keep position 2 so any pre-inserted allow rules (e.g. walled garden ACCEPT) can stay at position 1.
@@ -166,6 +174,20 @@ while iptables -C FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null; do
 done
 echo "Adding walled garden DROP rule for $IFACE (insert at $DROP_POS)..."
 iptables -I FORWARD $DROP_POS -i $IFACE -m mark ! --mark 99 -j DROP
+
+# Ensure domain-based walled garden chain is at the very top (above per-interface rules)
+if iptables -t filter -L WG_DOMAIN -n >/dev/null 2>&1; then
+    while iptables -t filter -C FORWARD -j WG_DOMAIN 2>/dev/null; do
+        iptables -t filter -D FORWARD -j WG_DOMAIN 2>/dev/null || break
+    done
+    iptables -t filter -I FORWARD 1 -j WG_DOMAIN 2>/dev/null || true
+fi
+if iptables -t nat -L WG_DOMAIN_NAT -n >/dev/null 2>&1; then
+    while iptables -t nat -C PREROUTING -j WG_DOMAIN_NAT 2>/dev/null; do
+        iptables -t nat -D PREROUTING -j WG_DOMAIN_NAT 2>/dev/null || break
+    done
+    iptables -t nat -I PREROUTING 1 -j WG_DOMAIN_NAT 2>/dev/null || true
+fi
 
 echo "Hotspot rules applied for $IFACE."
 echo "  - DNS interception: YES"

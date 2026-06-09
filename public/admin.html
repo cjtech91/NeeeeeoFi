@@ -9,9 +9,38 @@
     <!-- Try Local Chart.js only - Removed CDN fallback to prevent offline blocking -->
     <script src="/js/chart.js"></script>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/vendor/qrcode.min.js"></script>
+    <script src="/js/qrcode.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+        </div>
+    </div>
+
+    <!-- OTA Update Sub-Vendo Modal -->
+    <div id="update-subvendo-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:400px; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size:0.9rem;">
+            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.1rem; background:var(--card-bg); display:flex; justify-content:space-between; align-items:center;">
+                <span>Firmware Update (OTA)</span>
+                <button onclick="closeUpdateSubVendoModal()" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--text-main);">&times;</button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:15px;">
+                <div style="font-weight:600; color:var(--text-muted);">Device: <span id="update-subvendo-name" style="color:var(--text-main);"></span></div>
+                
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:6px;">Select Firmware (.bin)</label>
+                    <input type="file" id="update-subvendo-file" accept=".bin" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--bg-body); color:var(--text-main);">
+                </div>
+
+                <div style="font-size:0.8rem; color:var(--warning); background:rgba(241, 196, 15, 0.1); padding:10px; border-radius:4px; border:1px solid rgba(241, 196, 15, 0.2);">
+                    <strong>Warning:</strong> Do not turn off the device or the central system during the update process.
+                </div>
+            </div>
+            <div style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn btn-sm btn-secondary" onclick="closeUpdateSubVendoModal()">Cancel</button>
+                <button class="btn btn-sm btn-primary" id="btn-submit-subvendo-update" onclick="submitSubVendoUpdate()">Start Update</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Optional: Add simple placeholder if Chart is missing
         if (typeof Chart === 'undefined') {
@@ -1124,6 +1153,72 @@
             }
         }
 
+        let currentOTAInfo = null;
+        async function checkOTAUpdate() {
+            const btn = document.getElementById('btn-ota-check');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spin" style="width:16px; height:16px; border:2px solid #fff; border-top:2px solid transparent; border-radius:50%;"></div>';
+
+            try {
+                const res = await fetch('/api/admin/system/ota-check');
+                const info = await res.json();
+                currentOTAInfo = info;
+
+                if (info.update_available) {
+                    document.getElementById('ota-current-version').textContent = info.current_version;
+                    document.getElementById('ota-latest-version').textContent = info.latest_version;
+                    document.getElementById('ota-release-notes').textContent = info.release_notes || 'No release notes provided.';
+                    document.getElementById('ota-modal').style.display = 'flex';
+                } else {
+                    alert(`System is up to date (Version ${info.current_version})`);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Failed to check for updates: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        async function performOTAUpdate() {
+            if (!currentOTAInfo || !currentOTAInfo.download_url) return;
+            
+            if (!await showConfirm(`Are you sure you want to download and install version ${currentOTAInfo.latest_version}? The system will restart automatically.`, true)) return;
+
+            const btn = document.getElementById('btn-perform-ota');
+            const statusMsg = document.getElementById('ota-status-msg');
+            btn.disabled = true;
+            btn.textContent = 'Updating...';
+            statusMsg.textContent = 'Downloading and applying update... Please do not turn off the system.';
+
+            try {
+                const res = await fetch('/api/admin/system/ota-update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ download_url: currentOTAInfo.download_url })
+                });
+
+                if (res.ok) {
+                    alert("Update successful! The system is now rebooting.");
+                    location.reload();
+                } else {
+                    const err = await res.json();
+                    alert("Update failed: " + err.error);
+                    btn.disabled = false;
+                    btn.textContent = 'Update Now';
+                    statusMsg.textContent = '';
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Update failed: " + e.message);
+                btn.disabled = false;
+                btn.textContent = 'Update Now';
+                statusMsg.textContent = '';
+            }
+        }
+
         function createUpdatePackage() {
             window.location.href = '/api/admin/system/create-update';
         }
@@ -1155,8 +1250,18 @@
                     });
                     
                     if (res.ok) {
-                        alert("Update applied successfully! System is restarting...");
-                        setTimeout(() => location.reload(), 5000);
+                        alert("Update applied successfully! Logging out and rebooting...");
+                        try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch (_) {}
+                        try {
+                            document.getElementById('dashboard-ui').style.display = 'none';
+                            const login = document.getElementById('login-screen');
+                            if (login) login.style.display = 'flex';
+                            const msg = document.getElementById('login-error');
+                            if (msg) msg.textContent = 'Update installed. Rebooting system...';
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('page', 'login');
+                            window.history.replaceState({ page: 'login' }, '', url.toString());
+                        } catch (_) {}
                     } else {
                         const err = await res.json();
                         alert("Update failed: " + err.error);
@@ -1553,7 +1658,12 @@
 
                 uniqueConversations.forEach(c => {
                     const mac = c.sender_mac;
-                    const displayName = c.user_code ? `ID: ${c.user_code}` : (c.client_id ? `Dev: ${c.client_id.substring(0,8)}...` : mac);
+                    const overrideLabel = (() => {
+                        try { return localStorage.getItem(`admin_chat_label_override_${mac}`) || ''; } catch (_) { return ''; }
+                    })();
+                    const displayName = overrideLabel
+                        ? `ID: ${overrideLabel}`
+                        : (c.user_code ? `ID: ${c.user_code}` : (c.client_id ? `Dev: ${c.client_id.substring(0,8)}...` : mac));
                     
                     const div = document.createElement('div');
                     div.className = `chat-item ${currentChatMac === mac ? 'active' : ''} ${c.unread_count > 0 ? 'unread' : ''}`;
@@ -2042,6 +2152,9 @@
                                     </button>
                                     <button class="subvendo-action-btn" onclick="openSubVendoFreeTimeConfig(${device.id})" title="Free Time">
                                         <svg viewBox="0 0 24 24"><path d="M12 1a11 11 0 1011 11A11 11 0 0012 1zm1 11.6l3.2 1.9-.8 1.3L11 13V6h2z"/></svg>
+                                    </button>
+                                    <button class="subvendo-action-btn" onclick="openUpdateSubVendoModal(${device.id}, '${(device.name || device.device_id || '').replace(/'/g, "\\'")}')" title="Firmware Update" style="color:var(--primary);">
+                                        <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                                     </button>
                                     <button class="subvendo-action-btn" onclick="openRebindSubVendoModal(${device.id}, '${(device.name||'').replace(/'/g, "\\'")}')" title="Rebind WiFi" style="color:#16a085;">
                                         <svg viewBox="0 0 24 24"><path d="M12 3c4.1 0 7.8 2 10 5.2l-1.7 1.1C18.5 6.8 15.4 5 12 5S5.5 6.8 3.7 9.3L2 8.2C4.2 5 7.9 3 12 3zm0 6c2.7 0 5.2 1.3 6.7 3.4l-1.7 1.1C15.9 12 14 11 12 11s-3.9 1-5 2.5l-1.7-1.1C6.8 10.3 9.3 9 12 9zm0 6c1.2 0 2.3.6 3 1.6l-3 3-3-3c.7-1 1.8-1.6 3-1.6z"/></svg>
@@ -3217,22 +3330,26 @@
             white-space: nowrap;
         }
         #active-codes-table {
-            table-layout: fixed;
+            table-layout: auto;
+            width: max-content;
+            min-width: 100%;
         }
         #active-codes-table th,
         #active-codes-table td {
-            overflow: hidden;
-            text-overflow: ellipsis;
+            overflow: visible;
+            text-overflow: unset;
         }
-        /* PPPoE Active Status fixed columns */
+        /* PPPoE Active Status */
         #pppoe-status-table {
-            table-layout: fixed;
+            table-layout: auto;
+            width: max-content;
+            min-width: 100%;
         }
         #pppoe-status-table th,
         #pppoe-status-table td {
             white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            overflow: visible;
+            text-overflow: unset;
         }
         #active-codes-header {
             display: flex;
@@ -3288,10 +3405,33 @@
         #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.25); display: flex; justify-content: center; align-items: center; z-index: 3000; }
         .loading-logo { width: 96px; height: auto; animation: bounce 1s ease-in-out infinite; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.35)); }
         @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
-        #login-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-body); display: none; justify-content: center; align-items: center; flex-direction: column; z-index: 1000; }
+        #login-screen { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: url('/loginbackground.jpg') no-repeat center center; 
+            background-size: cover; 
+            display: none; 
+            justify-content: center; 
+            align-items: center; 
+            flex-direction: column; 
+            z-index: 1000; 
+        }
         .login-box { background: var(--card-bg); padding: 10px; border-radius: 12px; width: 300px; box-shadow: var(--shadow); text-align: center; }
         .login-input { width: 90%; padding: 10px; margin: 8px auto; display: block; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; background: var(--input-bg); color: var(--text-main); }
         .login-btn { width: 90%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin: 10px auto; display: block; }
+        .login-password-wrap { width: 90%; margin: 8px auto; position: relative; }
+        .login-password-wrap .login-input { width: 100%; margin: 0; padding-right: 44px; }
+        .login-password-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--text-muted); border-radius: 0; width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+        .login-password-toggle:hover { color: var(--text-main); }
+        .login-password-toggle svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        .login-password-toggle .eye-closed { display: none; }
+        .login-password-toggle.is-shown .eye-open { display: none; }
+        .login-password-toggle.is-shown .eye-closed { display: inline; }
+        .login-meta { position: absolute; bottom: 16px; left: 0; right: 0; display: flex; justify-content: center; gap: 10px; color: var(--text-muted); font-size: 0.8rem; }
+        .login-meta strong { color: inherit; font-weight: 600; }
 
         /* Pull to Refresh */
         #pull-to-refresh {
@@ -4149,13 +4289,31 @@
                 <label for="username" style="display:none;">Username</label>
                 <input type="text" id="username" class="login-input" placeholder="Username" autocomplete="username">
                 <label for="password" style="display:none;">Password</label>
-                <input type="password" id="password" class="login-input" placeholder="Password" autocomplete="current-password">
+                <div class="login-password-wrap">
+                    <input type="password" id="password" class="login-input" placeholder="Password" autocomplete="current-password">
+                    <button type="button" id="toggle-login-password" class="login-password-toggle" onclick="toggleLoginPassword()" aria-label="Show password">
+                        <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-6.94"></path>
+                            <path d="M9.9 4.24A10.86 10.86 0 0 1 12 4c7 0 11 8 11 8a21.89 21.89 0 0 1-2.87 4.14"></path>
+                            <path d="M14.12 14.12a3 3 0 0 1-4.24-4.24"></path>
+                            <path d="M1 1l22 22"></path>
+                        </svg>
+                    </button>
+                </div>
                 <div style="text-align:right; margin-bottom:10px;">
                     <a href="/forgot.html" style="font-size:0.85rem; color: var(--secondary); text-decoration:none;">Forgot Password?</a>
                 </div>
                 <button type="submit" class="login-btn">Secure Login</button>
             </form>
             <p id="login-error" style="color: var(--status-expired); font-size:0.85rem; margin-top:10px;"></p>
+        </div>
+        <div class="login-meta">
+            <div id="login-app-version">V—</div>
+            <div>Developed By: <strong>CJTECH</strong></div>
         </div>
     </div>
 
@@ -4744,6 +4902,10 @@
                                     </svg>
                                     <span>SALES BY VENDO</span>
                                 </span>
+                            </div>
+                            <div style="margin-left:auto; display:flex; align-items:center; gap:10px; font-weight:700;">
+                                <span style="color:var(--text-muted); font-weight:600;">Total Un Coins-Out:</span>
+                                <span id="sales-by-device-uncoinsout-total" style="color:var(--warning);">₱0.00</span>
                             </div>
                         </div>
                         <div style="overflow-x:auto; overflow-y:auto; height:260px;">
@@ -6066,6 +6228,14 @@
                         <div class="card-header" id="active-codes-header">
                             <div class="card-title" id="active-codes-header-title">ACTIVE CODES <span id="active-codes-title-counts" style="font-size:0.85rem; margin-left:8px; color:var(--text-muted)"></span></div>
                             <div id="active-codes-header-filter" style="display:flex; align-items:center; gap:10px;">
+                                <div style="position: relative; display: flex; align-items: center; background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 5px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">
+                                    <svg viewBox="0 0 24 24" style="width: 18px; height: 18px; color: var(--text-muted); margin-left: 5px; pointer-events: none;">
+                                        <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                                    </svg>
+                                    <input type="text" id="active-codes-search" placeholder="Search code or MAC..." 
+                                        oninput="renderActiveSessionsTable()" 
+                                        style="padding: 6px 10px; border: none; background: transparent; color: var(--text-color); font-size: 0.85rem; width: 220px; outline: none;">
+                                </div>
                                 <div style="display:flex; align-items:center; gap:5px;">
                                     <span style="font-size:0.8rem; color:var(--text-muted);">Show:</span>
                                     <select onchange="setTableLimit(this)" style="border-radius:4px; padding:2px 6px; font-size:0.75rem;">
@@ -6073,6 +6243,12 @@
                                         <option value="100">100</option>
                                         <option value="500">500</option>
                                         <option value="all">ALL</option>
+                                    </select>
+                                </div>
+                                <div id="interface-filter-container" style="display:none; align-items:center; gap:5px;">
+                                    <span style="font-size:0.8rem; color:var(--text-muted);">Interface:</span>
+                                    <select id="active-codes-interface-filter" style="padding:5px 10px; border-radius:4px; border:1px solid var(--border-color); background:var(--card-bg); color:var(--text-color);" onchange="renderActiveSessionsTable()">
+                                        <option value="all">All Interfaces</option>
                                     </select>
                                 </div>
                                 <span>Status:</span>
@@ -6086,12 +6262,13 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="table-container" style="max-height: 500px; overflow-y: auto;">
+                        <div class="table-container">
                             <table id="active-codes-table" class="sales-grid-table" style="width:100%; border-collapse: collapse;">
                                 <colgroup>
                                     <col style="width: 130px;">
                                     <col style="width: 150px;">
                                     <col style="width: 140px;">
+                                    <col style="width: 90px;">
                                     <col style="width: 110px;">
                                     <col style="width: 150px;">
                                     <col style="width: 110px;">
@@ -6133,6 +6310,14 @@
                                                     <path fill="currentColor" d="M4 4h16v2H4zm0 4h10v2H4zm0 4h8v2H4zm0 4h6v2H4z"/>
                                                 </svg>
                                                 <span>Interface <span class="sort-indicator"></span></span>
+                                            </span>
+                                        </th>
+                                        <th id="th-sort-points" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('points')">
+                                            <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8zm.31-8.86c-1.77-.45-2.34-.94-2.34-1.67c0-.84.79-1.43 2.1-1.43c1.38 0 1.9.66 1.94 1.64h1.71c-.05-1.62-1.07-2.82-2.78-3.24V5h-2v1.4c-1.51.35-2.72 1.3-2.72 2.81c0 1.79 1.49 2.69 3.66 3.21c1.95.46 2.34 1.15 2.34 1.87c0 .53-.36 1.39-2.15 1.39c-1.56 0-2.18-.73-2.25-1.63H8.22c.08 1.93 1.42 2.91 3.1 3.24V19h2v-1.42c1.73-.29 2.73-1.29 2.73-2.71c0-2.14-1.8-2.75-3.64-3.01z"/>
+                                                </svg>
+                                                <span>Points <span class="sort-indicator"></span></span>
                                             </span>
                                         </th>
                                         <th id="th-sort-time" style="padding:10px; text-align:center; cursor:pointer;" onclick="sortActiveSessions('time')">
@@ -7363,6 +7548,36 @@
                                     </div>
                                 </div>
 
+                                <div style="grid-column: 1 / -1; margin-bottom: 10px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--bg-body); border-radius: 6px; border: 1px solid var(--border);">
+                                        <div style="display:flex; align-items:center;">
+                                            <span style="font-weight: 600; color: var(--text-main);">Hide Insert Coins / Extend Time Button</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="portal-hide-insert-button">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; padding-left: 10px;">
+                                        If enabled, the Insert Coins / Extend Time button will be hidden on the client portal.
+                                    </div>
+                                </div>
+
+                                <div style="grid-column: 1 / -1; margin-bottom: 10px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--bg-body); border-radius: 6px; border: 1px solid var(--border);">
+                                        <div style="display:flex; align-items:center;">
+                                            <span style="font-weight: 600; color: var(--text-main);">Hide Pause / Resume Button</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="portal-hide-pause-button">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; padding-left: 10px;">
+                                        If enabled, the Pause / Resume button will be hidden on the client portal.
+                                    </div>
+                                </div>
+
                                 <!-- Ticker Settings -->
                                 <div style="grid-column: 1 / -1; margin-top: 5px; border-top: 1px solid var(--border); padding-top: 10px;">
                                     <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--bg-body); border-radius: 6px; border: 1px solid var(--border);">
@@ -7935,6 +8150,11 @@
                                 <button id="btn-upgrade" onclick="upgradeSystem('online')" class="btn sys-maint-btn" style="background:var(--gauge-3);">
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                                     <span>Upgrade</span>
+                                </button>
+
+                                <button id="btn-ota-check" onclick="checkOTAUpdate()" class="btn sys-maint-btn" style="background:var(--primary);">
+                                    <svg viewBox="0 0 24 24"><path d="M21 10.12h-6.78l2.74-2.82c-2.73-2.7-7.15-2.8-9.88-.1-2.73 2.71-2.73 7.08 0 9.79s7.15 2.71 9.88 0C18.32 15.65 19 14.08 19 12.1h2c0 1.98-.88 4.55-2.64 6.29-3.51 3.48-9.21 3.48-12.72 0-3.5-3.47-3.5-9.11 0-12.58s9.21-3.47 12.72 0L21 3v7.12zM12.5 8v4.25l3.5 2.08-.75 1.23-4.25-2.56V8h1.5z"/></svg>
+                                    <span>OTA Update</span>
                                 </button>
 
                                 <button onclick="downloadBackup()" class="btn sys-maint-btn" style="background: var(--info);">
@@ -8736,6 +8956,29 @@
         </div>
     </div>
 
+    <!-- OTA Update Modal -->
+    <div id="ota-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:500px; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size: 0.9rem; padding: 20px;">
+            <div style="font-weight:bold; font-size:1.1rem; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+                <span>OTA Update Available</span>
+                <button onclick="document.getElementById('ota-modal').style.display='none'" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--text-muted);">&times;</button>
+            </div>
+            <div id="ota-content">
+                <div style="margin-bottom: 10px;"><strong>Current Version:</strong> <span id="ota-current-version">---</span></div>
+                <div style="margin-bottom: 10px;"><strong>Latest Version:</strong> <span id="ota-latest-version" style="color: var(--status-active); font-weight: bold;">---</span></div>
+                <div style="margin-bottom: 15px;">
+                    <strong>Release Notes:</strong>
+                    <div id="ota-release-notes" style="background: var(--bg-body); padding: 10px; border-radius: 6px; margin-top: 5px; font-size: 0.85rem; max-height: 150px; overflow-y: auto;">---</div>
+                </div>
+                <div id="ota-status-msg" style="color: var(--text-muted); font-size: 0.85rem; margin-top: 10px;"></div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button onclick="document.getElementById('ota-modal').style.display='none'" class="btn btn-sm">Later</button>
+                <button id="btn-perform-ota" onclick="performOTAUpdate()" class="btn btn-sm btn-primary">Update Now</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Point Rates List Modal -->
     <div id="point-rates-list-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
         <div style="background:var(--card-bg); width:95%; max-width:800px; max-height:90vh; overflow-y:auto; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size: 0.9rem;">
@@ -9283,16 +9526,30 @@
         // --- Idle Timeout Logic ---
         let idleTimer;
         const IDLE_LIMIT = 3600000; // 1 hour
+        let lastKeepaliveAt = 0;
 
         function resetIdleTimer() {
             clearTimeout(idleTimer);
             // Only set timer if user is logged in (dashboard is visible)
             const dashboard = document.getElementById('dashboard-ui');
             if (dashboard && dashboard.style.display !== 'none') {
+                try { sendAdminKeepalive(); } catch (e) {}
                 idleTimer = setTimeout(() => {
                     logout(true); 
                 }, IDLE_LIMIT);
             }
+        }
+
+        async function sendAdminKeepalive() {
+            const now = Date.now();
+            if (now - lastKeepaliveAt < 30000) return;
+            lastKeepaliveAt = now;
+            try {
+                const r = await fetch('/api/auth/keepalive', { method: 'POST', credentials: 'include' });
+                if (r.status === 401) {
+                    location.reload();
+                }
+            } catch (e) {}
         }
 
         function initIdleTimer() {
@@ -9312,6 +9569,7 @@
                 if (res.ok) showDashboard(false);
                 else {
                     document.getElementById('login-screen').style.display = 'flex';
+                    try { loadAppVersion(); } catch (_) {}
                     try {
                         const url = new URL(window.location.href);
                         url.searchParams.set('page', 'login');
@@ -9321,6 +9579,7 @@
             } catch(e) {
                 document.getElementById('loading-overlay').style.display = 'none';
                 document.getElementById('login-screen').style.display = 'flex';
+                try { loadAppVersion(); } catch (_) {}
                 try {
                     const url = new URL(window.location.href);
                     url.searchParams.set('page', 'login');
@@ -9359,6 +9618,21 @@
             });
             if (res.ok) showDashboard(true);
             else document.getElementById('login-error').textContent = 'Invalid credentials';
+        }
+
+        function toggleLoginPassword() {
+            const input = document.getElementById('password');
+            const btn = document.getElementById('toggle-login-password');
+            if (!input || !btn) return;
+            const nextType = input.type === 'password' ? 'text' : 'password';
+            input.type = nextType;
+            if (nextType === 'text') {
+                btn.classList.add('is-shown');
+                btn.setAttribute('aria-label', 'Hide password');
+            } else {
+                btn.classList.remove('is-shown');
+                btn.setAttribute('aria-label', 'Show password');
+            }
         }
 
         async function logout(skipConfirm = false) {
@@ -9422,6 +9696,7 @@
                 IntervalManager.stop('bandwidth_chart');
             } else {
                 if (currentView && currentView === 'dashboard') {
+                    try { sendAdminKeepalive(); } catch (e) {}
                     updateBandwidthChart();
                     IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 }
@@ -9452,16 +9727,20 @@
 
         async function loadAppVersion() {
             try {
-                const el = document.getElementById('app-version');
-                if (!el) return;
                 const res = await fetch('/api/admin/settings');
                 if (!res.ok) throw new Error('settings fetch failed');
                 const settings = await res.json();
-                const v = settings.app_version || '1.1';
-                el.textContent = `V${String(v).trim()}`;
+                const v = settings.app_version || '1.3';
+                const value = `V${String(v).trim()}`;
+                const el = document.getElementById('app-version');
+                if (el) el.textContent = value;
+                const elLogin = document.getElementById('login-app-version');
+                if (elLogin) elLogin.textContent = value;
             } catch (e) {
                 const el = document.getElementById('app-version');
-                if (el) el.textContent = 'V1.2';
+                if (el) el.textContent = 'V1.3';
+                const elLogin = document.getElementById('login-app-version');
+                if (elLogin) elLogin.textContent = 'V1.3';
             }
         }
 
@@ -12460,7 +12739,13 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 });
                 
                 if (res.ok) {
-                    alert('WiFi configuration saved. Access Point is restarting...');
+                    let data = null;
+                    try { data = await res.json(); } catch (_) {}
+                    if (data && data.warning) {
+                        alert('WiFi configuration saved, pero may error sa Hostapd/AP start:\n\n' + data.warning);
+                    } else {
+                        alert('WiFi configuration saved. Access Point is restarting...');
+                    }
                 } else {
                     const err = await res.json();
                     alert('Error saving WiFi config: ' + err.error);
@@ -12841,18 +13126,30 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 tbody.innerHTML = '';
                 window.salesByDeviceCache = Array.isArray(rows) ? rows : [];
                 if (!Array.isArray(rows) || rows.length === 0) {
+                    const totalEl = document.getElementById('sales-by-device-uncoinsout-total');
+                    if (totalEl) totalEl.textContent = '\u20b10.00';
                     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No device sales data</td></tr>';
                     return;
                 }
 
                 const sortedRows = rows.slice().sort((a, b) => (Number(b?.overall_total ?? b?.total) || 0) - (Number(a?.overall_total ?? a?.total) || 0));
+                const totalUncoinsOut = sortedRows.reduce((sum, r) => sum + (Number(r?.pending) || 0), 0);
+                const totalEl = document.getElementById('sales-by-device-uncoinsout-total');
+                if (totalEl) totalEl.textContent = '\u20b1' + totalUncoinsOut.toFixed(2);
                 sortedRows.forEach(r => {
                     const tr = document.createElement('tr');
                     const total = (Number(r.overall_total ?? r.total) || 0).toFixed(2);
                     const daily = (Number(r.daily) || 0).toFixed(2);
                     const pending = (Number(r.pending) || 0).toFixed(2);
+                    const source = String(r.source || '');
+                    const name = String(r.name || r.source || '-');
+                    const safeSource = source.replace(/'/g, "\\'");
+                    const safeName = name.replace(/'/g, "\\'");
+                    const deviceCell = source.startsWith('subvendo:')
+                        ? `<span style="cursor:pointer; text-decoration:underline; font-weight:600;" onclick="openSalesByVendoDailyModal('${safeSource}', '${safeName}')">${name}</span>`
+                        : name;
                     tr.innerHTML = `
-                        <td>${r.name || r.source || '-'}</td>
+                        <td>${deviceCell}</td>
                         <td style="font-weight:bold;">₱${total}</td>
                         <td>₱${daily}</td>
                         <td style="color:var(--warning); font-weight:600;">₱${pending}</td>
@@ -12866,8 +13163,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                                 <button class="btn btn-sm btn-primary icon-only" onclick="openSalesCoinsOutModal('${r.source || ''}')" title="Coins Out">
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 4.24 2 7v10c0 2.76 4.48 5 10 5s10-2.24 10-5V7c0-2.76-4.48-5-10-5zm0 2c4.42 0 8 .9 8 3s-3.58 3-8 3-8-.9-8-3 3.58-3 8-3zm0 16c-4.42 0-8-.9-8-3V9.97C5.7 11.25 8.73 12 12 12s6.3-.75 8-2.03V17c0 2.1-3.58 3-8 3z"/></svg>
                                 </button>
-                                <button class="btn btn-sm btn-danger icon-only" onclick="deleteSalesByDeviceSource('${r.source || ''}', '${(r.name || r.source || '').replace(/'/g, "\\'")}')" title="Delete Source">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                                <button class="btn btn-sm btn-danger icon-only" onclick="resetSalesByDeviceSource('${r.source || ''}', '${(r.name || r.source || '').replace(/'/g, "\\'")}')" title="Reset Sales">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 1 1-9.9-1h-2.02A7 7 0 1 0 12 6z"/></svg>
                                 </button>
                             </div>
                         </td>
@@ -12883,6 +13180,95 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         let salesCoinsOutSource = null;
         let salesCoinsOutPending = 0;
         let currentPppoeSales = [];
+        let salesByVendoDailySource = null;
+
+        async function openSalesByVendoDailyModal(source, displayName) {
+            const modal = document.getElementById('sales-by-vendo-daily-modal');
+            const titleEl = document.getElementById('sales-by-vendo-daily-device');
+            const avgEl = document.getElementById('sales-by-vendo-daily-avg');
+            const totalEl = document.getElementById('sales-by-vendo-daily-total');
+            const daysEl = document.getElementById('sales-by-vendo-daily-days');
+            const tbody = document.querySelector('#sales-by-vendo-daily-table tbody');
+
+            salesByVendoDailySource = String(source || '');
+            if (titleEl) titleEl.textContent = String(displayName || source || '-');
+            if (avgEl) avgEl.textContent = '₱0.00';
+            if (totalEl) totalEl.textContent = '₱0.00';
+            if (daysEl) daysEl.textContent = '0';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:16px;">Loading...</td></tr>';
+
+            if (modal) modal.style.display = 'flex';
+
+            try {
+                const daysWindow = 30;
+                const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' });
+                const manilaMidnightUtcMs = () => {
+                    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+                    const y = Number(parts.find(p => p.type === 'year')?.value) || 1970;
+                    const m = Number(parts.find(p => p.type === 'month')?.value) || 1;
+                    const d = Number(parts.find(p => p.type === 'day')?.value) || 1;
+                    return Date.UTC(y, m - 1, d, 0, 0, 0) - (8 * 60 * 60 * 1000);
+                };
+                const parseTs = (ts) => {
+                    const s = String(ts || '');
+                    if (!s) return null;
+                    if (s.includes('T')) return new Date(s);
+                    return new Date(s.replace(' ', 'T') + 'Z');
+                };
+
+                const histRes = await fetch('/api/admin/sales?type=history');
+                if (histRes.status === 401) return location.reload();
+                const hist = await histRes.json().catch(() => []);
+                if (!Array.isArray(hist)) throw new Error('Failed to load history');
+
+                const startMs = manilaMidnightUtcMs() - ((daysWindow - 1) * 24 * 60 * 60 * 1000);
+                const sums = new Map();
+                for (const row of hist) {
+                    const src = String(row && row.source ? row.source : 'hardware');
+                    if (src !== salesByVendoDailySource) continue;
+                    const dt = parseTs(row.timestamp);
+                    if (!dt || isNaN(dt.getTime())) continue;
+                    if (dt.getTime() < startMs) continue;
+                    const day = fmt.format(dt);
+                    const amt = Number(row.amount) || 0;
+                    sums.set(day, (sums.get(day) || 0) + amt);
+                }
+                const rows = Array.from(sums.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+                    .map(([date, total]) => ({ date, total }));
+                const totals = rows.map(r => Number(r.total) || 0);
+                const total = totals.reduce((a, b) => a + b, 0);
+                const daysWithSales = rows.length;
+                const avg = daysWithSales > 0 ? (total / daysWithSales) : 0;
+
+                if (avgEl) avgEl.textContent = `₱${avg.toFixed(2)}`;
+                if (totalEl) totalEl.textContent = `₱${total.toFixed(2)}`;
+                if (daysEl) daysEl.textContent = String(daysWithSales);
+
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    if (rows.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:16px; color:var(--text-muted);">No sales data</td></tr>';
+                    } else {
+                        rows.forEach(r => {
+                            const tr = document.createElement('tr');
+                            const label = String(r.date || '');
+                            const amount = Number(r.total) || 0;
+                            tr.innerHTML = `<td>${label}</td><td style="font-weight:700;">₱${amount.toFixed(2)}</td>`;
+                            tbody.appendChild(tr);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                if (tbody) tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:16px; color:var(--danger);">${String(e && e.message ? e.message : 'Error')}</td></tr>`;
+            }
+        }
+
+        function closeSalesByVendoDailyModal() {
+            const modal = document.getElementById('sales-by-vendo-daily-modal');
+            if (modal) modal.style.display = 'none';
+            salesByVendoDailySource = null;
+        }
 
         async function loadPppoeSalesData() {
             const startEl = document.getElementById('pppoe-sales-start');
@@ -13191,26 +13577,26 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             }
         }
 
-        async function deleteSalesByDeviceSource(source, name) {
+        async function resetSalesByDeviceSource(source, name) {
             const src = String(source || '');
             if (!src) return;
-            if (src === 'hardware') {
-                alert('This source cannot be deleted.');
-                return;
-            }
-            if (!confirm(`Delete all sales for:\n${name || src}\n\nThis will remove its row from SALES BY VENDO.`)) return;
+            if (!confirm(`Reset all sales for:\n${name || src}\n\nThis will clear total sales, remove it from revenue, and remove it from sales history.`)) return;
             try {
-                const res = await fetch('/api/admin/sales/by-device?source=' + encodeURIComponent(src), { method: 'DELETE' });
+                const res = await fetch('/api/admin/sales/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: src })
+                });
                 if (res.status === 401) return location.reload();
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok || !data.success) {
-                    alert('Delete failed: ' + (data.error || 'Unknown error'));
+                    alert('Reset failed: ' + (data.error || 'Unknown error'));
                     return;
                 }
-                await loadSalesByDevice(currentSalesType || 'daily');
+                await loadSalesData(currentSalesType || 'daily');
             } catch (e) {
-                console.error('Delete sales source error', e);
-                alert('Delete error: ' + e.message);
+                console.error('Reset sales error', e);
+                alert('Reset error: ' + e.message);
             }
         }
 
@@ -13606,7 +13992,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             container.appendChild(createGroup('Timeout (minutes)', sessionTimeoutInput));
             attachAutoSave(sessionTimeoutInput, 'session_timeout_minutes');
 
-            const idleTimeoutInput = createInput('idle_timeout_seconds', (settings.idle_timeout_seconds || '120'), 'number', 'Default 120');
+            const idleTimeoutInput = createInput('idle_timeout_seconds', (settings.idle_timeout_seconds || '300'), 'number', 'Default 300');
             container.appendChild(createGroup('Idle Timeout (seconds)', idleTimeoutInput));
             attachAutoSave(idleTimeoutInput, 'idle_timeout_seconds');
 
@@ -13803,6 +14189,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 use_default_banner: document.getElementById('portal-use-default-banner').checked,
                 default_banner_file: document.getElementById('portal-default-banner-file').value,
                 hide_voucher_code: document.getElementById('portal-hide-voucher-code').checked,
+                hide_insert_button: document.getElementById('portal-hide-insert-button').checked,
+                hide_pause_button: document.getElementById('portal-hide-pause-button').checked,
                 banner_mode: document.querySelector('input[name="banner_mode"]:checked').value,
                 slideshow_interval: document.getElementById('portal-slideshow-interval').value,
                 footer_text: document.getElementById('portal-footer-text').value,
@@ -14128,6 +14516,16 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                     hideVoucherToggle.checked = config.hide_voucher_code || false;
                 }
 
+                const hideInsertToggle = document.getElementById('portal-hide-insert-button');
+                if (hideInsertToggle) {
+                    hideInsertToggle.checked = config.hide_insert_button || false;
+                }
+
+                const hidePauseToggle = document.getElementById('portal-hide-pause-button');
+                if (hidePauseToggle) {
+                    hidePauseToggle.checked = config.hide_pause_button || false;
+                }
+
                 // Ticker Settings
                 const tickerEnabledToggle = document.getElementById('portal-ticker-enabled');
                 if (tickerEnabledToggle) {
@@ -14339,6 +14737,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             const useDefault = document.getElementById('portal-use-default-banner').checked;
             const defaultFile = document.getElementById('portal-default-banner-file').value;
             const hideVoucherCode = document.getElementById('portal-hide-voucher-code').checked;
+            const hideInsertButton = document.getElementById('portal-hide-insert-button').checked;
+            const hidePauseButton = document.getElementById('portal-hide-pause-button').checked;
             const tickerEnabled = document.getElementById('portal-ticker-enabled').checked;
             const tickerText = document.getElementById('portal-ticker-text').value;
 
@@ -14369,6 +14769,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                         use_default_banner: useDefault,
                         default_banner_file: defaultFile,
                         hide_voucher_code: hideVoucherCode,
+                        hide_insert_button: hideInsertButton,
+                        hide_pause_button: hidePauseButton,
                         ticker_enabled: tickerEnabled,
                         ticker_text: tickerText,
                         announcement_enabled: announcementEnabled,
@@ -15140,6 +15542,41 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
         contentScroll.addEventListener('mouseleave', () => {
             if(isPulling) { isPulling = false; ptr.style.marginTop = '-50px'; }
         });
+
+        const loginScreen = document.getElementById('login-screen');
+        if (loginScreen) {
+            let loginStartY = 0;
+            let loginIsPulling = false;
+            let loginShouldReload = false;
+            const loginIsVisible = () => {
+                try { return getComputedStyle(loginScreen).display !== 'none'; } catch (_) { return false; }
+            };
+
+            const loginHandleStart = (y) => {
+                if (!loginIsVisible()) return;
+                if ((window.scrollY || 0) !== 0) return;
+                loginStartY = y;
+                loginIsPulling = true;
+                loginShouldReload = false;
+            };
+
+            const loginHandleMove = (y) => {
+                if (!loginIsPulling || !loginIsVisible()) return;
+                const diff = y - loginStartY;
+                if (diff > 90) loginShouldReload = true;
+            };
+
+            const loginHandleEnd = () => {
+                if (!loginIsPulling) return;
+                loginIsPulling = false;
+                if (loginShouldReload) location.reload();
+                loginShouldReload = false;
+            };
+
+            loginScreen.addEventListener('touchstart', (e) => loginHandleStart(e.touches[0].clientY), { passive: true });
+            loginScreen.addEventListener('touchmove', (e) => loginHandleMove(e.touches[0].clientY), { passive: true });
+            loginScreen.addEventListener('touchend', loginHandleEnd);
+        }
 
         // --- ZeroTier Integration ---
         async function loadZeroTierStatus() {
@@ -16419,14 +16856,55 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
 
              const filterSelect = document.getElementById('active-codes-status-filter');
              const statusFilter = filterSelect ? filterSelect.value : 'all';
+             
+             const interfaceSelect = document.getElementById('active-codes-interface-filter');
+             const interfaceFilter = interfaceSelect ? interfaceSelect.value : 'all';
+             
+             const searchInput = document.getElementById('active-codes-search');
+             const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+             // Populate Interface Filter Dynamically
+             const interfaceContainer = document.getElementById('interface-filter-container');
+             if (interfaceSelect && interfaceContainer) {
+                 const currentInterfaces = [...new Set(cachedActiveUsers.map(u => u.interface).filter(i => i && i !== '-'))].sort();
+                 
+                 if (currentInterfaces.length > 0) {
+                     interfaceContainer.style.display = 'flex';
+                     const currentVal = interfaceSelect.value;
+                     // Keep "All" and only add interfaces that have active users
+                     let html = '<option value="all">All Interfaces</option>';
+                     currentInterfaces.forEach(iface => {
+                         html += `<option value="${iface}" ${currentVal === iface ? 'selected' : ''}>${iface}</option>`;
+                     });
+                     interfaceSelect.innerHTML = html;
+                 } else {
+                     interfaceContainer.style.display = 'none';
+                     interfaceSelect.value = 'all';
+                 }
+             }
 
              let filteredUsers = [...cachedActiveUsers];
 
-             // Apply Filter
+             // Apply Status Filter
              if (statusFilter === 'online') {
                  filteredUsers = filteredUsers.filter(u => u.is_connected && !u.is_paused);
              } else if (statusFilter === 'offline_paused') {
                  filteredUsers = filteredUsers.filter(u => !u.is_connected || u.is_paused);
+             }
+
+             // Apply Interface Filter
+             if (interfaceFilter !== 'all') {
+                 filteredUsers = filteredUsers.filter(u => u.interface === interfaceFilter);
+             }
+
+             // Apply Search
+             if (searchQuery !== '') {
+                 filteredUsers = filteredUsers.filter(u => {
+                     const code = (u.last_voucher_code || u.user_code || u.session_code || '').toLowerCase();
+                     const mac = (u.mac_address || '').toLowerCase();
+                     const ip = (u.ip_address || '').toLowerCase();
+                     return code.includes(searchQuery) || mac.includes(searchQuery) || ip.includes(searchQuery);
+                 });
              }
 
             const titleCountsEl = document.getElementById('active-codes-title-counts');
@@ -16469,6 +16947,10 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                          case 'interface':
                              valA = str(a.interface);
                              valB = str(b.interface);
+                             break;
+                         case 'points':
+                             valA = num(a.points_balance);
+                             valB = num(b.points_balance);
                              break;
                          case 'time':
                              valA = num(a.time_remaining);
@@ -16581,12 +17063,20 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 const codeHtml = u.last_voucher_code 
                     ? `<span style="font-weight:bold; color:${codeColor || 'var(--primary)'};">${u.last_voucher_code}</span>`
                     : `<span style="font-weight:bold; color:${codeColor || 'inherit'};">${u.user_code || u.session_code || '-'}</span>`;
+                const sessionCodeRaw = String(u.last_voucher_code || u.user_code || u.session_code || '').trim();
+                const canChat = String(u.mac_address || '').trim() !== '';
+                const chatBtnHtml = canChat
+                    ? `<button class="btn btn-sm btn-primary icon-only" onclick="openChatFromActiveCode('${encodeURIComponent(String(u.mac_address || ''))}','${encodeURIComponent(sessionCodeRaw)}')" title="Chat Client">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 11H6v-2h12v2zm0-3H6V8h12v2zm0-3H6V5h12v2z"/></svg>
+                        </button>`
+                    : '';
 
                  tr.innerHTML = `
                     <td style="padding:10px; text-align:center;">${codeHtml}</td>
                      <td style="padding:10px; text-align:center;">${u.mac_address}</td>
                      <td style="padding:10px; text-align:center;">${(u.ip_address || '-').replace('::ffff:', '')}</td>
                      <td style="padding:10px; text-align:center;">${iface}</td>
+                     <td style="padding:10px; text-align:center;">${Number(u.points_balance || 0).toFixed(2)}</td>
                      <td style="padding:10px; text-align:center;">${timeString}</td>
                     <td style="padding:10px; text-align:center;">₱${totalCoins.toFixed(2)}</td>
                    <td style="padding:10px; text-align:center;">
@@ -16610,6 +17100,7 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                      <td style="padding:10px; text-align:center;">${status}</td>
                      <td style="padding:10px; text-align:center;">
                          <div style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap;">
+                             ${chatBtnHtml}
                              <button class="btn btn-sm btn-primary icon-only" onclick="modifyCode('${u.id}', '${u.last_voucher_code || u.user_code || u.session_code || ''}', ${u.time_remaining}, ${u.download_speed || 5120}, ${u.upload_speed || 1024})" title="Edit">
                                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0L15 3.59l3.75 3.75l1.96-2.3z"/></svg>
                              </button>
@@ -16747,6 +17238,22 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             } catch (e) {
                 console.error('Error deleting session', e);
             }
+        }
+
+        function openChatFromActiveCode(macEnc, codeEnc) {
+            const mac = decodeURIComponent(String(macEnc || ''));
+            const code = decodeURIComponent(String(codeEnc || ''));
+            if (!mac) return;
+            try {
+                if (code) localStorage.setItem(`admin_chat_label_override_${mac}`, code);
+            } catch (_) {}
+
+            navigateToView('chat');
+            try { setChatType('hotspot'); } catch (_) {}
+            try { initChatSocket(); } catch (_) {}
+            setTimeout(() => {
+                try { selectConversation(mac, code ? `ID: ${code}` : mac); } catch (_) {}
+            }, 50);
         }
 
         async function loadExpiredSessions() {
@@ -18081,6 +18588,43 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
             </div>
             <div style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
                 <button class="btn btn-sm btn-danger" onclick="closeSalesCoinsOutLogsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="sales-by-vendo-daily-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center;">
+        <div style="background:var(--card-bg); width:95%; max-width:520px; border-radius:8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); color:var(--text-main); display:flex; flex-direction:column; font-size:0.9rem;">
+            <div style="padding:15px; border-bottom:1px solid var(--border); font-weight:bold; font-size:1.05rem; background:var(--card-bg); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                    <div style="font-weight:800;">Daily Sales History</div>
+                    <div id="sales-by-vendo-daily-device" style="font-size:0.85rem; color:var(--text-muted); font-weight:600;"></div>
+                </div>
+                <button class="btn btn-sm btn-danger" onclick="closeSalesByVendoDailyModal()">Close</button>
+            </div>
+            <div style="padding:14px 18px; border-bottom:1px solid var(--border); display:flex; gap:14px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:120px;">
+                    <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Sales Info: avg</div>
+                    <div id="sales-by-vendo-daily-avg" style="font-weight:800;">₱0.00</div>
+                </div>
+                <div style="flex:1; min-width:120px;">
+                    <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Total</div>
+                    <div id="sales-by-vendo-daily-total" style="font-weight:800; color:var(--status-active);">₱0.00</div>
+                </div>
+                <div style="flex:1; min-width:120px;">
+                    <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Days</div>
+                    <div id="sales-by-vendo-daily-days" style="font-weight:800;">0</div>
+                </div>
+            </div>
+            <div style="padding:16px 18px; max-height:320px; overflow-y:auto;">
+                <table id="sales-by-vendo-daily-table" class="sales-grid-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -19530,6 +20074,8 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 document.getElementById('portal-use-default-banner').checked = config.use_default_banner;
                 if (config.default_banner_file) document.getElementById('portal-default-banner-file').value = config.default_banner_file;
                 document.getElementById('portal-hide-voucher-code').checked = config.hide_voucher_code;
+                document.getElementById('portal-hide-insert-button').checked = !!config.hide_insert_button;
+                document.getElementById('portal-hide-pause-button').checked = !!config.hide_pause_button;
                 
                 // Banner Mode
                 if (config.banner_mode) {
@@ -19730,6 +20276,74 @@ IntervalManager.start('bandwidth_chart', updateBandwidthChart, 2000);
                 alert('Error: ' + e.message);
             } finally {
                 btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        let updatingSubVendoId = null;
+        function openUpdateSubVendoModal(id, name) {
+            updatingSubVendoId = id;
+            document.getElementById('update-subvendo-name').textContent = name;
+            document.getElementById('update-subvendo-modal').style.display = 'flex';
+        }
+
+        function closeUpdateSubVendoModal() {
+            document.getElementById('update-subvendo-modal').style.display = 'none';
+            updatingSubVendoId = null;
+        }
+
+        async function submitSubVendoUpdate() {
+            const fileInput = document.getElementById('update-subvendo-file');
+            if (!fileInput.files || fileInput.files.length === 0) return alert('Please select a .bin firmware file');
+            
+            const file = fileInput.files[0];
+            const btn = document.getElementById('btn-submit-subvendo-update');
+            const original = btn.textContent;
+            
+            btn.textContent = 'Uploading...';
+            btn.disabled = true;
+
+            try {
+                // 1. Read file as Base64 for upload
+                const reader = new FileReader();
+                const fileData = await new Promise((resolve, reject) => {
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+
+                // 2. Upload to Sub-Vendo specific upload endpoint
+                const uploadRes = await fetch('/api/admin/subvendo-upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file: fileData, filename: file.name })
+                });
+                
+                const uploadData = await uploadRes.json();
+                if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload firmware to server');
+                
+                const downloadUrl = `${window.location.origin}${uploadData.url}`;
+
+                // 3. Trigger OTA on device
+                const otaRes = await fetch('/api/admin/subvendo/ota-update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: updatingSubVendoId, download_url: downloadUrl })
+                });
+
+                const otaData = await otaRes.json();
+                if (otaRes.ok) {
+                    alert('Update command sent! The device will now download and install the firmware. It may take a few minutes.');
+                    closeUpdateSubVendoModal();
+                } else {
+                    alert('Update failed: ' + (otaData.error || 'Unknown error'));
+                }
+
+            } catch (e) {
+                console.error(e);
+                alert('Error: ' + e.message);
+            } finally {
+                btn.textContent = original;
                 btn.disabled = false;
             }
         }

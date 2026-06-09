@@ -27,6 +27,27 @@ class WalledGardenService {
         });
     }
 
+    async resolveDomainAll(domain) {
+        try {
+            const addrs = new Set();
+            try {
+                const v4 = await dns.promises.resolve4(domain);
+                for (const a of (v4 || [])) addrs.add(a);
+            } catch (_) {}
+            try {
+                const v6 = await dns.promises.resolve6(domain);
+                for (const a of (v6 || [])) addrs.add(a);
+            } catch (_) {}
+            if (addrs.size === 0) {
+                const single = await this.resolveDomain(domain);
+                if (single) addrs.add(single);
+            }
+            return Array.from(addrs).slice(0, 50);
+        } catch (_) {
+            return [];
+        }
+    }
+
     async init() {
         console.log("Initializing Walled Garden...");
         await this.runScript('init');
@@ -39,7 +60,10 @@ class WalledGardenService {
         
         const entries = this.getAll();
         for (const entry of entries) {
-             await this.runScript('add', entry.domain, entry.type);
+             const t = String(entry.type || '').toLowerCase();
+             const scriptType = (t === 'deny' || t === 'drop') ? 'DROP' : (t === 'allow' || t === 'accept') ? 'ACCEPT' : String(entry.type || 'ACCEPT').toUpperCase();
+             const addr = (entry && entry.address && String(entry.address).trim() && String(entry.address).trim().toLowerCase() !== 'unresolved') ? String(entry.address) : '';
+             await this.runScript('add', entry.domain, scriptType, addr);
         }
     }
 
@@ -54,19 +78,21 @@ class WalledGardenService {
             
             if (!cleanDomain) throw new Error("Invalid domain");
 
-            // Auto-resolve address (For display only)
-            const address = await this.resolveDomain(cleanDomain);
-            
+            const addresses = await this.resolveDomainAll(cleanDomain);
+            const addressText = addresses.length ? addresses.join(', ') : 'Unresolved';
+
+            const t = String(type || '').toLowerCase();
+            const normalizedType = (t === 'deny' || t === 'drop') ? 'DROP' : 'ACCEPT';
+
             const stmt = db.prepare('INSERT INTO walled_garden (domain, type, address) VALUES (?, ?, ?)');
-            const info = stmt.run(cleanDomain, type, address || 'Unresolved');
-            
+            const info = stmt.run(cleanDomain, normalizedType, addressText);
+
             // Apply system changes
-            let scriptType = type;
-            if (scriptType === 'allow') scriptType = 'ACCEPT';
-            if (scriptType === 'deny') scriptType = 'DROP';
-            await this.runScript('add', cleanDomain, scriptType);
+            const scriptType = normalizedType;
+            await this.runScript('init');
+            await this.runScript('add', cleanDomain, scriptType, addressText);
             
-            return { id: info.lastInsertRowid, domain: cleanDomain, type, address: address || 'Unresolved' };
+            return { id: info.lastInsertRowid, domain: cleanDomain, type: normalizedType, address: addressText };
         } catch (e) {
             console.error("Failed to add walled garden entry:", e);
             throw e;
@@ -98,7 +124,8 @@ class WalledGardenService {
                 require('fs').chmodSync(this.scriptPath, '755'); 
             } catch(e) {}
 
-            const cmd = `bash "${this.scriptPath}" ${command} ${args.join(' ')}`;
+            const quotedArgs = args.map(a => `"${String(a).replace(/"/g, '\\"')}"`).join(' ');
+            const cmd = `bash "${this.scriptPath}" ${command}${quotedArgs ? ' ' + quotedArgs : ''}`;
             exec(cmd, (error, stdout, stderr) => {
                 if (error) {
                     console.error(`WalledGardenService Error (${command}):`, stderr);

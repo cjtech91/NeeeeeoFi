@@ -118,6 +118,36 @@
             z-index: 3;
         }
 
+        .client-info-btn {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            aspect-ratio: 1 / 1;
+            padding: 0;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: #f3f6fb;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            color: var(--primary);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            overflow: hidden;
+            line-height: 0;
+            flex: 0 0 auto;
+        }
+
+        .client-info-btn svg {
+            width: 30px;
+            height: 30px;
+            display: block;
+        }
+
+        #btn-points {
+            color: var(--purple);
+        }
+
         .portal-status-pill svg {
             width: 36px;
             height: 36px;
@@ -259,6 +289,42 @@
             border-color: #d1d5da;
         }
 
+        .quick-actions-row {
+            padding: 10px 16px 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+        }
+
+        .quick-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            min-width: 52px;
+        }
+
+        .quick-action-label {
+            font-size: 0.62rem;
+            line-height: 1;
+            color: var(--text-muted);
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            user-select: none;
+        }
+
+        .quick-actions-row .client-info-btn {
+            width: 35px;
+            height: 35px;
+            min-width: 35px;
+        }
+
+        .quick-actions-row .client-info-btn svg {
+            width: 26px;
+            height: 26px;
+        }
+
         /* Buttons */
         .actions {
             padding: 8px 16px;
@@ -287,6 +353,24 @@
 
         .btn-insert {
             background: var(--success);
+        }
+
+        @keyframes btn-wiggle {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(2deg); }
+            50% { transform: rotate(0deg); }
+            75% { transform: rotate(-2deg); }
+            100% { transform: rotate(0deg); }
+        }
+
+        .btn-wiggle {
+            display: inline-block;
+            transform-origin: 50% 60%;
+            animation: btn-wiggle 1.6s ease-in-out infinite;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .btn-wiggle { animation: none; }
         }
 
         .btn-rates {
@@ -372,6 +456,30 @@
             cursor: pointer;
         }
 
+        .coin-meta-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .coin-meta-row .coin-meta.time {
+            flex: 1 1 0;
+            min-width: 0;
+            text-align: left;
+        }
+
+        .coin-meta-row .coin-meta.points {
+            flex: 0 0 auto;
+            text-align: right;
+            white-space: nowrap;
+        }
+
         .coin-countdown {
             margin: 10px 0 0;
         }
@@ -437,6 +545,40 @@
             font-size: 1.2rem;
             font-weight: 700;
             margin-bottom: 10px;
+        }
+
+        .client-info-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            text-align: left;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .client-info-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+
+        .client-info-row .k {
+            color: var(--text-muted);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .client-info-row .v {
+            font-weight: 700;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+
+        #inline-client-meta,
+        #validity-row {
+            display: none !important;
         }
 
         /* Loading Overlay with Bouncing Logo */
@@ -925,7 +1067,7 @@
                 <div id="ticker-text" style="white-space: nowrap; animation: ticker-scroll 15s linear infinite; display: inline-block; color: var(--primary); font-weight: 600;"></div>
             </div>
             <div class="credit-label">Unclaimed Credit: <span id="coin-display">₱0.00</span></div>
-            <div class="info-row info-row-compact">
+            <div class="info-row info-row-compact" id="inline-client-meta">
                 <span>IP: <span id="ip-display">...</span></span>
                 <span>MAC: <span id="mac-display">...</span></span>
             </div>
@@ -958,10 +1100,8 @@
 
         <!-- Action Grid -->
         <div class="actions">
-            <button class="btn btn-insert" id="btn-insert" onclick="startCoinMode()">Insert Coins</button>
+            <button class="btn btn-insert btn-wiggle" id="btn-insert" onclick="startCoinMode()">Insert Coins</button>
             <button class="btn btn-pause" id="btn-pause" onclick="togglePause()" style="display:none;">Pause Time</button>
-            <button class="btn btn-rates" onclick="showRates()">Wifi Rates</button>
-            <button class="btn btn-points" id="btn-points" onclick="showPointRates()" style="display:none;">Redeem Points</button>
         </div>
 
         <!-- Voucher Input (Inline) -->
@@ -969,6 +1109,31 @@
             <div class="voucher-input-wrapper">
                 <input type="text" class="voucher-input" id="voucher-input-main" placeholder="Enter Voucher Code..." oninput="this.value=this.value.toUpperCase()" style="text-transform:uppercase;" autocapitalize="characters">
                 <button class="btn-submit" onclick="redeemVoucherMain()">Submit</button>
+            </div>
+        </div>
+
+        <div class="quick-actions-row">
+            <div class="quick-action" id="qa-rates">
+                <button class="client-info-btn" id="wifi-rates-btn" type="button" onclick="showRates()" aria-label="Wifi Rates">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 18c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm-4.24-3.76a6 6 0 0 1 8.48 0l-1.41 1.41a4 4 0 0 0-5.66 0l-1.41-1.41zm-2.83-2.83a10 10 0 0 1 14.14 0l-1.41 1.41a8 8 0 0 0-11.32 0l-1.41-1.41z"/></svg>
+                </button>
+                <div class="quick-action-label">Rates</div>
+            </div>
+            <div class="quick-action" id="qa-points" style="display:none;">
+                <button class="client-info-btn" id="btn-points" type="button" onclick="showPointRates()" aria-label="Redeem Points">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="8" cy="12" r="4" fill="currentColor" opacity="0.35"></circle>
+                        <circle cx="12" cy="12" r="4" fill="currentColor" opacity="0.6"></circle>
+                        <circle cx="16" cy="12" r="4" fill="currentColor"></circle>
+                    </svg>
+                </button>
+                <div class="quick-action-label">Points</div>
+            </div>
+            <div class="quick-action" id="qa-info">
+                <button class="client-info-btn" id="client-info-btn" type="button" onclick="openClientInfoModal()" aria-label="Client Info">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11 7h2v2h-2V7zm0 4h2v6h-2v-6zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>
+                </button>
+                <div class="quick-action-label">Info</div>
             </div>
         </div>
         
@@ -990,6 +1155,22 @@
         </div>
     </div>
 
+    <div id="client-info-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-title">Client Info</div>
+            <div class="client-info-grid">
+                <div class="client-info-row"><span class="k">Status</span><span class="v" id="ci-status">--</span></div>
+                <div class="client-info-row"><span class="k">Interface</span><span class="v" id="ci-interface">--</span></div>
+                <div class="client-info-row"><span class="k">IP</span><span class="v" id="ci-ip">--</span></div>
+                <div class="client-info-row"><span class="k">MAC</span><span class="v" id="ci-mac">--</span></div>
+                <div class="client-info-row"><span class="k">Voucher Code</span><span class="v" id="ci-code">--</span></div>
+                <div class="client-info-row"><span class="k">Validity</span><span class="v" id="ci-validity">--</span></div>
+                <div class="client-info-row"><span class="k">Internet</span><span class="v" id="ci-internet">--</span></div>
+            </div>
+            <button class="btn btn-rates" style="margin-top:15px; background:#95a5a6;" onclick="closeClientInfoModal()">Close</button>
+        </div>
+    </div>
+
     <!-- Modals -->
     
     <!-- Coin Modal -->
@@ -1002,7 +1183,10 @@
                 <div class="coin-slot"></div>
             </div>
             <div style="font-size:2rem; font-weight:bold; color:var(--success); margin-bottom:20px;" id="modal-coin-amount">₱0.00</div>
-            <div style="font-size:1rem; font-weight:600; color:#333; margin-bottom:20px; white-space: pre;" id="modal-coin-time">Time: 0 Min     Point:0</div>
+            <div class="coin-meta-row" id="modal-coin-time">
+                <span class="coin-meta time" id="modal-coin-time-text">Time: 0 Min</span>
+                <span class="coin-meta points" id="modal-coin-points-text">Points: 0</span>
+            </div>
             <div class="coin-countdown">
                 <div class="coin-countdown-bar">
                     <div class="coin-countdown-fill" id="coin-countdown-fill"></div>
@@ -1104,6 +1288,52 @@
         function setPortalStatus(state) {
             const pill = document.getElementById('portal-status-pill');
             if (pill) pill.className = `portal-status-pill ${state}`;
+        }
+
+        function openClientInfoModal() {
+            const m = document.getElementById('client-info-modal');
+            if (!m) return;
+            m.style.display = 'flex';
+            setTimeout(() => m.classList.add('show'), 10);
+            updateClientInfoModal(currentUser);
+        }
+
+        function closeClientInfoModal() {
+            const m = document.getElementById('client-info-modal');
+            if (!m) return;
+            m.classList.remove('show');
+            setTimeout(() => { m.style.display = 'none'; }, 200);
+        }
+
+        function updateClientInfoModal(data) {
+            const d = data || {};
+            const hasTime = Number(d.time_remaining) > 0;
+            const isPaused = Number(d.is_paused) === 1;
+            const isConnected = Number(d.is_connected) === 1;
+            const status = hasTime ? (isPaused ? 'Paused' : (isConnected ? 'Connected' : 'Disconnected')) : 'Disconnected';
+
+            const set = (id, value) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = value == null || value === '' ? '--' : String(value);
+            };
+
+            set('ci-status', status);
+            set('ci-interface', d.interface || '--');
+            set('ci-ip', d.ip || '--');
+            set('ci-mac', d.mac || '--');
+            set('ci-code', d.session_code || '--');
+
+            if (!hasTime) {
+                set('ci-validity', '--');
+            } else if (d.validity_expiry) {
+                set('ci-validity', `Valid until ${d.validity_expiry}`);
+            } else {
+                set('ci-validity', 'No Expiry');
+            }
+
+            const internetUp = (d.internet_is_up === true) || (String(d.internet_status || '').toUpperCase() === 'UP');
+            set('ci-internet', internetUp ? 'UP' : 'DOWN');
         }
 
         let slideshowIntervalId = null;
@@ -1212,6 +1442,15 @@
                 } else {
                     codeDisplay.style.display = 'flex'; // Restore if false
                 }
+            }
+
+            if (config.hide_insert_button === true) {
+                const insertBtn = document.getElementById('btn-insert');
+                if (insertBtn) insertBtn.style.display = 'none';
+            }
+            if (config.hide_pause_button === true) {
+                const pauseBtn = document.getElementById('btn-pause');
+                if (pauseBtn) pauseBtn.style.display = 'none';
             }
 
             // Banner Logic
@@ -1643,7 +1882,16 @@
             lastPendingCoinMinutes = Number(minutes) || 0;
             pendingCoinPoints = Number(points) || 0;
             const pointsText = Number.isInteger(pendingCoinPoints) ? String(pendingCoinPoints) : pendingCoinPoints.toFixed(2);
-            el.textContent = `Time: ${formatMinutes(lastPendingCoinMinutes)}     Point:${pointsText}`;
+            const timeEl = document.getElementById('modal-coin-time-text');
+            const pointsEl = document.getElementById('modal-coin-points-text');
+            const timeText = `Time: ${formatMinutes(lastPendingCoinMinutes)}`;
+            const pointsLabel = `Points: ${pointsText}`;
+            if (timeEl && pointsEl) {
+                timeEl.textContent = timeText;
+                pointsEl.textContent = pointsLabel;
+            } else {
+                el.textContent = `${timeText}  ${pointsLabel}`;
+            }
             try {
                 const total = (currentUser ? (Number(currentUser.points_balance) || 0) : 0) + pendingCoinPoints;
                 const codeSpan = document.getElementById('code-display');
@@ -1819,6 +2067,7 @@
                 const res = await fetch('/api/status?t=' + Date.now());
                 const data = await res.json();
                 currentUser = data;
+                updateClientInfoModal(currentUser);
                 const lastIp = localStorage.getItem('last_ip') || '';
                 const lastMac = localStorage.getItem('last_mac') || '';
 
@@ -1859,8 +2108,11 @@
 
                 // Update Points Button Visibility
                 const btnPoints = document.getElementById('btn-points');
-                if (btnPoints) {
-                    btnPoints.style.display = 'inline-block';
+                const pointsWrap = document.getElementById('qa-points');
+                if (btnPoints && pointsWrap) {
+                    pointsWrap.style.display = 'flex';
+                } else if (pointsWrap) {
+                    pointsWrap.style.display = 'none';
                 }
 
                 if (codeDisplayContainer) {
@@ -1876,6 +2128,9 @@
                 document.getElementById('coin-display').textContent = `₱${Number(data.pending_amount || 0).toFixed(2)}`;
                 const insertBtn = document.getElementById('btn-insert');
                 if (insertBtn) insertBtn.textContent = (Number(data.time_remaining) > 0) ? 'Extend Time' : 'Insert Coins';
+                if (portalConfig && portalConfig.hide_insert_button === true && insertBtn) insertBtn.style.display = 'none';
+                const pauseBtnOverride = document.getElementById('btn-pause');
+                if (portalConfig && portalConfig.hide_pause_button === true && pauseBtnOverride) pauseBtnOverride.style.display = 'none';
 
                 // Pass MAC to hidden element for legacy compatibility if needed
                 const hiddenMac = document.getElementById('voucher-mac-display');
@@ -2015,7 +2270,11 @@
                             try { await fetch('/api/session/resume?t=' + now, { method: 'POST' }); } catch (e) {}
                         }
                     }
-                    pauseBtn.style.display = 'block';
+                    if (portalConfig && portalConfig.hide_pause_button === true) {
+                        pauseBtn.style.display = 'none';
+                    } else {
+                        pauseBtn.style.display = 'block';
+                    }
                 } else {
                     updateTimer(0);
                     updateValidityDisplay(null, null);

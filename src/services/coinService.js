@@ -123,8 +123,8 @@ class CoinService extends EventEmitter {
         // --- Ban Settings ---
         // User requested "Insert attempt ban Counter: 10s". 
         // We interpret this as a time limit (seconds) for continuous activity before banning.
-        this.banLimit = parseInt(configService.get('ban_limit_counter', 10)); 
-        this.banDuration = parseInt(configService.get('ban_duration', 1)); // minutes
+        this.banLimit = parseInt(configService.get('coin_pulse_ban_limit_seconds', 10));
+        this.banDuration = parseInt(configService.get('coin_pulse_ban_duration_minutes', 1));
 
         const activeLabel = (this.activeLevel === null) ? 'AUTO' : (this.activeLevel === 0 ? 'LOW' : 'HIGH');
         console.log(`CoinService: Init Coin(GPIO${pin}, ${pinEdge}, Active:${activeLabel}) | Bill(GPIO${billPin}, ${billPinEdge}, x${this.billMultiplier}) | Debounce(${this.debounceTime}ms) | Commit(Base:${this.commitTimeBase}ms Large:${this.commitTimeLarge}ms) | Ban(Limit: ${this.banLimit}s, Duration: ${this.banDuration}m)`);

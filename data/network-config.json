@@ -1,6 +1,6 @@
 {
   "wan": {
-    "interface": "eth0",
+    "interface": "enp2s0",
     "mode": "dynamic",
     "static": {
       "ip": "",
@@ -11,10 +11,1928 @@
     },
     "pppoe": {
       "username": "",
-      "password": ""
+      "password": "",
+      "dns1": "",
+      "dns2": ""
     }
   },
-  "vlans": [],
+  "vlans": [
+    {
+      "name": "VLAN.400",
+      "parent": "enp2s0",
+      "vlanId": 400,
+      "autoMac": true,
+      "mac": "02:09:66:42:C2:72",
+      "id": "1780021964256tn7tr"
+    },
+    {
+      "name": "VLAN.401",
+      "parent": "enp2s0",
+      "vlanId": 401,
+      "autoMac": true,
+      "mac": "02:7F:17:C6:6B:1F",
+      "id": "1780021964256z98cq"
+    },
+    {
+      "name": "VLAN.402",
+      "parent": "enp2s0",
+      "vlanId": 402,
+      "autoMac": true,
+      "mac": "02:DF:BB:47:FD:B8",
+      "id": "17800219642564r58f"
+    },
+    {
+      "name": "VLAN.403",
+      "parent": "enp2s0",
+      "vlanId": 403,
+      "autoMac": true,
+      "mac": "02:E5:A7:BB:6F:E1",
+      "id": "1780021964256xoo44"
+    },
+    {
+      "name": "VLAN.404",
+      "parent": "enp2s0",
+      "vlanId": 404,
+      "autoMac": true,
+      "mac": "02:4E:9A:2D:1E:42",
+      "id": "17800219642568i9it"
+    },
+    {
+      "name": "VLAN.405",
+      "parent": "enp2s0",
+      "vlanId": 405,
+      "autoMac": true,
+      "mac": "02:02:8C:C6:F1:02",
+      "id": "1780021964256e5vc4"
+    },
+    {
+      "name": "VLAN.406",
+      "parent": "enp2s0",
+      "vlanId": 406,
+      "autoMac": true,
+      "mac": "02:EC:6C:63:FF:A1",
+      "id": "1780021964256gwtjn"
+    },
+    {
+      "name": "VLAN.407",
+      "parent": "enp2s0",
+      "vlanId": 407,
+      "autoMac": true,
+      "mac": "02:70:FD:2F:26:FA",
+      "id": "17800219642563eend"
+    },
+    {
+      "name": "VLAN.408",
+      "parent": "enp2s0",
+      "vlanId": 408,
+      "autoMac": true,
+      "mac": "02:60:CC:05:67:EA",
+      "id": "1780021964256qyl9f"
+    },
+    {
+      "name": "VLAN.409",
+      "parent": "enp2s0",
+      "vlanId": 409,
+      "autoMac": true,
+      "mac": "02:39:25:2D:FA:95",
+      "id": "1780021964256aho0l"
+    },
+    {
+      "name": "VLAN.410",
+      "parent": "enp2s0",
+      "vlanId": 410,
+      "autoMac": true,
+      "mac": "02:9F:27:00:6B:87",
+      "id": "1780021964256u8e2h"
+    },
+    {
+      "name": "VLAN.411",
+      "parent": "enp2s0",
+      "vlanId": 411,
+      "autoMac": true,
+      "mac": "02:35:33:E5:01:06",
+      "id": "1780021964256hiaam"
+    },
+    {
+      "name": "VLAN.412",
+      "parent": "enp2s0",
+      "vlanId": 412,
+      "autoMac": true,
+      "mac": "02:EE:C9:35:D5:47",
+      "id": "1780021964256xlsc5"
+    },
+    {
+      "name": "VLAN.413",
+      "parent": "enp2s0",
+      "vlanId": 413,
+      "autoMac": true,
+      "mac": "02:E7:D1:C1:42:BA",
+      "id": "1780021964256wakyv"
+    },
+    {
+      "name": "VLAN.414",
+      "parent": "enp2s0",
+      "vlanId": 414,
+      "autoMac": true,
+      "mac": "02:A6:72:74:3A:7E",
+      "id": "17800219642562a2a4"
+    },
+    {
+      "name": "VLAN.415",
+      "parent": "enp2s0",
+      "vlanId": 415,
+      "autoMac": true,
+      "mac": "02:60:5E:6B:43:73",
+      "id": "1780021964256dw8m1"
+    },
+    {
+      "name": "VLAN.416",
+      "parent": "enp2s0",
+      "vlanId": 416,
+      "autoMac": true,
+      "mac": "02:55:79:72:83:6E",
+      "id": "1780021964256xu720"
+    },
+    {
+      "name": "VLAN.417",
+      "parent": "enp2s0",
+      "vlanId": 417,
+      "autoMac": true,
+      "mac": "02:7B:C8:F9:0C:BD",
+      "id": "17800219642567lm4x"
+    },
+    {
+      "name": "VLAN.418",
+      "parent": "enp2s0",
+      "vlanId": 418,
+      "autoMac": true,
+      "mac": "02:75:09:ED:60:FD",
+      "id": "1780021964256zps4b"
+    },
+    {
+      "name": "VLAN.419",
+      "parent": "enp2s0",
+      "vlanId": 419,
+      "autoMac": true,
+      "mac": "02:C9:03:8D:50:5C",
+      "id": "17800219642566x2mm"
+    },
+    {
+      "name": "VLAN.420",
+      "parent": "enp2s0",
+      "vlanId": 420,
+      "autoMac": true,
+      "mac": "02:C3:DD:58:07:D9",
+      "id": "17800219642560x6ob"
+    },
+    {
+      "name": "VLAN.421",
+      "parent": "enp2s0",
+      "vlanId": 421,
+      "autoMac": true,
+      "mac": "02:44:E4:AA:AD:C9",
+      "id": "178002196425663z2q"
+    },
+    {
+      "name": "VLAN.422",
+      "parent": "enp2s0",
+      "vlanId": 422,
+      "autoMac": true,
+      "mac": "02:B6:3B:08:C1:F7",
+      "id": "1780021964256t4peg"
+    },
+    {
+      "name": "VLAN.423",
+      "parent": "enp2s0",
+      "vlanId": 423,
+      "autoMac": true,
+      "mac": "02:9E:E3:21:03:91",
+      "id": "178002196425695sg5"
+    },
+    {
+      "name": "VLAN.424",
+      "parent": "enp2s0",
+      "vlanId": 424,
+      "autoMac": true,
+      "mac": "02:B9:EF:98:14:C6",
+      "id": "1780021964256y10gp"
+    },
+    {
+      "name": "VLAN.425",
+      "parent": "enp2s0",
+      "vlanId": 425,
+      "autoMac": true,
+      "mac": "02:20:D0:39:1D:51",
+      "id": "1780021964256qb1az"
+    },
+    {
+      "name": "VLAN.426",
+      "parent": "enp2s0",
+      "vlanId": 426,
+      "autoMac": true,
+      "mac": "02:71:14:C9:80:61",
+      "id": "17800219642565rjog"
+    },
+    {
+      "name": "VLAN.427",
+      "parent": "enp2s0",
+      "vlanId": 427,
+      "autoMac": true,
+      "mac": "02:CA:37:70:B6:9D",
+      "id": "17800219642570efqv"
+    },
+    {
+      "name": "VLAN.428",
+      "parent": "enp2s0",
+      "vlanId": 428,
+      "autoMac": true,
+      "mac": "02:F4:E0:BF:1E:0C",
+      "id": "17800219642572oveg"
+    },
+    {
+      "name": "VLAN.429",
+      "parent": "enp2s0",
+      "vlanId": 429,
+      "autoMac": true,
+      "mac": "02:AE:35:56:1D:63",
+      "id": "1780021964257pso0s"
+    },
+    {
+      "name": "VLAN.430",
+      "parent": "enp2s0",
+      "vlanId": 430,
+      "autoMac": true,
+      "mac": "02:A3:BA:A7:BA:52",
+      "id": "1780021964257zn043"
+    },
+    {
+      "name": "VLAN.431",
+      "parent": "enp2s0",
+      "vlanId": 431,
+      "autoMac": true,
+      "mac": "02:5B:4D:0E:D1:AB",
+      "id": "1780021964257t3b23"
+    },
+    {
+      "name": "VLAN.432",
+      "parent": "enp2s0",
+      "vlanId": 432,
+      "autoMac": true,
+      "mac": "02:D5:27:8A:C5:08",
+      "id": "1780021964257svxo1"
+    },
+    {
+      "name": "VLAN.433",
+      "parent": "enp2s0",
+      "vlanId": 433,
+      "autoMac": true,
+      "mac": "02:1D:B2:67:8D:7D",
+      "id": "1780021964257kwryf"
+    },
+    {
+      "name": "VLAN.434",
+      "parent": "enp2s0",
+      "vlanId": 434,
+      "autoMac": true,
+      "mac": "02:F2:B2:09:28:81",
+      "id": "17800219642574oci1"
+    },
+    {
+      "name": "VLAN.435",
+      "parent": "enp2s0",
+      "vlanId": 435,
+      "autoMac": true,
+      "mac": "02:83:32:F2:F5:53",
+      "id": "1780021964257drh1g"
+    },
+    {
+      "name": "VLAN.436",
+      "parent": "enp2s0",
+      "vlanId": 436,
+      "autoMac": true,
+      "mac": "02:3E:02:87:37:8F",
+      "id": "17800219642572pvkm"
+    },
+    {
+      "name": "VLAN.437",
+      "parent": "enp2s0",
+      "vlanId": 437,
+      "autoMac": true,
+      "mac": "02:C6:31:4A:92:F4",
+      "id": "1780021964257euurd"
+    },
+    {
+      "name": "VLAN.438",
+      "parent": "enp2s0",
+      "vlanId": 438,
+      "autoMac": true,
+      "mac": "02:D7:B3:FA:70:EE",
+      "id": "1780021964257dtqyz"
+    },
+    {
+      "name": "VLAN.439",
+      "parent": "enp2s0",
+      "vlanId": 439,
+      "autoMac": true,
+      "mac": "02:20:62:F9:AC:94",
+      "id": "1780021964257r8v58"
+    },
+    {
+      "name": "VLAN.440",
+      "parent": "enp2s0",
+      "vlanId": 440,
+      "autoMac": true,
+      "mac": "02:ED:E1:86:2B:50",
+      "id": "1780021964257gh7kz"
+    },
+    {
+      "name": "VLAN.441",
+      "parent": "enp2s0",
+      "vlanId": 441,
+      "autoMac": true,
+      "mac": "02:78:84:27:5B:A3",
+      "id": "1780021964257wryub"
+    },
+    {
+      "name": "VLAN.442",
+      "parent": "enp2s0",
+      "vlanId": 442,
+      "autoMac": true,
+      "mac": "02:EB:AF:AC:4E:6D",
+      "id": "17800219642574o63s"
+    },
+    {
+      "name": "VLAN.443",
+      "parent": "enp2s0",
+      "vlanId": 443,
+      "autoMac": true,
+      "mac": "02:BF:F3:E3:11:A7",
+      "id": "17800219642572rr71"
+    },
+    {
+      "name": "VLAN.444",
+      "parent": "enp2s0",
+      "vlanId": 444,
+      "autoMac": true,
+      "mac": "02:42:80:D7:DC:56",
+      "id": "17800219642574vua5"
+    },
+    {
+      "name": "VLAN.445",
+      "parent": "enp2s0",
+      "vlanId": 445,
+      "autoMac": true,
+      "mac": "02:BC:1E:3A:FC:BD",
+      "id": "178002196425718ky2"
+    },
+    {
+      "name": "VLAN.446",
+      "parent": "enp2s0",
+      "vlanId": 446,
+      "autoMac": true,
+      "mac": "02:3B:1F:57:47:2B",
+      "id": "17800219642573xycy"
+    },
+    {
+      "name": "VLAN.447",
+      "parent": "enp2s0",
+      "vlanId": 447,
+      "autoMac": true,
+      "mac": "02:E4:1A:85:A8:01",
+      "id": "178002196425706g64"
+    },
+    {
+      "name": "VLAN.448",
+      "parent": "enp2s0",
+      "vlanId": 448,
+      "autoMac": true,
+      "mac": "02:F9:46:3A:DA:CE",
+      "id": "1780021964257drxdo"
+    },
+    {
+      "name": "VLAN.449",
+      "parent": "enp2s0",
+      "vlanId": 449,
+      "autoMac": true,
+      "mac": "02:85:C2:C3:B8:C4",
+      "id": "1780021964257wzazb"
+    },
+    {
+      "name": "VLAN.450",
+      "parent": "enp2s0",
+      "vlanId": 450,
+      "autoMac": true,
+      "mac": "02:8C:7C:0F:A3:3F",
+      "id": "1780021964257hk6ww"
+    },
+    {
+      "name": "VLAN.451",
+      "parent": "enp2s0",
+      "vlanId": 451,
+      "autoMac": true,
+      "mac": "02:35:89:8E:58:67",
+      "id": "1780021964257mvdds"
+    },
+    {
+      "name": "VLAN.452",
+      "parent": "enp2s0",
+      "vlanId": 452,
+      "autoMac": true,
+      "mac": "02:49:0D:36:7B:1C",
+      "id": "1780021964257tancl"
+    },
+    {
+      "name": "VLAN.453",
+      "parent": "enp2s0",
+      "vlanId": 453,
+      "autoMac": true,
+      "mac": "02:24:C5:D0:51:D5",
+      "id": "1780021964257z12sh"
+    },
+    {
+      "name": "VLAN.454",
+      "parent": "enp2s0",
+      "vlanId": 454,
+      "autoMac": true,
+      "mac": "02:DB:DC:CA:4E:24",
+      "id": "1780021964257cgktg"
+    },
+    {
+      "name": "VLAN.455",
+      "parent": "enp2s0",
+      "vlanId": 455,
+      "autoMac": true,
+      "mac": "02:F1:86:7D:CC:1A",
+      "id": "1780021964257afe0c"
+    },
+    {
+      "name": "VLAN.456",
+      "parent": "enp2s0",
+      "vlanId": 456,
+      "autoMac": true,
+      "mac": "02:25:92:AC:B3:3D",
+      "id": "1780021964257yad5q"
+    },
+    {
+      "name": "VLAN.457",
+      "parent": "enp2s0",
+      "vlanId": 457,
+      "autoMac": true,
+      "mac": "02:42:80:D0:8A:63",
+      "id": "1780021964257mrduj"
+    },
+    {
+      "name": "VLAN.458",
+      "parent": "enp2s0",
+      "vlanId": 458,
+      "autoMac": true,
+      "mac": "02:1C:35:E6:5A:64",
+      "id": "1780021964257c3grh"
+    },
+    {
+      "name": "VLAN.459",
+      "parent": "enp2s0",
+      "vlanId": 459,
+      "autoMac": true,
+      "mac": "02:26:97:4A:67:C8",
+      "id": "17800219642570y1q0"
+    },
+    {
+      "name": "VLAN.460",
+      "parent": "enp2s0",
+      "vlanId": 460,
+      "autoMac": true,
+      "mac": "02:02:EC:80:E5:FB",
+      "id": "1780021964257m41sn"
+    },
+    {
+      "name": "VLAN.461",
+      "parent": "enp2s0",
+      "vlanId": 461,
+      "autoMac": true,
+      "mac": "02:63:B8:B0:85:3B",
+      "id": "1780021964257jc6cq"
+    },
+    {
+      "name": "VLAN.462",
+      "parent": "enp2s0",
+      "vlanId": 462,
+      "autoMac": true,
+      "mac": "02:D9:17:B4:91:C6",
+      "id": "1780021964257mf2tr"
+    },
+    {
+      "name": "VLAN.463",
+      "parent": "enp2s0",
+      "vlanId": 463,
+      "autoMac": true,
+      "mac": "02:8A:36:AA:FA:00",
+      "id": "17800219642579vujd"
+    },
+    {
+      "name": "VLAN.464",
+      "parent": "enp2s0",
+      "vlanId": 464,
+      "autoMac": true,
+      "mac": "02:01:59:6D:A9:8F",
+      "id": "1780021964257p9roo"
+    },
+    {
+      "name": "VLAN.465",
+      "parent": "enp2s0",
+      "vlanId": 465,
+      "autoMac": true,
+      "mac": "02:80:C7:7C:D1:A9",
+      "id": "1780021964257bm0f3"
+    },
+    {
+      "name": "VLAN.466",
+      "parent": "enp2s0",
+      "vlanId": 466,
+      "autoMac": true,
+      "mac": "02:D3:3C:7C:C1:93",
+      "id": "1780021964257acph8"
+    },
+    {
+      "name": "VLAN.467",
+      "parent": "enp2s0",
+      "vlanId": 467,
+      "autoMac": true,
+      "mac": "02:B1:0B:36:2A:F9",
+      "id": "1780021964257bsbck"
+    },
+    {
+      "name": "VLAN.468",
+      "parent": "enp2s0",
+      "vlanId": 468,
+      "autoMac": true,
+      "mac": "02:BC:4C:E4:73:EB",
+      "id": "1780021964257aamv3"
+    },
+    {
+      "name": "VLAN.469",
+      "parent": "enp2s0",
+      "vlanId": 469,
+      "autoMac": true,
+      "mac": "02:53:E1:34:6D:69",
+      "id": "1780021964257jw4r7"
+    },
+    {
+      "name": "VLAN.470",
+      "parent": "enp2s0",
+      "vlanId": 470,
+      "autoMac": true,
+      "mac": "02:9D:C4:68:C4:20",
+      "id": "1780021964257mow1e"
+    },
+    {
+      "name": "VLAN.471",
+      "parent": "enp2s0",
+      "vlanId": 471,
+      "autoMac": true,
+      "mac": "02:FD:CF:39:85:15",
+      "id": "1780021964257mqqk8"
+    },
+    {
+      "name": "VLAN.472",
+      "parent": "enp2s0",
+      "vlanId": 472,
+      "autoMac": true,
+      "mac": "02:8A:CF:B4:F7:61",
+      "id": "17800219642570g9kh"
+    },
+    {
+      "name": "VLAN.473",
+      "parent": "enp2s0",
+      "vlanId": 473,
+      "autoMac": true,
+      "mac": "02:69:BF:66:04:A3",
+      "id": "1780021964257yms24"
+    },
+    {
+      "name": "VLAN.474",
+      "parent": "enp2s0",
+      "vlanId": 474,
+      "autoMac": true,
+      "mac": "02:D5:45:ED:29:76",
+      "id": "1780021964257fdq6c"
+    },
+    {
+      "name": "VLAN.475",
+      "parent": "enp2s0",
+      "vlanId": 475,
+      "autoMac": true,
+      "mac": "02:3C:AE:37:EE:C2",
+      "id": "1780021964257ji9rw"
+    },
+    {
+      "name": "VLAN.476",
+      "parent": "enp2s0",
+      "vlanId": 476,
+      "autoMac": true,
+      "mac": "02:B2:CF:10:07:0B",
+      "id": "1780021964257zqlot"
+    },
+    {
+      "name": "VLAN.477",
+      "parent": "enp2s0",
+      "vlanId": 477,
+      "autoMac": true,
+      "mac": "02:50:81:9C:EF:AC",
+      "id": "178002196425788crm"
+    },
+    {
+      "name": "VLAN.478",
+      "parent": "enp2s0",
+      "vlanId": 478,
+      "autoMac": true,
+      "mac": "02:58:F5:24:A5:F8",
+      "id": "1780021964257iqwv3"
+    },
+    {
+      "name": "VLAN.479",
+      "parent": "enp2s0",
+      "vlanId": 479,
+      "autoMac": true,
+      "mac": "02:D7:E3:D8:38:74",
+      "id": "1780021964257ztpij"
+    },
+    {
+      "name": "VLAN.480",
+      "parent": "enp2s0",
+      "vlanId": 480,
+      "autoMac": true,
+      "mac": "02:71:BC:48:36:5E",
+      "id": "1780021964257keu3p"
+    },
+    {
+      "name": "VLAN.481",
+      "parent": "enp2s0",
+      "vlanId": 481,
+      "autoMac": true,
+      "mac": "02:98:12:E5:E1:74",
+      "id": "1780021964257e677l"
+    },
+    {
+      "name": "VLAN.482",
+      "parent": "enp2s0",
+      "vlanId": 482,
+      "autoMac": true,
+      "mac": "02:DA:34:89:F2:DF",
+      "id": "17800219642579o450"
+    },
+    {
+      "name": "VLAN.483",
+      "parent": "enp2s0",
+      "vlanId": 483,
+      "autoMac": true,
+      "mac": "02:0C:32:41:B9:52",
+      "id": "1780021964257u8lw1"
+    },
+    {
+      "name": "VLAN.484",
+      "parent": "enp2s0",
+      "vlanId": 484,
+      "autoMac": true,
+      "mac": "02:51:0D:A8:B5:5F",
+      "id": "1780021964257z8aep"
+    },
+    {
+      "name": "VLAN.485",
+      "parent": "enp2s0",
+      "vlanId": 485,
+      "autoMac": true,
+      "mac": "02:B5:20:75:13:A9",
+      "id": "1780021964257a4ehl"
+    },
+    {
+      "name": "VLAN.486",
+      "parent": "enp2s0",
+      "vlanId": 486,
+      "autoMac": true,
+      "mac": "02:AE:DA:7A:00:03",
+      "id": "1780021964257ykdh7"
+    },
+    {
+      "name": "VLAN.487",
+      "parent": "enp2s0",
+      "vlanId": 487,
+      "autoMac": true,
+      "mac": "02:B4:42:6B:1D:1C",
+      "id": "1780021964257zmjyj"
+    },
+    {
+      "name": "VLAN.488",
+      "parent": "enp2s0",
+      "vlanId": 488,
+      "autoMac": true,
+      "mac": "02:6B:55:ED:BF:EF",
+      "id": "1780021964257f90ds"
+    },
+    {
+      "name": "VLAN.489",
+      "parent": "enp2s0",
+      "vlanId": 489,
+      "autoMac": true,
+      "mac": "02:A4:6E:BB:BF:9F",
+      "id": "1780021964257tl5gg"
+    },
+    {
+      "name": "VLAN.490",
+      "parent": "enp2s0",
+      "vlanId": 490,
+      "autoMac": true,
+      "mac": "02:47:0F:3A:F9:89",
+      "id": "1780021964257g2nh3"
+    },
+    {
+      "name": "VLAN.491",
+      "parent": "enp2s0",
+      "vlanId": 491,
+      "autoMac": true,
+      "mac": "02:C5:42:F6:EC:87",
+      "id": "1780021964257u3znf"
+    },
+    {
+      "name": "VLAN.492",
+      "parent": "enp2s0",
+      "vlanId": 492,
+      "autoMac": true,
+      "mac": "02:E2:FF:DC:92:4F",
+      "id": "1780021964257fzo0o"
+    },
+    {
+      "name": "VLAN.493",
+      "parent": "enp2s0",
+      "vlanId": 493,
+      "autoMac": true,
+      "mac": "02:CC:23:C4:D6:FD",
+      "id": "1780021964257ohwml"
+    },
+    {
+      "name": "VLAN.494",
+      "parent": "enp2s0",
+      "vlanId": 494,
+      "autoMac": true,
+      "mac": "02:34:49:0D:88:DF",
+      "id": "17800219642572dgpr"
+    },
+    {
+      "name": "VLAN.495",
+      "parent": "enp2s0",
+      "vlanId": 495,
+      "autoMac": true,
+      "mac": "02:F3:74:DF:D0:9C",
+      "id": "1780021964257xm0tv"
+    },
+    {
+      "name": "VLAN.496",
+      "parent": "enp2s0",
+      "vlanId": 496,
+      "autoMac": true,
+      "mac": "02:74:AF:D7:BC:D6",
+      "id": "1780021964257r1iai"
+    },
+    {
+      "name": "VLAN.497",
+      "parent": "enp2s0",
+      "vlanId": 497,
+      "autoMac": true,
+      "mac": "02:F9:18:A3:FC:7A",
+      "id": "1780021964257dprer"
+    },
+    {
+      "name": "VLAN.498",
+      "parent": "enp2s0",
+      "vlanId": 498,
+      "autoMac": true,
+      "mac": "02:88:DB:04:1E:48",
+      "id": "1780021964257h6roo"
+    },
+    {
+      "name": "VLAN.499",
+      "parent": "enp2s0",
+      "vlanId": 499,
+      "autoMac": true,
+      "mac": "02:5E:D6:E4:FC:D8",
+      "id": "17800219642577w5zh"
+    },
+    {
+      "name": "VLAN.500",
+      "parent": "enp2s0",
+      "vlanId": 500,
+      "autoMac": true,
+      "mac": "02:D6:F7:27:2F:FD",
+      "id": "1780021964257163cr"
+    }
+  ],
+  "dhcp": {
+    "bitmask": 24,
+    "dns1": "8.8.8.8",
+    "dns2": "8.8.4.4",
+    "servers": [
+      {
+        "interface": "enp2s0.401",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.1.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.1.1",
+        "pool_start": "10.0.1.2",
+        "pool_end": "10.0.1.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.402",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.2.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.2.1",
+        "pool_start": "10.0.2.2",
+        "pool_end": "10.0.2.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.403",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.3.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.3.1",
+        "pool_start": "10.0.3.2",
+        "pool_end": "10.0.3.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.404",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.4.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.4.1",
+        "pool_start": "10.0.4.2",
+        "pool_end": "10.0.4.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.405",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.5.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.5.1",
+        "pool_start": "10.0.5.2",
+        "pool_end": "10.0.5.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.406",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.6.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.6.1",
+        "pool_start": "10.0.6.2",
+        "pool_end": "10.0.6.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.407",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.7.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.7.1",
+        "pool_start": "10.0.7.2",
+        "pool_end": "10.0.7.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.408",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.8.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.8.1",
+        "pool_start": "10.0.8.2",
+        "pool_end": "10.0.8.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.409",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.9.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.9.1",
+        "pool_start": "10.0.9.2",
+        "pool_end": "10.0.9.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.410",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.10.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.10.1",
+        "pool_start": "10.0.10.2",
+        "pool_end": "10.0.10.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.411",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.11.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.11.1",
+        "pool_start": "10.0.11.2",
+        "pool_end": "10.0.11.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.412",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.12.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.12.1",
+        "pool_start": "10.0.12.2",
+        "pool_end": "10.0.12.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.413",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.13.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.13.1",
+        "pool_start": "10.0.13.2",
+        "pool_end": "10.0.13.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.414",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.14.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.14.1",
+        "pool_start": "10.0.14.2",
+        "pool_end": "10.0.14.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.415",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.15.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.15.1",
+        "pool_start": "10.0.15.2",
+        "pool_end": "10.0.15.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.416",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.16.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.16.1",
+        "pool_start": "10.0.16.2",
+        "pool_end": "10.0.16.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.417",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.17.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.17.1",
+        "pool_start": "10.0.17.2",
+        "pool_end": "10.0.17.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.418",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.18.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.18.1",
+        "pool_start": "10.0.18.2",
+        "pool_end": "10.0.18.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.419",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.19.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.19.1",
+        "pool_start": "10.0.19.2",
+        "pool_end": "10.0.19.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.420",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.20.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.20.1",
+        "pool_start": "10.0.20.2",
+        "pool_end": "10.0.20.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.421",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.21.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.21.1",
+        "pool_start": "10.0.21.2",
+        "pool_end": "10.0.21.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.422",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.22.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.22.1",
+        "pool_start": "10.0.22.2",
+        "pool_end": "10.0.22.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.423",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.23.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.23.1",
+        "pool_start": "10.0.23.2",
+        "pool_end": "10.0.23.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.424",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.24.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.24.1",
+        "pool_start": "10.0.24.2",
+        "pool_end": "10.0.24.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.425",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.25.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.25.1",
+        "pool_start": "10.0.25.2",
+        "pool_end": "10.0.25.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.426",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.26.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.26.1",
+        "pool_start": "10.0.26.2",
+        "pool_end": "10.0.26.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.427",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.27.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.27.1",
+        "pool_start": "10.0.27.2",
+        "pool_end": "10.0.27.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.428",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.28.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.28.1",
+        "pool_start": "10.0.28.2",
+        "pool_end": "10.0.28.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.429",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.29.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.29.1",
+        "pool_start": "10.0.29.2",
+        "pool_end": "10.0.29.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.430",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.30.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.30.1",
+        "pool_start": "10.0.30.2",
+        "pool_end": "10.0.30.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.431",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.31.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.31.1",
+        "pool_start": "10.0.31.2",
+        "pool_end": "10.0.31.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.432",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.32.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.32.1",
+        "pool_start": "10.0.32.2",
+        "pool_end": "10.0.32.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.433",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.33.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.33.1",
+        "pool_start": "10.0.33.2",
+        "pool_end": "10.0.33.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.434",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.34.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.34.1",
+        "pool_start": "10.0.34.2",
+        "pool_end": "10.0.34.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.435",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.35.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.35.1",
+        "pool_start": "10.0.35.2",
+        "pool_end": "10.0.35.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.436",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.36.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.36.1",
+        "pool_start": "10.0.36.2",
+        "pool_end": "10.0.36.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.437",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.37.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.37.1",
+        "pool_start": "10.0.37.2",
+        "pool_end": "10.0.37.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.438",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.38.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.38.1",
+        "pool_start": "10.0.38.2",
+        "pool_end": "10.0.38.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.439",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.39.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.39.1",
+        "pool_start": "10.0.39.2",
+        "pool_end": "10.0.39.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.440",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.40.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.40.1",
+        "pool_start": "10.0.40.2",
+        "pool_end": "10.0.40.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.441",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.41.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.41.1",
+        "pool_start": "10.0.41.2",
+        "pool_end": "10.0.41.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.442",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.42.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.42.1",
+        "pool_start": "10.0.42.2",
+        "pool_end": "10.0.42.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.443",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.43.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.43.1",
+        "pool_start": "10.0.43.2",
+        "pool_end": "10.0.43.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.444",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.44.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.44.1",
+        "pool_start": "10.0.44.2",
+        "pool_end": "10.0.44.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.445",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.45.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.45.1",
+        "pool_start": "10.0.45.2",
+        "pool_end": "10.0.45.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.446",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.46.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.46.1",
+        "pool_start": "10.0.46.2",
+        "pool_end": "10.0.46.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.447",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.47.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.47.1",
+        "pool_start": "10.0.47.2",
+        "pool_end": "10.0.47.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.448",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.48.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.48.1",
+        "pool_start": "10.0.48.2",
+        "pool_end": "10.0.48.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.449",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.49.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.49.1",
+        "pool_start": "10.0.49.2",
+        "pool_end": "10.0.49.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.450",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.50.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.50.1",
+        "pool_start": "10.0.50.2",
+        "pool_end": "10.0.50.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.451",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.51.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.51.1",
+        "pool_start": "10.0.51.2",
+        "pool_end": "10.0.51.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.452",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.52.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.52.1",
+        "pool_start": "10.0.52.2",
+        "pool_end": "10.0.52.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.453",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.53.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.53.1",
+        "pool_start": "10.0.53.2",
+        "pool_end": "10.0.53.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.454",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.54.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.54.1",
+        "pool_start": "10.0.54.2",
+        "pool_end": "10.0.54.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.455",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.55.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.55.1",
+        "pool_start": "10.0.55.2",
+        "pool_end": "10.0.55.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.456",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.56.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.56.1",
+        "pool_start": "10.0.56.2",
+        "pool_end": "10.0.56.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.457",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.57.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.57.1",
+        "pool_start": "10.0.57.2",
+        "pool_end": "10.0.57.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.458",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.58.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.58.1",
+        "pool_start": "10.0.58.2",
+        "pool_end": "10.0.58.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.459",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.59.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.59.1",
+        "pool_start": "10.0.59.2",
+        "pool_end": "10.0.59.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.460",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.60.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.60.1",
+        "pool_start": "10.0.60.2",
+        "pool_end": "10.0.60.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.461",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.61.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.61.1",
+        "pool_start": "10.0.61.2",
+        "pool_end": "10.0.61.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.462",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.62.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.62.1",
+        "pool_start": "10.0.62.2",
+        "pool_end": "10.0.62.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.463",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.63.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.63.1",
+        "pool_start": "10.0.63.2",
+        "pool_end": "10.0.63.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.464",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.64.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.64.1",
+        "pool_start": "10.0.64.2",
+        "pool_end": "10.0.64.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.465",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.65.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.65.1",
+        "pool_start": "10.0.65.2",
+        "pool_end": "10.0.65.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.466",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.66.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.66.1",
+        "pool_start": "10.0.66.2",
+        "pool_end": "10.0.66.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.467",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.67.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.67.1",
+        "pool_start": "10.0.67.2",
+        "pool_end": "10.0.67.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.468",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.68.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.68.1",
+        "pool_start": "10.0.68.2",
+        "pool_end": "10.0.68.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.469",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.69.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.69.1",
+        "pool_start": "10.0.69.2",
+        "pool_end": "10.0.69.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.470",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.70.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.70.1",
+        "pool_start": "10.0.70.2",
+        "pool_end": "10.0.70.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.471",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.71.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.71.1",
+        "pool_start": "10.0.71.2",
+        "pool_end": "10.0.71.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.472",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.72.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.72.1",
+        "pool_start": "10.0.72.2",
+        "pool_end": "10.0.72.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.473",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.73.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.73.1",
+        "pool_start": "10.0.73.2",
+        "pool_end": "10.0.73.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.474",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.74.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.74.1",
+        "pool_start": "10.0.74.2",
+        "pool_end": "10.0.74.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.475",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.75.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.75.1",
+        "pool_start": "10.0.75.2",
+        "pool_end": "10.0.75.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.476",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.76.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.76.1",
+        "pool_start": "10.0.76.2",
+        "pool_end": "10.0.76.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.477",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.77.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.77.1",
+        "pool_start": "10.0.77.2",
+        "pool_end": "10.0.77.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.478",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.78.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.78.1",
+        "pool_start": "10.0.78.2",
+        "pool_end": "10.0.78.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.479",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.79.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.79.1",
+        "pool_start": "10.0.79.2",
+        "pool_end": "10.0.79.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.480",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.80.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.80.1",
+        "pool_start": "10.0.80.2",
+        "pool_end": "10.0.80.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.481",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.81.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.81.1",
+        "pool_start": "10.0.81.2",
+        "pool_end": "10.0.81.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.482",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.82.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.82.1",
+        "pool_start": "10.0.82.2",
+        "pool_end": "10.0.82.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.483",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.83.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.83.1",
+        "pool_start": "10.0.83.2",
+        "pool_end": "10.0.83.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.484",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.84.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.84.1",
+        "pool_start": "10.0.84.2",
+        "pool_end": "10.0.84.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.485",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.85.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.85.1",
+        "pool_start": "10.0.85.2",
+        "pool_end": "10.0.85.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.486",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.86.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.86.1",
+        "pool_start": "10.0.86.2",
+        "pool_end": "10.0.86.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.487",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.87.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.87.1",
+        "pool_start": "10.0.87.2",
+        "pool_end": "10.0.87.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.488",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.88.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.88.1",
+        "pool_start": "10.0.88.2",
+        "pool_end": "10.0.88.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.489",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.89.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.89.1",
+        "pool_start": "10.0.89.2",
+        "pool_end": "10.0.89.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.490",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.90.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.90.1",
+        "pool_start": "10.0.90.2",
+        "pool_end": "10.0.90.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.491",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.91.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.91.1",
+        "pool_start": "10.0.91.2",
+        "pool_end": "10.0.91.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.492",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.92.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.92.1",
+        "pool_start": "10.0.92.2",
+        "pool_end": "10.0.92.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.493",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.93.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.93.1",
+        "pool_start": "10.0.93.2",
+        "pool_end": "10.0.93.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.494",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.94.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.94.1",
+        "pool_start": "10.0.94.2",
+        "pool_end": "10.0.94.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.495",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.95.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.95.1",
+        "pool_start": "10.0.95.2",
+        "pool_end": "10.0.95.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.496",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.96.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.96.1",
+        "pool_start": "10.0.96.2",
+        "pool_end": "10.0.96.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.497",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.97.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.97.1",
+        "pool_start": "10.0.97.2",
+        "pool_end": "10.0.97.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.498",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.98.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.98.1",
+        "pool_start": "10.0.98.2",
+        "pool_end": "10.0.98.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.499",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.99.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.99.1",
+        "pool_start": "10.0.99.2",
+        "pool_end": "10.0.99.254",
+        "size": 256
+      },
+      {
+        "interface": "enp2s0.500",
+        "dns1": "8.8.8.8",
+        "dns2": "8.8.4.4",
+        "subnet": "10.0.100.0/24",
+        "netmask": "255.255.255.0",
+        "gateway": "10.0.100.1",
+        "pool_start": "10.0.100.2",
+        "pool_end": "10.0.100.254",
+        "size": 256
+      }
+    ]
+  },
   "bridges": [
     {
       "name": "br0",
@@ -23,5 +1941,6 @@
       "stp": false,
       "interfaces": []
     }
-  ]
+  ],
+  "seeded_default_vlans": true
 }

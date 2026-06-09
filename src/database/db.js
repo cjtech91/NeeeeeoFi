@@ -24,7 +24,7 @@ const initDb = () => {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       session_code TEXT,
       validity_expiry DATETIME,
-      idle_timeout INTEGER DEFAULT 120, -- in seconds
+      idle_timeout INTEGER DEFAULT 300, -- in seconds
       last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -82,7 +82,7 @@ const initDb = () => {
 
     // Check and add idle_timeout
     if (!columns.some(col => col.name === 'idle_timeout')) {
-        db.exec("ALTER TABLE users ADD COLUMN idle_timeout INTEGER DEFAULT 120");
+        db.exec("ALTER TABLE users ADD COLUMN idle_timeout INTEGER DEFAULT 300");
     }
 
     // Check and add last_active_at
@@ -142,6 +142,15 @@ const initDb = () => {
   // Table for Access Control (Bans)
   db.exec(`
     CREATE TABLE IF NOT EXISTS access_control (
+      mac_address TEXT PRIMARY KEY,
+      failed_attempts INTEGER DEFAULT 0,
+      banned_until DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS coin_insert_control (
       mac_address TEXT PRIMARY KEY,
       failed_attempts INTEGER DEFAULT 0,
       banned_until DATETIME,
@@ -451,6 +460,9 @@ const initDb = () => {
     if (!adminCols.some(col => col.name === 'is_super_admin')) {
         db.exec("ALTER TABLE admins ADD COLUMN is_super_admin INTEGER DEFAULT 0");
     }
+    if (!adminCols.some(col => col.name === 'session_last_seen_at')) {
+        db.exec("ALTER TABLE admins ADD COLUMN session_last_seen_at INTEGER");
+    }
   } catch (e) {
     console.error('Migration error (admin security):', e);
   }
@@ -463,35 +475,6 @@ const initDb = () => {
       const insert = db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, ?)');
       insert.run('superadmin', superHash, 'What is the name of your first pet?', 'admin', 'super_admin', 1);
       insert.run('admin', adminHash, 'What is the name of your first pet?', 'admin', 'admin', 0);
-  } else {
-      const petQ = 'What is the name of your first pet?';
-
-      // Ensure there is a single super admin account "superadmin"
-      const existingSuper = db.prepare('SELECT * FROM admins WHERE username = ?').get('superadmin');
-      if (!existingSuper) {
-          const superHash = bcrypt.hashSync('Neofi2026', 10);
-          const primary = db.prepare('SELECT * FROM admins WHERE id = 1').get();
-          if (primary) {
-              db.prepare(`
-                UPDATE admins
-                SET username = ?, password_hash = ?, role = 'super_admin', is_super_admin = 1,
-                    security_question = COALESCE(security_question, ?),
-                    security_answer = COALESCE(security_answer, ?)
-                WHERE id = 1
-              `).run('superadmin', superHash, petQ, 'admin');
-          } else {
-              db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, 1)')
-                .run('superadmin', superHash, petQ, 'admin', 'super_admin');
-          }
-      }
-
-      // Ensure there is a normal admin account "admin"
-      const existingAdmin = db.prepare('SELECT * FROM admins WHERE username = ?').get('admin');
-      if (!existingAdmin) {
-          const adminHash = bcrypt.hashSync('admin', 10);
-          db.prepare('INSERT INTO admins (username, password_hash, security_question, security_answer, role, is_super_admin) VALUES (?, ?, ?, ?, ?, 0)')
-            .run('admin', adminHash, petQ, 'admin', 'admin');
-      }
   }
 
   // Table for System Logs

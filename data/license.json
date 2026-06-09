@@ -1,0 +1,17 @@
+{
+  "token": {
+    "type": "PAID",
+    "owner": "smileradiosantafe@gmail.com",
+    "expires": "2036-03-29T23:59:59+00:00",
+    "license_duration": "120",
+    "license_duration_months": 120,
+    "license_plan": "120 months",
+    "system_serial": "4C4C4544-004C-3810-8035-B7C04F484432",
+    "System_Serial": "4C4C4544-004C-3810-8035-B7C04F484432",
+    "device_model": "OptiPlex 3040"
+  },
+  "token_raw": "{\"type\":\"PAID\",\"owner\":\"smileradiosantafe@gmail.com\",\"expires\":\"2036-03-29T23:59:59+00:00\",\"license_duration\":\"120\",\"license_duration_months\":120,\"license_plan\":\"120 months\",\"system_serial\":\"4C4C4544-004C-3810-8035-B7C04F484432\",\"System_Serial\":\"4C4C4544-004C-3810-8035-B7C04F484432\",\"device_model\":\"OptiPlex 3040\"}",
+  "signature": "PhFsdYMqvVnXDO89CsilZfyOAEjNQY4IY5C3gcWsm8O6aeovlIRnNMY+H0U6ifg+cjnu4ZP+uwHqwxRWDLg0K4K//QE9TeAuczx4dGlEOz6DIb70LfT+0viL6hjv0CvrdEwqwZPF2S3Wun5BgH5XRuvdADU5vKM6NWCe16gE4t6TDZljAYRyu92lZed5DtSByQLqp74SW0POSnssCTgEXo2fNIEajVicBP5SmIAgPgZYHEtxE4Jb0GVLPjfHzhGv0BtNYg1ZYeylvC6Hmya73+wmrzjaJuBe9EDrmf4VU0/s8ingcr5aaQePlArViLvYwCr7ZaF/Gpmudzn/xxa2Jw==",
+  "key": "NEO-2026-YGIT-52YX",
+  "activated_date": 1780965520981
+}

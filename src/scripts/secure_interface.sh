@@ -85,6 +85,10 @@ ensure_rule filter INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
 ensure_rule filter INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
 ensure_rule filter INPUT -i $IFACE -p tcp --dport $PORTAL_PORT -j ACCEPT
 
+# 4.1 Block DNS-over-TLS (Private DNS) to prevent bypassing local DNS filtering
+ensure_rule filter FORWARD -i $IFACE -p tcp --dport 853 -j DROP
+ensure_rule filter FORWARD -i $IFACE -p udp --dport 853 -j DROP
+
 # 5. Filter - Drop unauthorized traffic (Walled Garden)
 DROP_POS=1
 if [ "$IFACE" = "br0" ]; then
@@ -94,5 +98,19 @@ while iptables -t filter -C FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev
     iptables -t filter -D FORWARD -i $IFACE -m mark ! --mark 99 -j DROP 2>/dev/null || break
 done
 ensure_rule_insert filter FORWARD $DROP_POS -i $IFACE -m mark ! --mark 99 -j DROP
+
+# 6. Ensure Walled Garden domain chain stays on top (it can be pushed down by per-interface inserts)
+if iptables -t filter -L WG_DOMAIN -n >/dev/null 2>&1; then
+    while iptables -t filter -C FORWARD -j WG_DOMAIN 2>/dev/null; do
+        iptables -t filter -D FORWARD -j WG_DOMAIN 2>/dev/null || break
+    done
+    iptables -t filter -I FORWARD 1 -j WG_DOMAIN 2>/dev/null || true
+fi
+if iptables -t nat -L WG_DOMAIN_NAT -n >/dev/null 2>&1; then
+    while iptables -t nat -C PREROUTING -j WG_DOMAIN_NAT 2>/dev/null; do
+        iptables -t nat -D PREROUTING -j WG_DOMAIN_NAT 2>/dev/null || break
+    done
+    iptables -t nat -I PREROUTING 1 -j WG_DOMAIN_NAT 2>/dev/null || true
+fi
 
 echo "Interface $IFACE Secured."

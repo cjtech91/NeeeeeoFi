@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const logService = require('./logService');
 
 class SystemService {
@@ -31,6 +32,13 @@ class SystemService {
     async factoryReset() {
         try {
             logService.critical('SYSTEM', 'Factory Reset initiated - Clearing data...');
+
+            try {
+                const networkConfigPath = path.join(__dirname, '../../data/network-config.json');
+                if (fs.existsSync(networkConfigPath)) {
+                    fs.unlinkSync(networkConfigPath);
+                }
+            } catch (_) {}
 
             const preservedSettings = (() => {
                 try {
@@ -90,6 +98,50 @@ class SystemService {
                     }
                 }
 
+                try {
+                    const ratesCount = db.prepare('SELECT count(*) as count FROM rates').get().count;
+                    if (ratesCount === 0) {
+                        const insertRate = db.prepare(
+                            'INSERT INTO rates (amount, minutes, validity_hours, upload_speed, download_speed, is_pausable) VALUES (?, ?, ?, ?, ?, ?)'
+                        );
+                        insertRate.run(1, 15, 0, 5120, 5120, 1);
+                        insertRate.run(5, 120, 0, 5120, 5120, 1);
+                        insertRate.run(10, 300, 0, 5120, 5120, 1);
+                    }
+                } catch (_) {}
+
+                try {
+                    const defaults = [
+                        { key: 'wan_interface', value: 'eth0', type: 'string', category: 'network' },
+                        { key: 'lan_interface', value: 'br0', type: 'string', category: 'network' },
+                        { key: 'portal_port', value: '3000', type: 'string', category: 'network' },
+                        { key: 'wifi_enabled', value: 'true', type: 'boolean', category: 'network' },
+                        { key: 'stp_enabled', value: 'true', type: 'boolean', category: 'network' },
+                        { key: 'network_seed_defaults', value: 'true', type: 'boolean', category: 'network' },
+                        { key: 'coin_pin', value: '12', type: 'number', category: 'hardware' },
+                        { key: 'relay_pin', value: '11', type: 'number', category: 'hardware' },
+                        { key: 'bill_pin', value: '19', type: 'number', category: 'hardware' },
+                        { key: 'coin_pin_edge', value: 'rising', type: 'string', category: 'hardware' },
+                        { key: 'bill_pin_edge', value: 'falling', type: 'string', category: 'hardware' },
+                        { key: 'bill_multiplier', value: '1', type: 'number', category: 'hardware' },
+                        { key: 'relay_pin_active', value: 'HIGH', type: 'string', category: 'hardware' },
+                        { key: 'ban_limit_counter', value: '10', type: 'number', category: 'security' },
+                        { key: 'ban_duration', value: '1', type: 'number', category: 'security' },
+                        { key: 'pulse_multiplier', value: '5', type: 'number', category: 'hardware' },
+                        { key: 'temp_threshold', value: '70', type: 'number', category: 'hardware' },
+                        { key: 'rate_1_peso', value: '300', type: 'number', category: 'pricing' },
+                        { key: 'rate_5_peso', value: '1800', type: 'number', category: 'pricing' },
+                        { key: 'rate_10_peso', value: '3600', type: 'number', category: 'pricing' }
+                    ];
+
+                    const insertSetting = db.prepare(
+                        'INSERT OR IGNORE INTO settings (key, value, type, category, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)'
+                    );
+                    for (const s of defaults) {
+                        insertSetting.run(s.key, s.value, s.type, s.category);
+                    }
+                } catch (_) {}
+
                 const superHash = bcrypt.hashSync('Neofi2026', 10);
                 const adminHash = bcrypt.hashSync('admin', 10);
                 const insert = db.prepare(
@@ -105,6 +157,19 @@ class SystemService {
 
             tx();
 
+            try {
+                const networkConfigService = require('./networkConfigService');
+                try {
+                    db.prepare(
+                        "INSERT INTO settings (key, value, type, category, updated_at) VALUES ('network_seed_defaults', 'true', 'boolean', 'network', CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, type = excluded.type, category = excluded.category, updated_at = CURRENT_TIMESTAMP"
+                    ).run();
+                } catch (_) {}
+                try {
+                    networkConfigService.init();
+                    networkConfigService.seedDefaultVlansAndDhcp();
+                } catch (_) {}
+            } catch (_) {}
+
             logService.info('SYSTEM', 'Factory Reset completed successfully');
             return true;
         } catch (e) {
@@ -115,10 +180,99 @@ class SystemService {
     }
 
     async upgrade(type, file = null) {
-        // Placeholder for upgrade logic
-        // type: 'local' | 'online'
+        // type: 'local' | 'online' | 'ota'
+        if (type === 'ota') {
+            return this.performOTAUpdate(file); // 'file' here will be the download URL
+        }
         console.log(`System upgrade requested: ${type}`);
         return new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    async checkOTAUpdate() {
+        const otaUrl = 'https://neofisystem.com/api/ota.php';
+        return new Promise((resolve, reject) => {
+            https.get(otaUrl, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode !== 200) {
+                            reject(new Error(`OTA Server returned status ${res.statusCode}`));
+                            return;
+                        }
+                        const updateInfo = JSON.parse(data);
+                        const currentVersion = this.getSystemVersion();
+                        updateInfo.current_version = currentVersion;
+                        updateInfo.update_available = this.compareVersions(updateInfo.latest_version, currentVersion) > 0;
+                        resolve(updateInfo);
+                    } catch (e) {
+                        reject(new Error("Failed to parse update info: " + e.message));
+                    }
+                });
+            }).on('error', (err) => {
+                reject(new Error("Failed to connect to OTA server: " + err.message));
+            });
+        });
+    }
+
+    getSystemVersion() {
+        try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+            return pkg.version || '1.0.0';
+        } catch (e) {
+            return '1.0.0';
+        }
+    }
+
+    compareVersions(v1, v2) {
+        if (!v1 || !v2) return 0;
+        const parts1 = String(v1).split('.').map(Number);
+        const parts2 = String(v2).split('.').map(Number);
+        for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+            const p1 = parts1[i] || 0;
+            const p2 = parts2[i] || 0;
+            if (p1 > p2) return 1;
+            if (p1 < p2) return -1;
+        }
+        return 0;
+    }
+
+    async performOTAUpdate(downloadUrl) {
+        if (!downloadUrl) throw new Error("No download URL provided for OTA update");
+        logService.info('SYSTEM', `OTA Update initiated from ${downloadUrl}`);
+        const tempPath = path.join(__dirname, '../../temp_ota_update.bin');
+        
+        return new Promise((resolve, reject) => {
+            const file = fs.createWriteStream(tempPath);
+            https.get(downloadUrl, (res) => {
+                if (res.statusCode === 301 || res.statusCode === 302) {
+                    // Handle redirect
+                    this.performOTAUpdate(res.headers.location).then(resolve).catch(reject);
+                    return;
+                }
+                if (res.statusCode !== 200) {
+                    reject(new Error(`Failed to download update: HTTP ${res.statusCode}`));
+                    return;
+                }
+                res.pipe(file);
+                file.on('finish', () => {
+                    file.close(async () => {
+                        try {
+                            const data = fs.readFileSync(tempPath);
+                            const base64Data = data.toString('base64');
+                            await this.applyUpdatePackage(base64Data);
+                            try { fs.unlinkSync(tempPath); } catch (_) {}
+                            resolve(true);
+                        } catch (e) {
+                            reject(e);
+                        }
+                    });
+                });
+            }).on('error', (err) => {
+                try { fs.unlinkSync(tempPath); } catch (_) {}
+                reject(err);
+            });
+        });
     }
 
     async createUpdatePackage() {
@@ -166,18 +320,7 @@ class SystemService {
                         console.error('Failed to run npm install:', e);
                     }
 
-                    // Restart
-                    logService.warn('SYSTEM', 'System updated via package. Restarting...');
-                    
-                    // Try PM2 restart first
-                    exec('pm2 restart all', (err) => {
-                        if (err) {
-                            // Fallback to process exit (if monitored) or reboot
-                            console.log('PM2 restart failed, exiting process...');
-                            process.exit(0); 
-                        }
-                    });
-                    
+                    logService.warn('SYSTEM', 'System update applied via package.');
                     resolve(true);
                 }
             });

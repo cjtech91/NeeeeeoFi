@@ -70,6 +70,150 @@ class NetworkConfigService {
              this.config.bridges = JSON.parse(JSON.stringify(DEFAULT_CONFIG.bridges));
              this.saveConfig(this.config);
         }
+
+        try {
+            const seeded = this.seedDefaultVlansAndDhcp();
+            if (seeded) {
+                console.log('Network defaults: Seeded VLAN 13/22 and DHCP servers.');
+            }
+        } catch (e) {
+            console.warn('Network defaults: VLAN/DHCP seeding skipped:', e && e.message ? e.message : String(e));
+        }
+
+        try {
+            let changed = false;
+            if (Array.isArray(this.config.vlans)) {
+                for (const v of this.config.vlans) {
+                    if (!v) continue;
+                    const vlanId = String(v.vlanId || '').trim();
+                    if (!vlanId) continue;
+                    const nm = (v.name == null) ? '' : String(v.name).trim();
+                    if (!nm || nm === '-') {
+                        v.name = `VLAN.${vlanId}`;
+                        changed = true;
+                    }
+                }
+            }
+            if (changed) this.saveConfig(this.config);
+        } catch (_) {}
+    }
+
+    detectDefaultVlanParentInterface() {
+        const fallback = (this.config && this.config.wan && this.config.wan.interface) ? String(this.config.wan.interface) : 'eth0';
+        if (os.platform() !== 'linux') return fallback;
+
+        let wanIface = '';
+        try {
+            const row = db.prepare("SELECT value FROM settings WHERE key = 'wan_interface'").get();
+            if (row && row.value) wanIface = String(row.value).trim();
+        } catch (_) {}
+
+        if (!wanIface) {
+            try {
+                const routes = fs.readFileSync('/proc/net/route', 'utf8').split('\n').slice(1);
+                for (const line of routes) {
+                    const cols = line.trim().split(/\s+/);
+                    if (cols.length < 2) continue;
+                    const iface = cols[0];
+                    const dest = cols[1];
+                    if (dest === '00000000') {
+                        wanIface = iface;
+                        break;
+                    }
+                }
+            } catch (_) {}
+        }
+
+        if (!wanIface) wanIface = fallback;
+
+        let ifaces = [];
+        try {
+            ifaces = fs.readdirSync('/sys/class/net').filter(Boolean);
+        } catch (_) {
+            return wanIface || fallback;
+        }
+
+        const isCandidate = (n) => {
+            if (!n) return false;
+            if (n === 'lo') return false;
+            if (n.includes('.')) return false;
+            if (n.startsWith('br')) return false;
+            if (n.startsWith('wl')) return false;
+            if (n.startsWith('docker') || n.startsWith('veth')) return false;
+            if (n.startsWith('tun') || n.startsWith('ppp')) return false;
+            if (n.startsWith('zt') || n.startsWith('wg')) return false;
+            return /^(eth|en|end|enx|usb)/.test(n);
+        };
+
+        const candidates = ifaces.filter(isCandidate);
+        if (candidates.length === 0) return wanIface || fallback;
+        if (candidates.length === 1) return candidates[0];
+
+        const nonWan = candidates.filter(i => i !== wanIface);
+        return nonWan[0] || candidates[0];
+    }
+
+    seedDefaultVlansAndDhcp() {
+        let force = false;
+        try {
+            const row = db.prepare("SELECT value FROM settings WHERE key = 'network_seed_defaults'").get();
+            if (row && row.value != null) {
+                const v = String(row.value).trim().toLowerCase();
+                force = (v === '1' || v === 'true' || v === 'yes');
+            }
+        } catch (_) {}
+
+        const alreadySeeded = this.config && this.config.seeded_default_vlans === true;
+        if (alreadySeeded && !force) return false;
+
+        const parent = this.detectDefaultVlanParentInterface();
+        if (!parent) return false;
+
+        if (!this.config.vlans) this.config.vlans = [];
+        if (!this.config.dhcp) this.config.dhcp = { bitmask: 19, dns1: '8.8.8.8', dns2: '8.8.4.4', servers: [] };
+        if (!Array.isArray(this.config.dhcp.servers)) this.config.dhcp.servers = [];
+
+        const vlanIds = ['13', '22'];
+        const now = Date.now();
+
+        for (const vlanId of vlanIds) {
+            const exists = this.config.vlans.some(v => String(v.vlanId) === vlanId && String(v.parent) === parent);
+            if (exists) continue;
+            this.config.vlans.push({
+                id: `${now}-${parent}-${vlanId}`,
+                name: `VLAN.${vlanId}`,
+                parent,
+                vlanId,
+                mac: this.generateRandomMac()
+            });
+        }
+
+        for (const vlanId of vlanIds) {
+            const iface = `${parent}.${vlanId}`;
+            const exists = this.config.dhcp.servers.some(s => String(s.interface) === iface);
+            if (exists) continue;
+
+            const slot = this.findNextAvailableSlot(this.config.dhcp.bitmask || 19);
+            const calc = this.calculateSubnet(slot, this.config.dhcp.bitmask || 19);
+            this.config.dhcp.servers.push({
+                interface: iface,
+                subnet: calc.subnet,
+                netmask: calc.netmask,
+                gateway: calc.gateway,
+                pool_start: calc.pool_start,
+                pool_end: calc.pool_end,
+                lease: '1d'
+            });
+        }
+
+        this.config.seeded_default_vlans = true;
+        this.saveConfig(this.config);
+        if (force) {
+            try {
+                db.prepare("INSERT INTO settings (key, value, type, category, updated_at) VALUES ('network_seed_defaults', 'false', 'boolean', 'network', CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP").run();
+            } catch (_) {}
+        }
+        return true;
     }
 
     loadConfig() {

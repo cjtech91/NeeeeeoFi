@@ -254,8 +254,14 @@ class SessionService extends EventEmitter {
         try {
             const configService = require('./configService');
             const networkService = require('./networkService'); // Import here
-            const globalIdleSec = Number(configService.get('idle_timeout_seconds')) || 120;
+            const globalIdleSec = Number(configService.get('idle_timeout_seconds')) || 300;
             const globalKeepaliveSec = Number(configService.get('keepalive_timeout_seconds')) || 300;
+            const resolveIdleSec = (userIdle) => {
+                const v = Number(userIdle);
+                if (!Number.isFinite(v) || v <= 0) return globalIdleSec;
+                if ((v === 120 || v === 300) && globalIdleSec !== v) return globalIdleSec;
+                return v;
+            };
             // Get all connected users
             const users = db.prepare(`
                 SELECT id, mac_address, ip_address, 
@@ -335,7 +341,7 @@ class SessionService extends EventEmitter {
                 
                 // Re-enabled: Idle Timeout per user request.
                 // When timeout is reached, we PAUSE the user (stop time, block internet), but do NOT disconnect (keep is_connected=1).
-                const idleTimeout = ((user.idle_timeout || globalIdleSec)) * 1000;
+                const idleTimeout = resolveIdleSec(user.idle_timeout) * 1000;
                 
                 const tTraffic = user.last_traffic_at ? this.parseDbDate(user.last_traffic_at) : 0;
                 const tActive = user.last_active_at ? this.parseDbDate(user.last_active_at) : 0;

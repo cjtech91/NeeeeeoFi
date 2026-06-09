@@ -1203,6 +1203,16 @@
                     if (codeDisplay) codeDisplay.style.display = 'none';
                 }
 
+                if (config.hide_insert_button === true) {
+                    const insertBtn = document.getElementById('btn-insert');
+                    if (insertBtn) insertBtn.style.display = 'none';
+                }
+
+                if (config.hide_pause_button === true) {
+                    const pauseBtn = document.getElementById('btn-pause');
+                    if (pauseBtn) pauseBtn.style.display = 'none';
+                }
+
                 // Banner Logic
                 if (config.banner_mode === 'slideshow' && config.slideshow_images && config.slideshow_images.length > 0) {
                     initSlideshow(config.slideshow_images, config.slideshow_interval);
@@ -1941,7 +1951,11 @@
                             try { await fetch('/api/session/resume?t=' + now, { method: 'POST' }); } catch (e) {}
                         }
                     }
-                    pauseBtn.style.display = 'block';
+                    if (portalConfig && portalConfig.hide_pause_button === true) {
+                        pauseBtn.style.display = 'none';
+                    } else {
+                        pauseBtn.style.display = 'block';
+                    }
                 } else {
                     updateTimer(0);
                     updateValidityDisplay(null, null);
@@ -1954,6 +1968,11 @@
                     document.getElementById('btn-pause').style.display = 'none';
                     hasRedirected = false; // Reset redirect flag when disconnected
                 }
+
+                const insertBtnHide = document.getElementById('btn-insert');
+                if (portalConfig && portalConfig.hide_insert_button === true && insertBtnHide) insertBtnHide.style.display = 'none';
+                const pauseBtnHide = document.getElementById('btn-pause');
+                if (portalConfig && portalConfig.hide_pause_button === true && pauseBtnHide) pauseBtnHide.style.display = 'none';
 
                 updateFreeTimeWidgetVisibility();
             } catch(e) { console.error(e); }
