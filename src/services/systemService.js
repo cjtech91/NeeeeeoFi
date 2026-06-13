@@ -7,6 +7,78 @@ const fs = require('fs');
 const https = require('https');
 const logService = require('./logService');
 
+const projectRoot = path.join(__dirname, '../../');
+const updatePackageEntries = ['src', 'public', 'package.json', 'ecosystem.config.js'];
+
+function normalizeRelativePath(relativePath) {
+    return relativePath.split(path.sep).join('/');
+}
+
+function shouldExcludeFromUpdate(relativePath) {
+    const normalizedPath = normalizeRelativePath(relativePath);
+
+    if (!normalizedPath) return false;
+
+    if (normalizedPath.startsWith('src/database/')) {
+        const basename = path.posix.basename(normalizedPath);
+
+        if (normalizedPath === 'src/database/db.js') {
+            return false;
+        }
+
+        return (
+            basename.endsWith('.sqlite') ||
+            basename.includes('.sqlite.') ||
+            basename.endsWith('.sqlite-journal') ||
+            basename.endsWith('.db') ||
+            basename.includes('.db.')
+        );
+    }
+
+    return false;
+}
+
+function copyUpdateTree(sourcePath, destinationPath, relativePath = '') {
+    let stats;
+    try {
+        stats = fs.statSync(sourcePath);
+    } catch (error) {
+        if (error && error.code === 'ENOENT') {
+            return;
+        }
+        throw error;
+    }
+
+    if (shouldExcludeFromUpdate(relativePath)) {
+        return;
+    }
+
+    if (stats.isDirectory()) {
+        fs.mkdirSync(destinationPath, { recursive: true });
+
+        let entries = [];
+        try {
+            entries = fs.readdirSync(sourcePath);
+        } catch (error) {
+            if (error && error.code === 'ENOENT') {
+                return;
+            }
+            throw error;
+        }
+
+        for (const entry of entries) {
+            const childSourcePath = path.join(sourcePath, entry);
+            const childDestinationPath = path.join(destinationPath, entry);
+            const childRelativePath = relativePath ? path.join(relativePath, entry) : entry;
+            copyUpdateTree(childSourcePath, childDestinationPath, childRelativePath);
+        }
+        return;
+    }
+
+    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+    fs.copyFileSync(sourcePath, destinationPath);
+}
+
 class SystemService {
     async reboot() {
         logService.warn('SYSTEM', 'System reboot initiated via Admin Panel');
@@ -279,14 +351,32 @@ class SystemService {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         // Produce a gzip-compressed tar but use .bin extension for distribution
         const filename = `update-${timestamp}.bin`;
-        const outputPath = path.join(__dirname, '../../', filename);
-        
-        // Exclude: node_modules, data, .git, .trae, backups, firmware, *.img, *.iso, and DATABASE files
-        // Note: extension does not affect tar; we still produce a gzip stream
-        const cmd = `tar -czf "${filename}" --exclude=node_modules --exclude=data --exclude=.git --exclude=.trae --exclude=firmware --exclude=*.iso --exclude=*.img --exclude=src/database/*.sqlite --exclude=src/database/*.db --exclude=src/database/*.sqlite-journal src public package.json ecosystem.config.js`;
-        
+        const outputPath = path.join(projectRoot, filename);
+        const stagingDir = path.join(projectRoot, `.update-staging-${timestamp}`);
+
         return new Promise((resolve, reject) => {
-            exec(cmd, { cwd: path.join(__dirname, '../../') }, (error) => {
+            try {
+                fs.rmSync(stagingDir, { recursive: true, force: true });
+                fs.mkdirSync(stagingDir, { recursive: true });
+
+                for (const entry of updatePackageEntries) {
+                    copyUpdateTree(
+                        path.join(projectRoot, entry),
+                        path.join(stagingDir, entry),
+                        entry
+                    );
+                }
+            } catch (error) {
+                try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (_) {}
+                reject(error);
+                return;
+            }
+
+            const cmd = `tar -czf "${outputPath}" -C "${stagingDir}" .`;
+
+            exec(cmd, { cwd: projectRoot }, (error) => {
+                try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (_) {}
+
                 if (error) reject(error);
                 else resolve(outputPath);
             });
@@ -296,14 +386,14 @@ class SystemService {
     async applyUpdatePackage(base64Data) {
         const buffer = Buffer.from(base64Data, 'base64');
         // Accept .bin or .tar.gz payloads (we store as .bin; tar ignores extension)
-        const tempPath = path.join(__dirname, '../../temp_update.bin');
+        const tempPath = path.join(projectRoot, 'temp_update.bin');
         fs.writeFileSync(tempPath, buffer);
         
         // Extract
         const cmd = `tar -xzf "temp_update.bin" -C .`;
         
         return new Promise((resolve, reject) => {
-            exec(cmd, { cwd: path.join(__dirname, '../../') }, async (error) => {
+            exec(cmd, { cwd: projectRoot }, async (error) => {
                 if (error) {
                     try { fs.unlinkSync(tempPath); } catch(e) {}
                     reject(error);
@@ -314,7 +404,7 @@ class SystemService {
                     // Attempt to install dependencies if package.json changed
                     try {
                         await new Promise((res) => {
-                            exec('npm install --production', { cwd: path.join(__dirname, '../../') }, () => res());
+                            exec('npm install --production', { cwd: projectRoot }, () => res());
                         });
                     } catch (e) {
                         console.error('Failed to run npm install:', e);
