@@ -246,11 +246,17 @@ class LicenseService {
                                 this.isValid = true;
                                 try { configService.set('license_last_verified_ts', Date.now(), 'system'); } catch (e) {}
                                 console.log('LicenseService: Validation allowed.');
-                                if (data.token && data.signature) {
-                                    try { this.saveLicense(data, keyUse); } catch (e) {}
+                                const signedPayload = this.extractSignedLicensePayload(data);
+                                if (signedPayload.token && signedPayload.signature) {
+                                    try { this.saveLicense({ ...data, ...signedPayload }, keyUse); } catch (e) {}
                     try { this.fireHeartbeat(); } catch (e) {}
                                 } else {
-                                    try { this.activateLicense(keyUse).catch(() => {}); } catch (e) {}
+                                    const legacyPayload = this.extractLegacyLicensePayload(data, keyUse);
+                                    if (legacyPayload) {
+                                        try { this.saveLegacyLicense(legacyPayload, keyUse); } catch (e) {}
+                                    } else {
+                                        try { this.activateLicense(keyUse).catch(() => {}); } catch (e) {}
+                                    }
                     try { this.fireHeartbeat(); } catch (e) {}
                                 }
                             }
@@ -359,6 +365,118 @@ class LicenseService {
     normalizeId(s) {
         if (typeof s !== 'string') return s;
         return s.trim().toLowerCase();
+    }
+
+    getStoredLicenseToken(license) {
+        if (!license || typeof license !== 'object') return null;
+        if (license.token && typeof license.token === 'object') return license.token;
+        return license;
+    }
+
+    extractSignedLicensePayload(response) {
+        if (!response || typeof response !== 'object') {
+            return { token: null, signature: null, token_raw: null };
+        }
+
+        const containers = [
+            response,
+            response.data,
+            response.result,
+            response.license,
+            response.payload,
+            response.activation
+        ].filter(item => item && typeof item === 'object');
+
+        for (const container of containers) {
+            const token =
+                (container.token && typeof container.token === 'object' ? container.token : null) ||
+                (container.license && typeof container.license === 'object' ? container.license : null) ||
+                (container.payload && typeof container.payload === 'object' ? container.payload : null);
+
+            const signature =
+                container.signature ||
+                container.sig ||
+                container.license_signature ||
+                (container.license && typeof container.license === 'object' ? (container.license.signature || container.license.sig || container.license.license_signature) : null);
+
+            const token_raw =
+                container.token_raw ||
+                container.raw_token ||
+                (container.license && typeof container.license === 'object' ? (container.license.token_raw || container.license.raw_token) : null) ||
+                null;
+
+            if (token && signature) {
+                return { token, signature, token_raw };
+            }
+        }
+
+        return { token: null, signature: null, token_raw: null };
+    }
+
+    extractLegacyLicensePayload(response, fallbackKey) {
+        if (!response || typeof response !== 'object') {
+            return null;
+        }
+
+        const containers = [
+            response,
+            response.data,
+            response.result,
+            response.license,
+            response.payload,
+            response.activation
+        ].filter(item => item && typeof item === 'object');
+
+        for (const container of containers) {
+            const allowed = (
+                container.allowed === true ||
+                container.valid === true ||
+                container.success === true ||
+                container.ok === true
+            );
+
+            if (!allowed) {
+                continue;
+            }
+
+            const machineId = String(
+                container.machineId ||
+                container.machine_id ||
+                container.system_serial ||
+                container.System_Serial ||
+                container.hwid ||
+                ''
+            ).trim();
+
+            const licenseKey = String(
+                container.licenseKey ||
+                container.license_key ||
+                fallbackKey ||
+                ''
+            ).trim();
+
+            if (!machineId || !licenseKey) {
+                continue;
+            }
+
+            return {
+                legacy_online_verified: true,
+                token: {
+                    type: String(container.type || container.license_type || 'PAID').trim() || 'PAID',
+                    owner: container.owner || container.customer || 'Licensed User',
+                    expires: container.expiry || container.expires || 'Active',
+                    status: container.status || 'active',
+                    system_serial: machineId,
+                    hwid: machineId,
+                    license_key: licenseKey
+                },
+                key: licenseKey,
+                activated_date: Date.now(),
+                validation_source: 'legacy_api'
+            };
+        }
+
+        return null;
     }
 
     fireHeartbeat() {
@@ -605,24 +723,31 @@ class LicenseService {
                     let rawData = fs.readFileSync(this.licensePath, 'utf8');
                     if (!rawData || rawData.trim().length < 2) throw new Error('Empty license file');
                     const license = JSON.parse(rawData);
+                    const token = this.getStoredLicenseToken(license);
+                    const legacyVerified = !!license.legacy_online_verified;
                     
                     if (license.key) this.savedKey = license.key;
                     else if (license.token && license.token.key) this.savedKey = license.token.key;
+                    else if (token && token.key) this.savedKey = token.key;
+                    else if (token && token.license_key) this.savedKey = token.license_key;
 
-                const tokenId = this.normalizeId(license.token.system_serial || license.token.System_Serial || license.token.hardware_id || license.token.hwid);
+                const tokenId = this.normalizeId(token && (token.system_serial || token.System_Serial || token.hardware_id || token.hwid));
                 const localId = this.normalizeId(this.systemSerial || this.hwid);
                 
-                const sigValid = this.verifySignature(license);
+                const sigValid = legacyVerified ? true : this.verifySignature({ ...license, token });
                 const idMatch = (tokenId && localId && tokenId === localId);
 
                 console.log(`LicenseService: Verifying. SigValid: ${sigValid}, IDMatch: ${idMatch}, TokenID: "${tokenId}", LocalID: "${localId}"`);
                 
                 if (sigValid && idMatch) {
                     this.isValid = true;
-                    this.licenseData = license.token;
+                    this.licenseData = { ...token };
                     // Add metadata
-                    this.licenseData.key = license.key || 'Hidden';
+                    this.licenseData.key = license.key || token.license_key || 'Hidden';
                     this.licenseData.activated_date = license.activated_date || null;
+                    if (legacyVerified) {
+                        this.licenseData.validation_source = license.validation_source || 'legacy_api';
+                    }
                     
                     console.log('LicenseService: License Validated Successfully. Type:', this.licenseData.type);
                     return;
@@ -703,6 +828,15 @@ class LicenseService {
                 console.error('LicenseService: Public Key missing!');
                 return false;
             }
+            const token = this.getStoredLicenseToken(license);
+            if (!token || typeof token !== 'object') {
+                console.warn('LicenseService: License token missing or invalid.');
+                return false;
+            }
+            if (!license || !license.signature) {
+                console.warn('LicenseService: License signature missing.');
+                return false;
+            }
             const publicKey = fs.readFileSync(this.publicKeyPath, 'utf8');
             const verify = crypto.createVerify('SHA256');
             
@@ -713,7 +847,7 @@ class LicenseService {
                 payload = license.token_raw;
             } else {
                 // If token_raw is missing, we try to match the PHP json_encode behavior
-                payload = JSON.stringify(license.token);
+                payload = JSON.stringify(token);
             }
             
             verify.update(payload);
@@ -804,13 +938,24 @@ class LicenseService {
                 res.on('end', () => {
                     try {
                         const data = JSON.parse(body);
+                        const signedPayload = this.extractSignedLicensePayload(data);
+                        const hasSignedLicense = !!(signedPayload.token && signedPayload.signature);
+                        const legacyPayload = this.extractLegacyLicensePayload(data, key);
                         
                         if (!res.statusCode || res.statusCode >= 400 || (!data.allowed && !data.token)) {
                              return reject(new Error(data.message || data.error || `Activation failed with status ${res.statusCode}`));
                         }
+                        if (!hasSignedLicense && !legacyPayload) {
+                            const responseKeys = Object.keys(data || {}).join(', ') || 'none';
+                            return reject(new Error(`Activation response missing signed license payload. Response keys: ${responseKeys}`));
+                        }
 
                         // Success
-                        this.saveLicense(data, key);
+                        if (hasSignedLicense) {
+                            this.saveLicense({ ...data, ...signedPayload }, key);
+                        } else {
+                            this.saveLegacyLicense(legacyPayload, key);
+                        }
                         resolve(data);
                     } catch (e) {
                         reject(new Error('Failed to parse activation response: ' + body));
@@ -825,11 +970,15 @@ class LicenseService {
     }
 
     saveLicense(response, key) {
+        const signedPayload = this.extractSignedLicensePayload(response);
+        if (!signedPayload.token || !signedPayload.signature) {
+            throw new Error('Cannot save license without token and signature');
+        }
         const tmpPath = this.licensePath + '.tmp';
         fs.writeFileSync(tmpPath, JSON.stringify({
-            token: response.token || response, 
-            token_raw: response.token_raw || null,
-            signature: response.signature,
+            token: signedPayload.token, 
+            token_raw: signedPayload.token_raw || null,
+            signature: signedPayload.signature || null,
             key: key,
             activated_date: Date.now()
         }, null, 2));
@@ -844,7 +993,7 @@ class LicenseService {
         // Persist activation to local database for audit/resilience
         try {
             const hash = crypto.createHash('sha256').update(String(key)).digest('hex');
-            const tokenJson = JSON.stringify(response.token || response);
+            const tokenJson = JSON.stringify(signedPayload.token);
             db.prepare(`
               INSERT INTO license_activations
                 (license_key_hash, system_serial, device_model, token_json, signature, status, message, activated_at)
@@ -855,7 +1004,7 @@ class LicenseService {
               this.systemSerial || null,
               this.deviceModel || null,
               tokenJson,
-              response.signature || null
+              signedPayload.signature
             );
         } catch (e) {
             console.warn('LicenseService: Failed to log activation locally:', e.message);
@@ -867,6 +1016,42 @@ class LicenseService {
             this.events.emit('license_state', { state: 'activated', key });
         } catch (e) {}
         try { this.fireHeartbeat(); } catch (e) {}
+    }
+
+    saveLegacyLicense(response, key) {
+        const legacyPayload = this.extractLegacyLicensePayload(response, key) || response;
+        if (!legacyPayload || !legacyPayload.token) {
+            throw new Error('Cannot save legacy license without token');
+        }
+
+        const tmpPath = this.licensePath + '.tmp';
+        fs.writeFileSync(tmpPath, JSON.stringify({
+            legacy_online_verified: true,
+            validation_source: legacyPayload.validation_source || 'legacy_api',
+            token: legacyPayload.token,
+            key: key || legacyPayload.key || legacyPayload.token.license_key || null,
+            activated_date: legacyPayload.activated_date || Date.now()
+        }, null, 2));
+        fs.renameSync(tmpPath, this.licensePath);
+
+        this.savedKey = key || legacyPayload.key || legacyPayload.token.license_key || null;
+        this.isValid = true;
+        this.licenseData = {
+            ...legacyPayload.token,
+            key: this.savedKey || 'Hidden',
+            activated_date: legacyPayload.activated_date || Date.now(),
+            validation_source: legacyPayload.validation_source || 'legacy_api'
+        };
+
+        try {
+            configService.set('last_license_key', this.savedKey, 'system');
+            configService.set('license_last_verified_ts', Date.now(), 'system');
+            configService.set('license_status', 'activated', 'system');
+        } catch (e) {}
+
+        try {
+            this.events.emit('license_state', { state: 'activated', key: this.savedKey });
+        } catch (e) {}
     }
 
     getStatus() {
